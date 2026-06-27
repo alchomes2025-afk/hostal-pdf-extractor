@@ -17,6 +17,11 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+class GmailAuthError(Exception):
+    """Se lanza cuando el refresh token de Gmail ha caducado o es inválido."""
+    pass
+
+
 PDF_PASSWORD         = os.environ.get("PDF_PASSWORD", "Alchomes2025")
 API_TOKEN            = os.environ.get("API_TOKEN", "")
 TEST_TOKEN           = os.environ.get("TEST_TOKEN", "test1234")
@@ -143,13 +148,15 @@ def get_access_token():
     """Obtiene un access token fresco usando el refresh token guardado."""
     refresh_token = GOOGLE_REFRESH_TOKEN
     if not refresh_token:
-        raise Exception("GOOGLE_REFRESH_TOKEN no configurado. Ve a /oauth/inicio para autorizarlo.")
+        raise GmailAuthError("GOOGLE_REFRESH_TOKEN no configurado. Ve a /oauth/inicio para autorizarlo.")
     resp = requests.post("https://oauth2.googleapis.com/token", data={
         "client_id":     GOOGLE_CLIENT_ID,
         "client_secret": GOOGLE_CLIENT_SECRET,
         "refresh_token": refresh_token,
         "grant_type":    "refresh_token",
     }, timeout=15)
+    if resp.status_code == 400:
+        raise GmailAuthError("Token OAuth de Gmail caducado o revocado. Renuévalo en /oauth/inicio")
     resp.raise_for_status()
     return resp.json()["access_token"]
 
@@ -385,9 +392,12 @@ def obtener_todas_reservas():
     Extrae datos de todos los partes de viajeros de Gmail (últimos 90 días).
     Gmail devuelve los mensajes del más reciente al más antiguo, así que
     el primer ejemplar de cada (habitacion, fecha_entrada) es el más actual.
+    Lanza GmailAuthError si el token OAuth ha caducado.
     """
     try:
         access_token = get_access_token()
+    except GmailAuthError:
+        raise  # propagar para que /resumen pueda avisar por WhatsApp
     except Exception as e:
         logger.error(f"Error obteniendo access token: {e}")
         return []
@@ -698,6 +708,20 @@ def resumen_whatsapp():
 
     try:
         mensaje = generar_mensaje_resumen(hora)
+    except GmailAuthError as e:
+        logger.error(f"Gmail auth caducado: {e}")
+        aviso = (
+            "⚠️ ALCHOMES — Error de sistema\n\n"
+            "El acceso a Gmail ha caducado.\n"
+            "El resumen diario NO se está enviando.\n\n"
+            "Renueva el acceso en:\n"
+            "hostal-pdf-extractor.onrender.com/oauth/inicio"
+        )
+        try:
+            enviar_whatsapp_callmebot(aviso)
+        except Exception as we:
+            logger.error(f"Error enviando aviso WhatsApp: {we}")
+        return jsonify({"ok": False, "error": str(e), "aviso_enviado": True}), 500
     except Exception as e:
         logger.error(f"Error generando resumen: {e}")
         return jsonify({"ok": False, "error": f"Error generando resumen: {e}"}), 500
