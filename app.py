@@ -375,40 +375,45 @@ def extraer_telefono(texto):
 
 # ── Beds24: detección de habitación + envío de código por Booking.com ──────
 
-# Localizador de registroparteviajeros.com → roomId de Beds24.
-# Es el identificador más fiable: no cambia aunque el nombre de la habitación
-# mostrado en el email/PDF esté desactualizado (p.ej. sigue diciendo "Simple 3").
-LOCALIZADOR_ROOM_MAP = {
-    "jaohru5i": "702395",  # Deluxe — Cala Coveta Fumá
-    "eldaps-u": "702396",  # Doble  — Playa de la Fossá
-    "utwgffpx": "702397",  # habitacion 1 — Playa Lanuza
-    "2cwgymmo": "702398",  # habitacion 2 — Playa del Albir
-    "vbz-o7pr": "702399",  # habitacion 3 — Cala del Moraig
+# Nombre de habitación tal como aparece SIEMPRE en registroparteviajeros.com
+# (fijo por propiedad, a diferencia del localizador que es único por cada reserva)
+# → roomId real de Beds24. Esta es la correspondencia estable a usar para detectar
+# la habitación real.
+NOMBRE_FIJO_ROOM_MAP = {
+    "habitacion simple 1": "702397",  # Playa Lanuza
+    "habitacion simple 2": "702398",  # Playa del Albir
+    "habitacion simple 3": "702399",  # Cala del Moraig
+    "habitacion doble 4":  "702396",  # Playa de la Fossá
+    "habitacion deluxe 5": "702395",  # Cala Coveta Fumá
 }
 
 
 def extraer_localizador(texto):
-    """Extrae el localizador de registroparteviajeros.com, ej: 'vbZ-O7Pr'."""
+    """Extrae el localizador de registroparteviajeros.com, ej: 'vbZ-O7Pr'.
+    OJO: el localizador es único por RESERVA, no identifica la habitación de
+    forma fiable (cada parte tiene uno distinto). Se conserva la función por si
+    hace falta para otros usos, pero NO se usa para detectar la habitación."""
     m = re.search(r"localizador\s+es\s+([A-Za-z0-9\-_]{4,20})", texto or "", re.I)
     return m.group(1) if m else None
 
 
 def detectar_room_id(habitacion_texto, texto_completo):
     """
-    Detecta el roomId de Beds24 (702395-702399).
-    1º intenta por el localizador de registroparteviajeros.com (fiable al 100%,
-       ya que no depende del nombre de habitación que pueda estar desactualizado).
-    2º si no hay localizador, cae a buscar palabras clave del nombre real
-       (lanuza, albir, moraig, fossa, coveta) en el nombre de archivo o el PDF.
+    Detecta el roomId de Beds24 (702395-702399) a partir del nombre de
+    habitación tal como lo usa registroparteviajeros.com (ej. "Habitación
+    Simple 2"), que es fijo por propiedad y no cambia entre reservas.
+    Como respaldo, también prueba por palabras clave del nombre real
+    (lanuza, albir, moraig, fossa, coveta) por si algún día cambia el naming.
     """
-    localizador = extraer_localizador(texto_completo)
-    if localizador:
-        room_id = LOCALIZADOR_ROOM_MAP.get(localizador.lower())
-        if room_id:
-            logger.info(f"Habitación detectada por localizador '{localizador}' → room {room_id}")
-            return room_id
-        logger.warning(f"Localizador '{localizador}' no reconocido en LOCALIZADOR_ROOM_MAP")
+    texto_normalizado = normalizar(habitacion_texto or "")
 
+    # 1º: nombre fijo exacto (ej. "habitacion simple 2")
+    for nombre_fijo, room_id in NOMBRE_FIJO_ROOM_MAP.items():
+        if nombre_fijo in texto_normalizado:
+            logger.info(f"Habitación detectada por nombre fijo '{nombre_fijo}' → room {room_id}")
+            return room_id
+
+    # 2º: palabras clave del nombre real, por si aparecen en el PDF o el email
     texto_buscar = normalizar((habitacion_texto or "") + " " + (texto_completo or ""))
     for room_id, cfg in ROOM_CONFIG.items():
         for kw in cfg["keywords"]:
