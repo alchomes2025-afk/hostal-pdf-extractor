@@ -518,13 +518,17 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None):
     )
 
 
-def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None):
+def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False):
     """
     Detecta la habitación, busca la reserva en Beds24 y envía el mensaje con el
     código de puerta a través de Booking.com Messages (POST /bookings/messages).
+    Si dry_run=True, hace todo el proceso (detección + búsqueda de reserva +
+    construcción del mensaje) pero NO llama al POST real que envía el mensaje
+    al cliente — útil para probar sin molestar a huéspedes reales.
     Devuelve un dict con el resultado para poder loguear/depurar sin romper /extraer.
     """
-    resultado = {"enviado": False, "room_id": None, "book_id": None, "error": None}
+    resultado = {"enviado": False, "dry_run": dry_run, "room_id": None, "book_id": None,
+                 "mensaje_generado": None, "error": None}
 
     room_id = detectar_room_id(habitacion_texto, texto_completo)
     if not room_id:
@@ -545,6 +549,13 @@ def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada,
         resultado["book_id"] = book_id
 
         mensaje = construir_mensaje_codigo(room_id, nombre_cliente)
+        resultado["mensaje_generado"] = mensaje
+
+        if dry_run:
+            logger.info(f"[DRY RUN] Se enviaría a booking {book_id} (room {room_id}), pero no se envía de verdad.")
+            resultado["enviado"] = False
+            return resultado
+
         resp = requests.post(
             f"{BEDS24_API_BASE}/bookings/messages",
             headers={"token": access_token, "accept": "application/json", "Content-Type": "application/json"},
@@ -1035,6 +1046,80 @@ async function run(){
   }catch(e){out.textContent='Error: '+e;}
 }
 </script></body></html>"""
+
+@app.route("/probar-ultimo-parte", methods=["GET"])
+def probar_ultimo_parte():
+    """
+    Endpoint de prueba manual: busca el email de 'Parte de viajeros' más reciente
+    en Gmail y ejecuta el mismo flujo que /extraer (extracción + envío del código
+    de puerta por Beds24), sin necesitar Make ni conocer el message_id.
+
+    Uso (modo simulación, no envía nada al cliente):
+        /probar-ultimo-parte?token=Alchomes2025
+
+    Uso (envío real, solo si estás seguro):
+        /probar-ultimo-parte?token=Alchomes2025&enviar=1
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    dry_run = request.args.get("enviar", "0") != "1"
+
+    try:
+        access_token = get_access_token()
+    except GmailAuthError as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error de autenticación Gmail: {e}"}), 500
+
+    try:
+        message_ids = buscar_message_ids_gmail(access_token, max_results=1)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error buscando en Gmail: {e}"}), 500
+
+    if not message_ids:
+        return jsonify({"ok": False, "error": "No se encontró ningún email de 'Parte de viajeros' en los últimos 90 días"}), 404
+
+    message_id = message_ids[0]
+
+    try:
+        pdf_bytes, pdf_filename, cuerpo_email = descargar_adjunto_gmail(message_id, access_token)
+    except Exception as e:
+        return jsonify({"ok": False, "message_id": message_id, "error": f"Error descargando adjunto: {e}"}), 500
+
+    r = procesar_pdf_bytes(pdf_bytes, pdf_filename, incluir_texto=True)
+    if r["error"]:
+        return jsonify({"ok": False, "message_id": message_id, "error": r["error"]}), 500
+
+    texto_para_detectar = (r.get("texto_extraido") or "") + "\n" + cuerpo_email
+    room_id_detectado = detectar_room_id(r["habitacion"], texto_para_detectar)
+    localizador = extraer_localizador(texto_para_detectar)
+
+    beds24_resultado = enviar_codigo_puerta_beds24(
+        habitacion_texto=r["habitacion"],
+        texto_completo=texto_para_detectar,
+        fecha_entrada=r["fecha_entrada"],
+        nombre_cliente=r.get("nombre"),
+        dry_run=dry_run,
+    )
+
+    return jsonify({
+        "ok": True,
+        "modo": "SIMULACIÓN (no se envió nada)" if dry_run else "ENVÍO REAL",
+        "message_id": message_id,
+        "pdf_filename": pdf_filename,
+        "habitacion_texto_pdf": r["habitacion"],
+        "localizador_detectado": localizador,
+        "room_id_detectado": room_id_detectado,
+        "nombre_habitacion_real": ROOM_CONFIG.get(room_id_detectado, {}).get("nombre") if room_id_detectado else None,
+        "email_cliente": r["email"],
+        "fecha_entrada": r["fecha_entrada"],
+        "fecha_salida": r["fecha_salida"],
+        "codigo_puerta": beds24_resultado,
+    }), 200
+
 
 @app.route("/debug", methods=["GET"])
 def debug_page():
