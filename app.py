@@ -38,6 +38,30 @@ CALLMEBOT_API_KEY   = os.environ.get("CALLMEBOT_API_KEY", "")
 CALLMEBOT_PHONE_2   = os.environ.get("CALLMEBOT_PHONE_2", "")
 CALLMEBOT_API_KEY_2 = os.environ.get("CALLMEBOT_API_KEY_2", "")
 
+# ── Beds24 API (envío de código de puerta vía Booking.com Messages) ────────
+# BEDS24_REFRESH_TOKEN se obtiene una vez intercambiando un invite code
+# (Settings > Marketplace > API en Beds24) por GET /authentication/setup
+BEDS24_REFRESH_TOKEN = os.environ.get("BEDS24_REFRESH_TOKEN", "")
+BEDS24_PROPERTY_ID   = os.environ.get("BEDS24_PROPERTY_ID", "339751")
+BEDS24_API_BASE      = "https://beds24.com/api/v2"
+
+# PINs de acceso por habitación (se editan solo aquí, en Render → Environment)
+PIN_HABITACION_2 = os.environ.get("PIN_HABITACION_2", "")  # Playa del Albir
+PIN_HABITACION_3 = os.environ.get("PIN_HABITACION_3", "")  # Cala del Moraig
+PIN_DOBLE        = os.environ.get("PIN_DOBLE", "")         # Playa de la Fossá
+PIN_DELUXE       = os.environ.get("PIN_DELUXE", "")        # Cala Coveta Fumá
+
+# Configuración de las 5 habitaciones: roomId de Beds24 → nombre + PIN + palabras clave
+# para detectar a qué habitación corresponde un parte de viajero (buscando en el
+# nombre del archivo y en el texto extraído del PDF, sin acentos gracias a normalizar()).
+ROOM_CONFIG = {
+    "702397": {"nombre": "Playa Lanuza",       "pin": None,             "keywords": ["lanuza"]},
+    "702398": {"nombre": "Playa del Albir",    "pin": PIN_HABITACION_2, "keywords": ["albir"]},
+    "702399": {"nombre": "Cala del Moraig",    "pin": PIN_HABITACION_3, "keywords": ["moraig"]},
+    "702396": {"nombre": "Playa de la Fossá",  "pin": PIN_DOBLE,        "keywords": ["fossa"]},
+    "702395": {"nombre": "Cala Coveta Fumá",   "pin": PIN_DELUXE,       "keywords": ["coveta", "fuma"]},
+}
+
 HABITACIONES = {
     "habitacion simple 1": "Habitación Simple 1",
     "habitacion simple 2": "Habitación Simple 2",
@@ -162,7 +186,11 @@ def get_access_token():
 
 
 def descargar_adjunto_gmail(message_id, access_token):
-    """Descarga el primer adjunto PDF de un email de Gmail por su message_id."""
+    """
+    Descarga el primer adjunto PDF de un email de Gmail por su message_id,
+    y además el cuerpo de texto del email (para poder extraer el localizador
+    del parte, que identifica la habitación real de forma fiable).
+    """
     url = f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}"
     headers = {"Authorization": f"Bearer {access_token}"}
     resp = requests.get(url, headers=headers, timeout=15)
@@ -187,9 +215,40 @@ def descargar_adjunto_gmail(message_id, access_token):
                     return r
         return None, None
 
+    def buscar_cuerpo(parts, nivel=0):
+        """Busca la parte text/plain (o si no, text/html) con el cuerpo del email."""
+        html_fallback = None
+        for part in parts:
+            mime = part.get("mimeType", "")
+            data = part.get("body", {}).get("data", "")
+            if mime == "text/plain" and data:
+                try:
+                    return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
+                except Exception:
+                    pass
+            if mime == "text/html" and data and html_fallback is None:
+                try:
+                    html_fallback = base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
+                except Exception:
+                    pass
+            subparts = part.get("parts", [])
+            if subparts:
+                r = buscar_cuerpo(subparts, nivel+1)
+                if r:
+                    return r
+        return html_fallback
+
     parts = msg.get("payload", {}).get("parts", [])
     logger.info(f"Buscando PDF en {message_id}, partes: {len(parts)}")
     attachment_id, filename = buscar_pdf(parts)
+
+    # Cuerpo del email (best effort, no debe romper el flujo si falla)
+    try:
+        cuerpo_texto = buscar_cuerpo(parts) or ""
+        cuerpo_texto = re.sub(r"<[^>]+>", " ", cuerpo_texto)  # limpiar HTML si vino de html_fallback
+    except Exception as e:
+        logger.warning(f"No se pudo extraer cuerpo del email {message_id}: {e}")
+        cuerpo_texto = ""
 
     if not attachment_id:
         raise Exception(f"No se encontró adjunto PDF en el mensaje {message_id}")
@@ -199,7 +258,7 @@ def descargar_adjunto_gmail(message_id, access_token):
     resp2.raise_for_status()
     data_b64 = resp2.json().get("data", "")
     pdf_bytes = base64.urlsafe_b64decode(data_b64 + "==")
-    return pdf_bytes, filename
+    return pdf_bytes, filename, cuerpo_texto
 
 
 # ── PDF helpers ────────────────────────────────────────────────────────────────
@@ -314,6 +373,194 @@ def extraer_telefono(texto):
     return None
 
 
+# ── Beds24: detección de habitación + envío de código por Booking.com ──────
+
+# Localizador de registroparteviajeros.com → roomId de Beds24.
+# Es el identificador más fiable: no cambia aunque el nombre de la habitación
+# mostrado en el email/PDF esté desactualizado (p.ej. sigue diciendo "Simple 3").
+LOCALIZADOR_ROOM_MAP = {
+    "jaohru5i": "702395",  # Deluxe — Cala Coveta Fumá
+    "eldaps-u": "702396",  # Doble  — Playa de la Fossá
+    "utwgffpx": "702397",  # habitacion 1 — Playa Lanuza
+    "2cwgymmo": "702398",  # habitacion 2 — Playa del Albir
+    "vbz-o7pr": "702399",  # habitacion 3 — Cala del Moraig
+}
+
+
+def extraer_localizador(texto):
+    """Extrae el localizador de registroparteviajeros.com, ej: 'vbZ-O7Pr'."""
+    m = re.search(r"localizador\s+es\s+([A-Za-z0-9\-_]{4,20})", texto or "", re.I)
+    return m.group(1) if m else None
+
+
+def detectar_room_id(habitacion_texto, texto_completo):
+    """
+    Detecta el roomId de Beds24 (702395-702399).
+    1º intenta por el localizador de registroparteviajeros.com (fiable al 100%,
+       ya que no depende del nombre de habitación que pueda estar desactualizado).
+    2º si no hay localizador, cae a buscar palabras clave del nombre real
+       (lanuza, albir, moraig, fossa, coveta) en el nombre de archivo o el PDF.
+    """
+    localizador = extraer_localizador(texto_completo)
+    if localizador:
+        room_id = LOCALIZADOR_ROOM_MAP.get(localizador.lower())
+        if room_id:
+            logger.info(f"Habitación detectada por localizador '{localizador}' → room {room_id}")
+            return room_id
+        logger.warning(f"Localizador '{localizador}' no reconocido en LOCALIZADOR_ROOM_MAP")
+
+    texto_buscar = normalizar((habitacion_texto or "") + " " + (texto_completo or ""))
+    for room_id, cfg in ROOM_CONFIG.items():
+        for kw in cfg["keywords"]:
+            if kw in texto_buscar:
+                logger.info(f"Habitación detectada por palabra clave '{kw}' → room {room_id}")
+                return room_id
+    return None
+
+
+def get_beds24_access_token():
+    """Intercambia el refresh token de Beds24 por un access token válido (24h)."""
+    if not BEDS24_REFRESH_TOKEN:
+        raise Exception("BEDS24_REFRESH_TOKEN no configurado en Render.")
+    resp = requests.get(
+        f"{BEDS24_API_BASE}/authentication/token",
+        headers={"refreshToken": BEDS24_REFRESH_TOKEN, "accept": "application/json"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()["token"]
+
+
+def buscar_booking_id_beds24(access_token, room_id, fecha_entrada):
+    """
+    Busca la reserva en Beds24 para una habitación y fecha de entrada concretas.
+    Devuelve el bookId de la primera coincidencia, o None si no encuentra nada.
+    """
+    resp = requests.get(
+        f"{BEDS24_API_BASE}/bookings",
+        headers={"token": access_token, "accept": "application/json"},
+        params={
+            "propertyId": BEDS24_PROPERTY_ID,
+            "roomId": room_id,
+            "checkInFrom": fecha_entrada,
+            "checkInTo": fecha_entrada,
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json().get("data", [])
+    if not data:
+        return None
+    return data[0].get("id")
+
+
+def construir_mensaje_codigo(room_id, nombre_cliente=None):
+    """Construye el mensaje bilingüe de bienvenida + código de puerta."""
+    cfg = ROOM_CONFIG.get(room_id, {})
+    nombre_hab = cfg.get("nombre", "")
+    pin = cfg.get("pin")
+    saludo_en = f"{nombre_cliente} " if nombre_cliente else ""
+
+    if room_id == "702397":  # Playa Lanuza — sin código actualmente
+        return (
+            "Bienvenido a Alc Homes Alicante.\n"
+            "Nos encontrará en la Calle Camino de Ronda, 1 (Alicante). "
+            "Para abrir la puerta de la calle, introduzca el código de entrada y empuje la puerta. "
+            "Código de entrada: 130773# (asegúrese de marcar los seis números y la #)\n\n"
+            f"Su habitación es {nombre_hab}\n"
+            "No funciona el código, disculpe las molestias. La habitación estará abierta y la llave en la mesita de noche\n\n"
+            "WIFI: ALCHOMES\n"
+            "CONTRASEÑA: Alchomes2025\n\n"
+            "Para cualquier duda o consulta, puede tener respuesta inmediata en nuestro asistente virtual: "
+            "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
+            "Puede comunicarse con nosotros 24h, vía mensajes dentro de la plataforma de booking, "
+            "o puede contactarnos por el teléfono oficial +34 622 38 35 87 las 24 horas del día\n"
+            "Alc Homes le desea una agradable estancia.\n"
+            "_________\n"
+            "Welcome to Alc Homes Alicante.\n"
+            "We are located at Calle Camino de Ronda, 1 (Alicante). To open the street entrance, enter the access "
+            "code and push the door. Entry code: 130773# (make sure to dial the six numbers and the #)\n\n"
+            f"Your room is {nombre_hab}.\n"
+            "The code is not working, sorry for the inconvenience: The room will be unlocked, and the key will be on the nightstand.\n\n"
+            "WIFI: ALCHOMES\n"
+            "PASSWORD: Alchomes2025\n\n"
+            "For any questions or inquiries, you can get an immediate response from our virtual assistant: "
+            "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
+            "You can communicate with us 24 hours a day via messages within the booking platform or by calling "
+            "our official number at +34 622 38 35 87. Alc Homes wishes you a pleasant stay."
+        )
+
+    return (
+        "Bienvenido a Alc Homes Alicante.\n"
+        "Nos encontrará en la Calle Camino de Ronda, 1 (Alicante). "
+        "Para abrir la puerta de la calle, introduzca el código de entrada y empuje la puerta. "
+        "Código de entrada: 130773# (asegúrese de marcar los seis números y la #)\n\n"
+        f"Su habitación es {nombre_hab}. Su código es {pin or 'PIN NO CONFIGURADO'}. "
+        "Para cerrar la puerta desde fuera, pulse el triángulo\n\n"
+        "WIFI: ALCHOMES\n"
+        "CONTRASEÑA: Alchomes2025\n\n"
+        "Para cualquier duda o consulta, puede tener respuesta inmediata en nuestro asistente virtual: "
+        "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
+        "Puede comunicarse con nosotros 24h, vía mensajes dentro de la plataforma de booking, "
+        "o puede contactarnos por el teléfono oficial +34 622 38 35 87 las 24 horas del día\n"
+        "Alc Homes le desea una agradable estancia.\n"
+        "_________\n"
+        f"{saludo_en}Welcome to Alc Homes Alicante.\n"
+        "We are located at Calle Camino de Ronda, 1 (Alicante). To open the street entrance, enter the access "
+        "code and push the door. Entry code: 130773# (make sure to dial the six numbers and the #)\n\n"
+        f"Your room is {nombre_hab}. Your code is {pin or 'PIN NOT CONFIGURED'}. To lock the door from the outside, press the triangle.\n\n"
+        "WIFI: ALCHOMES\n"
+        "PASSWORD: Alchomes2025\n\n"
+        "For any questions or inquiries, you can get an immediate response from our virtual assistant: "
+        "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
+        "You can communicate with us 24 hours a day via messages within the booking platform or by calling "
+        "our official number at +34 622 38 35 87. Alc Homes wishes you a pleasant stay."
+    )
+
+
+def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None):
+    """
+    Detecta la habitación, busca la reserva en Beds24 y envía el mensaje con el
+    código de puerta a través de Booking.com Messages (POST /bookings/messages).
+    Devuelve un dict con el resultado para poder loguear/depurar sin romper /extraer.
+    """
+    resultado = {"enviado": False, "room_id": None, "book_id": None, "error": None}
+
+    room_id = detectar_room_id(habitacion_texto, texto_completo)
+    if not room_id:
+        resultado["error"] = f"No se pudo detectar la habitación Beds24 a partir de: {habitacion_texto!r}"
+        return resultado
+    resultado["room_id"] = room_id
+
+    if not fecha_entrada:
+        resultado["error"] = "Falta fecha_entrada, no se puede localizar la reserva en Beds24"
+        return resultado
+
+    try:
+        access_token = get_beds24_access_token()
+        book_id = buscar_booking_id_beds24(access_token, room_id, fecha_entrada)
+        if not book_id:
+            resultado["error"] = f"No se encontró reserva en Beds24 para room {room_id} / entrada {fecha_entrada}"
+            return resultado
+        resultado["book_id"] = book_id
+
+        mensaje = construir_mensaje_codigo(room_id, nombre_cliente)
+        resp = requests.post(
+            f"{BEDS24_API_BASE}/bookings/messages",
+            headers={"token": access_token, "accept": "application/json", "Content-Type": "application/json"},
+            json=[{"bookingId": book_id, "message": mensaje, "sendEmail": False}],
+            timeout=20,
+        )
+        resp.raise_for_status()
+        resultado["enviado"] = True
+        logger.info(f"Beds24: código enviado a booking {book_id} (room {room_id})")
+    except Exception as e:
+        resultado["error"] = str(e)
+        logger.error(f"Beds24: error enviando código de puerta: {e}")
+
+    return resultado
+
+
 def procesar_pdf_bytes(pdf_bytes, pdf_filename, incluir_texto=False):
     resultado = {"habitacion": habitacion_desde_nombre_archivo(pdf_filename),
                  "nombre": None, "telefono": None,
@@ -413,7 +660,7 @@ def obtener_todas_reservas():
 
     for msg_id in message_ids:
         try:
-            pdf_bytes, filename = descargar_adjunto_gmail(msg_id, access_token)
+            pdf_bytes, filename, _cuerpo = descargar_adjunto_gmail(msg_id, access_token)
             r = procesar_pdf_bytes(pdf_bytes, filename or "documento.pdf")
             if r["error"]:
                 logger.warning(f"PDF {msg_id}: {r['error']}")
@@ -650,11 +897,12 @@ def extraer():
         return jsonify({"ok": False, "error": "No autorizado"}), 401
 
     pdf_filename = data.get("pdf_filename", "documento.pdf")
+    cuerpo_email = ""
 
     if "message_id" in data:
         try:
             access_token = get_access_token()
-            pdf_bytes, fn = descargar_adjunto_gmail(data["message_id"], access_token)
+            pdf_bytes, fn, cuerpo_email = descargar_adjunto_gmail(data["message_id"], access_token)
             if fn: pdf_filename = fn
         except Exception as e:
             return jsonify({"ok": False, "error": str(e)}), 500
@@ -666,12 +914,25 @@ def extraer():
     else:
         return jsonify({"ok": False, "error": "Falta message_id o pdf_base64"}), 400
 
-    r = procesar_pdf_bytes(pdf_bytes, pdf_filename)
+    r = procesar_pdf_bytes(pdf_bytes, pdf_filename, incluir_texto=True)
     if r["error"]: return jsonify({"ok": False, "error": r["error"]}), 500
 
     logger.info(f"OK → hab={r['habitacion']} email={r['email']} entrada={r['fecha_entrada']} salida={r['fecha_salida']}")
+
+    # Envío del código de puerta a través de Booking.com Messages (Beds24)
+    # Combinamos el texto del PDF con el cuerpo del email, ya que el localizador
+    # (identificador fiable de la habitación real) viene en el cuerpo del email.
+    texto_para_detectar = (r.get("texto_extraido") or "") + "\n" + cuerpo_email
+    beds24_resultado = enviar_codigo_puerta_beds24(
+        habitacion_texto=r["habitacion"],
+        texto_completo=texto_para_detectar,
+        fecha_entrada=r["fecha_entrada"],
+        nombre_cliente=r.get("nombre"),
+    )
+
     return jsonify({"ok": True, "habitacion": r["habitacion"], "email": r["email"],
-                    "fecha_entrada": r["fecha_entrada"], "fecha_salida": r["fecha_salida"]}), 200
+                    "fecha_entrada": r["fecha_entrada"], "fecha_salida": r["fecha_salida"],
+                    "codigo_puerta": beds24_resultado}), 200
 
 
 @app.route("/resumen", methods=["GET", "POST"])
