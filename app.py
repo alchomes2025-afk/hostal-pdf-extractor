@@ -531,7 +531,7 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None, version_minima=False)
     )
 
 
-def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False):
+def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False, enviar_tambien_email=False):
     """
     Detecta la habitación, busca la reserva en Beds24 y envía el mensaje con el
     código de puerta a través de Booking.com Messages (POST /bookings/messages).
@@ -572,7 +572,7 @@ def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada,
         resp = requests.post(
             f"{BEDS24_API_BASE}/bookings/messages",
             headers={"token": access_token, "accept": "application/json", "Content-Type": "application/json"},
-            json=[{"bookingId": book_id, "message": mensaje, "sendEmail": False}],
+            json=[{"bookingId": book_id, "message": mensaje, "sendEmail": enviar_tambien_email}],
             timeout=20,
         )
         resp.raise_for_status()
@@ -1101,6 +1101,9 @@ def probar_ultimo_parte():
 
     Uso (envío real SIN enlace ni teléfono, para diagnosticar bloqueos de Booking.com):
         /probar-ultimo-parte?token=Alchomes2025&enviar=1&minimo=1
+
+    Uso (envío real con sendEmail=true, última variante de diagnóstico):
+        /probar-ultimo-parte?token=Alchomes2025&enviar=1&con_email=1
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -1109,6 +1112,7 @@ def probar_ultimo_parte():
 
     dry_run = request.args.get("enviar", "0") != "1"
     version_minima = request.args.get("minimo", "0") == "1"
+    con_email = request.args.get("con_email", "0") == "1"
 
     try:
         access_token = get_access_token()
@@ -1147,6 +1151,7 @@ def probar_ultimo_parte():
         nombre_cliente=r.get("nombre"),
         dry_run=dry_run,
         version_minima=version_minima,
+        enviar_tambien_email=con_email,
     )
 
     return jsonify({
