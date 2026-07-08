@@ -1288,6 +1288,71 @@ def ver_mensajes_beds24():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/ver-reservas-dia-beds24", methods=["GET"])
+def ver_reservas_dia_beds24():
+    """
+    Diagnóstico: muestra la respuesta cruda de Beds24 al consultar reservas
+    de un día concreto, para entender por qué el resumen devuelve resultados
+    duplicados/excesivos (posible problema con el filtro de fechas o paginación).
+
+    Uso:
+        /ver-reservas-dia-beds24?token=Alchomes2025&fecha=2026-07-08&tipo=checkin
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    fecha = request.args.get("fecha", date.today().isoformat())
+    tipo = request.args.get("tipo", "checkin")
+
+    try:
+        access_token = get_beds24_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    params = {"propertyId": BEDS24_PROPERTY_ID}
+    if tipo == "checkin":
+        params["checkInFrom"] = fecha
+        params["checkInTo"] = fecha
+    else:
+        params["checkOutFrom"] = fecha
+        params["checkOutTo"] = fecha
+
+    try:
+        resp = requests.get(
+            f"{BEDS24_API_BASE}/bookings",
+            headers={"token": access_token, "accept": "application/json"},
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    data = raw.get("data", [])
+    resumen_items = [
+        {
+            "id": b.get("id"),
+            "roomId": b.get("roomId"),
+            "checkIn": b.get("arrival") or b.get("checkIn") or b.get("firstNight"),
+            "checkOut": b.get("departure") or b.get("checkOut") or b.get("lastNight"),
+            "status": b.get("status"),
+        }
+        for b in data
+    ]
+
+    return jsonify({
+        "ok": True,
+        "params_enviados": params,
+        "total_items_data": len(data),
+        "pages_info": raw.get("pages"),
+        "primeros_10_items": resumen_items[:10],
+        "todos_los_items_resumidos": resumen_items,
+    }), 200
+
+
 @app.route("/debug", methods=["GET"])
 def debug_page():
     return render_template_string(DEBUG_PAGE)
