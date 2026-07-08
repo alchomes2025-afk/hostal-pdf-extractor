@@ -439,7 +439,16 @@ def get_beds24_access_token():
 def buscar_booking_id_beds24(access_token, room_id, fecha_entrada):
     """
     Busca la reserva en Beds24 para una habitación y fecha de entrada concretas.
-    Devuelve el bookId de la primera coincidencia, o None si no encuentra nada.
+
+    IMPORTANTE: los parámetros de filtro por fecha de la API (checkInFrom/
+    checkInTo) NO funcionan de forma fiable — se comprobó que Beds24 los
+    ignora y devuelve reservas de cualquier fecha. Por eso aquí SIEMPRE se
+    filtra también en nuestro propio código, comparando el campo real
+    'arrival' de cada reserva contra fecha_entrada de forma exacta, en vez
+    de confiar en que el primer resultado (data[0]) sea el correcto.
+
+    Devuelve el bookId de la reserva cuya fecha de 'arrival' coincide
+    exactamente, o None si no encuentra ninguna coincidencia real.
     """
     resp = requests.get(
         f"{BEDS24_API_BASE}/bookings",
@@ -447,16 +456,27 @@ def buscar_booking_id_beds24(access_token, room_id, fecha_entrada):
         params={
             "propertyId": BEDS24_PROPERTY_ID,
             "roomId": room_id,
-            "checkInFrom": fecha_entrada,
-            "checkInTo": fecha_entrada,
+            "arrivalFrom": fecha_entrada,
+            "arrivalTo": fecha_entrada,
         },
         timeout=15,
     )
     resp.raise_for_status()
     data = resp.json().get("data", [])
-    if not data:
-        return None
-    return data[0].get("id")
+
+    # Verificación explícita: solo aceptamos una reserva cuya fecha de
+    # 'arrival' coincida EXACTAMENTE con fecha_entrada, y cuyo status no
+    # sea 'cancelled'. No confiamos en el orden ni en el filtro de la API.
+    for b in data:
+        if b.get("arrival") == fecha_entrada and str(b.get("status", "")).lower() != "cancelled":
+            return b.get("id")
+
+    logger.warning(
+        f"buscar_booking_id_beds24: ninguna reserva de room {room_id} tiene "
+        f"arrival exacto {fecha_entrada} (la API devolvió {len(data)} resultados "
+        f"sin filtrar correctamente por fecha)"
+    )
+    return None
 
 
 def construir_mensaje_codigo(room_id, nombre_cliente=None, version_minima=False):
@@ -531,6 +551,21 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None, version_minima=False)
     )
 
 
+def avisar_error_critico(titulo, detalle):
+    """
+    Envía un aviso por WhatsApp cuando falla un punto crítico del flujo
+    (autenticación Beds24, habitación no detectada, reserva no encontrada,
+    envío de mensaje fallido, etc.). No lanza excepción si el propio envío
+    de WhatsApp falla — solo lo loguea, para no romper el flujo principal.
+    """
+    mensaje = f"⚠️ ALCHOMES — {titulo}\n\n{detalle}"
+    logger.error(f"[CONTROL] {titulo}: {detalle}")
+    try:
+        enviar_whatsapp_callmebot(mensaje)
+    except Exception as e:
+        logger.error(f"No se pudo enviar el aviso de error crítico por WhatsApp: {e}")
+
+
 def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False, enviar_tambien_email=False):
     """
     Detecta la habitación, busca la reserva en Beds24 y envía el mensaje con el
@@ -546,18 +581,50 @@ def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada,
     room_id = detectar_room_id(habitacion_texto, texto_completo)
     if not room_id:
         resultado["error"] = f"No se pudo detectar la habitación Beds24 a partir de: {habitacion_texto!r}"
+        if not dry_run:
+            avisar_error_critico(
+                "No se pudo detectar la habitación",
+                f"Parte recibido con habitación '{habitacion_texto}' pero no coincide con "
+                f"ninguna de las 5 habitaciones configuradas. No se envió el código de puerta.\n"
+                f"Revísalo manualmente cuanto antes."
+            )
         return resultado
     resultado["room_id"] = room_id
 
     if not fecha_entrada:
         resultado["error"] = "Falta fecha_entrada, no se puede localizar la reserva en Beds24"
+        if not dry_run:
+            avisar_error_critico(
+                "Falta fecha de entrada en un parte",
+                f"Habitación '{habitacion_texto}' — no se pudo extraer la fecha de entrada del PDF. "
+                f"No se envió el código de puerta. Revísalo manualmente."
+            )
         return resultado
 
     try:
         access_token = get_beds24_access_token()
+    except Exception as e:
+        resultado["error"] = f"No se pudo autenticar con Beds24: {e}"
+        if not dry_run:
+            avisar_error_critico(
+                "Fallo de autenticación con Beds24",
+                f"No se pudo obtener el access token de Beds24 ({e}). "
+                f"Revisa BEDS24_REFRESH_TOKEN en Render — puede haber caducado."
+            )
+        return resultado
+
+    try:
         book_id = buscar_booking_id_beds24(access_token, room_id, fecha_entrada)
         if not book_id:
             resultado["error"] = f"No se encontró reserva en Beds24 para room {room_id} / entrada {fecha_entrada}"
+            if not dry_run:
+                avisar_error_critico(
+                    "Reserva no encontrada en Beds24",
+                    f"Habitación {ROOM_CONFIG.get(room_id, {}).get('nombre', room_id)}, "
+                    f"entrada {fecha_entrada} — no hay ninguna reserva en Beds24 con esa fecha exacta. "
+                    f"Puede que la reserva aún no se haya sincronizado, o que la fecha del parte "
+                    f"no coincida con la de Booking.com. No se envió el código de puerta."
+                )
             return resultado
         resultado["book_id"] = book_id
 
@@ -599,14 +666,23 @@ def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada,
         if not item_ok:
             resultado["enviado"] = False
             resultado["error"] = f"Beds24 aceptó la petición pero reportó un error al crear el mensaje: {item_error}"
-            logger.error(f"Beds24: error interno al crear mensaje para booking {book_id}: {item_error}")
+            avisar_error_critico(
+                "Código de puerta NO enviado (rechazado por Beds24/Booking)",
+                f"Booking {book_id}, habitación {ROOM_CONFIG.get(room_id, {}).get('nombre', room_id)}. "
+                f"Error: {item_error}\nEnvía el código manualmente por Booking.com Messages."
+            )
             return resultado
 
         resultado["enviado"] = True
         logger.info(f"Beds24: código enviado a booking {book_id} (room {room_id}) — respuesta: {respuesta_json}")
     except Exception as e:
         resultado["error"] = str(e)
-        logger.error(f"Beds24: error enviando código de puerta: {e}")
+        if not dry_run:
+            avisar_error_critico(
+                "Error inesperado enviando el código de puerta",
+                f"Habitación {ROOM_CONFIG.get(room_id, {}).get('nombre', room_id)}, entrada {fecha_entrada}. "
+                f"Error: {e}\nEnvía el código manualmente por Booking.com Messages."
+            )
 
     return resultado
 
@@ -762,8 +838,16 @@ def _extraer_nombre_huesped_beds24(booking):
 
 def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
     """
-    Consulta en Beds24 las reservas con check-in o check-out en una fecha
-    concreta (fecha_iso formato YYYY-MM-DD). tipo: "checkin" o "checkout".
+    Consulta en Beds24 las reservas con entrada (arrival) o salida (departure)
+    en una fecha concreta (fecha_iso formato YYYY-MM-DD). tipo: "checkin" o "checkout".
+
+    IMPORTANTE: los parámetros de filtro por fecha de la API (arrivalFrom/
+    arrivalTo, departureFrom/departureTo) no son fiables al 100% — se detectó
+    que en algunos casos Beds24 devuelve reservas de fechas no solicitadas.
+    Por eso, además de pasar el filtro en la petición, SIEMPRE se vuelve a
+    filtrar explícitamente en Python comparando el campo real 'arrival' o
+    'departure' de cada reserva contra fecha_iso de forma exacta.
+
     Devuelve una lista de dicts: {room_id, nombre_habitacion, huesped, book_id}.
     Si falla la consulta (token, red, etc.) devuelve lista vacía y loguea el error,
     para no romper el resumen diario por un problema puntual de Beds24.
@@ -771,16 +855,17 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
     try:
         access_token = get_beds24_access_token()
     except Exception as e:
-        logger.error(f"Beds24: no se pudo obtener access token para el resumen: {e}")
+        logger.error(f"[CONTROL] Beds24 auth falló al consultar reservas de {tipo} ({fecha_iso}): {e}")
         return []
 
     params = {"propertyId": BEDS24_PROPERTY_ID}
+    campo_fecha = "arrival" if tipo == "checkin" else "departure"
     if tipo == "checkin":
-        params["checkInFrom"] = fecha_iso
-        params["checkInTo"] = fecha_iso
+        params["arrivalFrom"] = fecha_iso
+        params["arrivalTo"] = fecha_iso
     else:
-        params["checkOutFrom"] = fecha_iso
-        params["checkOutTo"] = fecha_iso
+        params["departureFrom"] = fecha_iso
+        params["departureTo"] = fecha_iso
 
     try:
         resp = requests.get(
@@ -792,16 +877,20 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
         resp.raise_for_status()
         data = resp.json().get("data", [])
     except Exception as e:
-        logger.error(f"Beds24: error consultando reservas de {tipo} para {fecha_iso}: {e}")
+        logger.error(f"[CONTROL] Error consultando reservas de {tipo} para {fecha_iso}: {e}")
         return []
 
     resultado = []
+    descartadas_por_fecha = 0
     for b in data:
+        # Filtrado explícito: NO confiar en que la API ya haya filtrado bien.
+        if b.get(campo_fecha) != fecha_iso:
+            descartadas_por_fecha += 1
+            continue
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
         room_id = str(b.get("roomId", ""))
         if not room_id:
-            continue
-        # Ignora reservas canceladas
-        if str(b.get("status", "")).lower() == "cancelled":
             continue
         resultado.append({
             "room_id": room_id,
@@ -809,6 +898,13 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
             "huesped": _extraer_nombre_huesped_beds24(b),
             "book_id": b.get("id"),
         })
+
+    if descartadas_por_fecha:
+        logger.info(
+            f"obtener_bookings_dia_beds24({tipo}, {fecha_iso}): la API devolvió "
+            f"{len(data)} reservas, {descartadas_por_fecha} descartadas por no "
+            f"coincidir la fecha exacta de '{campo_fecha}' (filtro de la API no fiable)."
+        )
     return resultado
 
 
@@ -842,6 +938,19 @@ def generar_mensaje_resumen(hora_str=None):
     hoy_iso = hoy.isoformat()
     if hora_str is None:
         hora_str = datetime.now().strftime("%H")
+
+    # Punto de control: verificar autenticación con Beds24 antes de consultar
+    # las reservas del día. Si falla, avisamos por WhatsApp además de que el
+    # resumen seguirá generándose (con listas vacías) para no bloquear el envío.
+    try:
+        get_beds24_access_token()
+    except Exception as e:
+        avisar_error_critico(
+            "Fallo de autenticación con Beds24 (resumen diario)",
+            f"No se pudo conectar con Beds24 para generar el resumen de hoy ({e}). "
+            f"El resumen se enviará sin entradas/salidas hasta que se resuelva. "
+            f"Revisa BEDS24_REFRESH_TOKEN en Render."
+        )
 
     entradas_beds24 = obtener_bookings_dia_beds24(hoy_iso, tipo="checkin")
     salidas_beds24  = obtener_bookings_dia_beds24(hoy_iso, tipo="checkout")
