@@ -738,46 +738,131 @@ def obtener_todas_reservas():
     return reservas
 
 
+# Nombre de habitación en el formato original (el que usa registroparteviajeros.com
+# y el que se mostraba antes en el resumen de WhatsApp), para no cambiar el
+# formato del mensaje aunque los datos ahora vengan de Beds24.
+ROOM_ID_DISPLAY_NAME = {
+    "702397": "Habitación Simple 1",
+    "702398": "Habitación Simple 2",
+    "702399": "Habitación Simple 3",
+    "702396": "Habitación Doble 4",
+    "702395": "Habitación Deluxe 5",
+}
+
+
+def _extraer_nombre_huesped_beds24(booking):
+    """Beds24 puede devolver el nombre del huésped en distintos campos según
+    la versión/canal. Probamos varias claves habituales antes de rendirnos."""
+    guest = booking.get("guest") or {}
+    nombre = guest.get("firstName") or booking.get("firstName") or booking.get("guestFirstName") or ""
+    apellido = guest.get("lastName") or booking.get("lastName") or booking.get("guestLastName") or ""
+    nombre_completo = f"{nombre} {apellido}".strip()
+    return nombre_completo or booking.get("guestName") or "Huésped sin nombre"
+
+
+def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
+    """
+    Consulta en Beds24 las reservas con check-in o check-out en una fecha
+    concreta (fecha_iso formato YYYY-MM-DD). tipo: "checkin" o "checkout".
+    Devuelve una lista de dicts: {room_id, nombre_habitacion, huesped, book_id}.
+    Si falla la consulta (token, red, etc.) devuelve lista vacía y loguea el error,
+    para no romper el resumen diario por un problema puntual de Beds24.
+    """
+    try:
+        access_token = get_beds24_access_token()
+    except Exception as e:
+        logger.error(f"Beds24: no se pudo obtener access token para el resumen: {e}")
+        return []
+
+    params = {"propertyId": BEDS24_PROPERTY_ID}
+    if tipo == "checkin":
+        params["checkInFrom"] = fecha_iso
+        params["checkInTo"] = fecha_iso
+    else:
+        params["checkOutFrom"] = fecha_iso
+        params["checkOutTo"] = fecha_iso
+
+    try:
+        resp = requests.get(
+            f"{BEDS24_API_BASE}/bookings",
+            headers={"token": access_token, "accept": "application/json"},
+            params=params,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+    except Exception as e:
+        logger.error(f"Beds24: error consultando reservas de {tipo} para {fecha_iso}: {e}")
+        return []
+
+    resultado = []
+    for b in data:
+        room_id = str(b.get("roomId", ""))
+        if not room_id:
+            continue
+        # Ignora reservas canceladas
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
+        resultado.append({
+            "room_id": room_id,
+            "nombre_habitacion": ROOM_ID_DISPLAY_NAME.get(room_id, ROOM_CONFIG.get(room_id, {}).get("nombre", f"Room {room_id}")),
+            "huesped": _extraer_nombre_huesped_beds24(b),
+            "book_id": b.get("id"),
+        })
+    return resultado
+
+
+def obtener_partes_recibidos_hoy():
+    """
+    Devuelve un set de (room_id, fecha_entrada_iso) de los partes de viajeros
+    ya recibidos por email, usando la misma lógica de detección de habitación
+    que /extraer (nombre fijo de registroparteviajeros.com → room_id real).
+    Se usa para marcar en el resumen si el parte de una entrada ya llegó o no.
+    """
+    reservas = obtener_todas_reservas()
+    recibidos = set()
+    for r in reservas:
+        room_id = detectar_room_id(r["habitacion"], "")
+        if room_id and r["fecha_entrada"]:
+            recibidos.add((room_id, r["fecha_entrada"]))
+    return recibidos
+
+
 def generar_mensaje_resumen(hora_str=None):
     """
     Genera el resumen diario para WhatsApp.
-    - ENTRADAS HOY: fecha_entrada == hoy
-    - SALIDAS HOY:  fecha_salida == hoy
+    - ENTRADAS HOY y SALIDAS HOY se obtienen directamente de Beds24 (reservas
+      reales), no de los emails de partes recibidos — así el resumen refleja
+      quién debe entrar/salir hoy según la reserva, independientemente de si
+      ya ha rellenado el parte o no.
+    - Para cada ENTRADA se indica además si el parte de viajero ya se ha
+      recibido (cruzando con los emails procesados) o si sigue pendiente.
     """
     hoy = date.today()
+    hoy_iso = hoy.isoformat()
     if hora_str is None:
         hora_str = datetime.now().strftime("%H")
 
-    reservas = obtener_todas_reservas()
-
-    entradas_hoy = []
-    salidas_hoy  = []
-
-    for r in reservas:
-        try:
-            fe = date.fromisoformat(r["fecha_entrada"])
-            fs = date.fromisoformat(r["fecha_salida"])
-        except Exception:
-            continue
-        if fe == hoy:
-            entradas_hoy.append(r["habitacion"])
-        if fs == hoy:
-            salidas_hoy.append(r["habitacion"])
+    entradas_beds24 = obtener_bookings_dia_beds24(hoy_iso, tipo="checkin")
+    salidas_beds24  = obtener_bookings_dia_beds24(hoy_iso, tipo="checkout")
+    partes_recibidos = obtener_partes_recibidos_hoy()
 
     hoy_fmt = hoy.strftime("%d/%m/%Y")
     lineas = [f"🏨 ALCHOMES — {hoy_fmt} · {hora_str}:00h"]
 
     lineas.append("\n✅ ENTRADAS HOY:")
-    if entradas_hoy:
-        for hab in entradas_hoy:
-            lineas.append(f"• {hab}")
+    if entradas_beds24:
+        for e in entradas_beds24:
+            parte_ok = (e["room_id"], hoy_iso) in partes_recibidos
+            estado = "📄 parte recibido" if parte_ok else "⚠️ parte PENDIENTE"
+            lineas.append(f"• {e['nombre_habitacion']} ({estado})")
     else:
         lineas.append("• (ninguna)")
 
     lineas.append("\n🚪 SALIDAS HOY:")
-    if salidas_hoy:
-        for hab in salidas_hoy:
-            lineas.append(f"• {hab}")
+    if salidas_beds24:
+        for s in salidas_beds24:
+            lineas.append(f"• {s['nombre_habitacion']}")
     else:
         lineas.append("• (ninguna)")
 
