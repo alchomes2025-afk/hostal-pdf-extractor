@@ -1348,6 +1348,7 @@ def ver_reservas_dia_beds24():
         "params_enviados": params,
         "total_items_data": len(data),
         "pages_info": raw.get("pages"),
+        "primer_item_SIN_PROCESAR": data[0] if data else None,
         "primeros_10_items": resumen_items[:10],
         "todos_los_items_resumidos": resumen_items,
     }), 200
