@@ -568,8 +568,34 @@ def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada,
             timeout=20,
         )
         resp.raise_for_status()
+        respuesta_json = resp.json()
+        resultado["respuesta_beds24"] = respuesta_json
+
+        # La API puede devolver 200 OK a nivel HTTP pero reportar un error
+        # por elemento dentro del cuerpo de la respuesta (patrón típico de
+        # endpoints que procesan en lote). Lo comprobamos explícitamente
+        # en vez de asumir éxito solo porque no hubo excepción HTTP.
+        item_ok = True
+        item_error = None
+        if isinstance(respuesta_json, list) and respuesta_json:
+            primer_item = respuesta_json[0]
+            if isinstance(primer_item, dict):
+                if primer_item.get("success") is False:
+                    item_ok = False
+                    item_error = primer_item.get("errors") or primer_item.get("error") or primer_item
+        elif isinstance(respuesta_json, dict):
+            if respuesta_json.get("success") is False:
+                item_ok = False
+                item_error = respuesta_json.get("errors") or respuesta_json.get("error") or respuesta_json
+
+        if not item_ok:
+            resultado["enviado"] = False
+            resultado["error"] = f"Beds24 aceptó la petición pero reportó un error al crear el mensaje: {item_error}"
+            logger.error(f"Beds24: error interno al crear mensaje para booking {book_id}: {item_error}")
+            return resultado
+
         resultado["enviado"] = True
-        logger.info(f"Beds24: código enviado a booking {book_id} (room {room_id})")
+        logger.info(f"Beds24: código enviado a booking {book_id} (room {room_id}) — respuesta: {respuesta_json}")
     except Exception as e:
         resultado["error"] = str(e)
         logger.error(f"Beds24: error enviando código de puerta: {e}")
@@ -1124,6 +1150,39 @@ def probar_ultimo_parte():
         "fecha_salida": r["fecha_salida"],
         "codigo_puerta": beds24_resultado,
     }), 200
+
+
+@app.route("/ver-mensajes-beds24", methods=["GET"])
+def ver_mensajes_beds24():
+    """
+    Diagnóstico: consulta directamente en Beds24 el historial de mensajes
+    de una reserva concreta, para confirmar si un mensaje se registró/envió
+    realmente (y ver el estado que reporta el canal).
+
+    Uso:
+        /ver-mensajes-beds24?token=Alchomes2025&book_id=89432182
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    book_id = request.args.get("book_id", "")
+    if not book_id:
+        return jsonify({"ok": False, "error": "Falta el parámetro book_id"}), 400
+
+    try:
+        access_token = get_beds24_access_token()
+        resp = requests.get(
+            f"{BEDS24_API_BASE}/bookings/messages",
+            headers={"token": access_token, "accept": "application/json"},
+            params={"bookingId": book_id},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        return jsonify({"ok": True, "book_id": book_id, "mensajes": resp.json()}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/debug", methods=["GET"])
