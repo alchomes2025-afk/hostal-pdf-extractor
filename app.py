@@ -459,12 +459,30 @@ def buscar_booking_id_beds24(access_token, room_id, fecha_entrada):
     return data[0].get("id")
 
 
-def construir_mensaje_codigo(room_id, nombre_cliente=None):
-    """Construye el mensaje bilingüe de bienvenida + código de puerta."""
+def construir_mensaje_codigo(room_id, nombre_cliente=None, version_minima=False):
+    """Construye el mensaje bilingüe de bienvenida + código de puerta.
+    Si version_minima=True, omite el enlace del asistente virtual y el
+    teléfono — útil para diagnosticar si Booking.com está bloqueando el
+    mensaje por contener enlaces/teléfonos no aprobados en su Extranet."""
     cfg = ROOM_CONFIG.get(room_id, {})
     nombre_hab = cfg.get("nombre", "")
     pin = cfg.get("pin")
     saludo_en = f"{nombre_cliente} " if nombre_cliente else ""
+
+    bloque_contacto_es = (
+        "" if version_minima else
+        "\n\nPara cualquier duda o consulta, puede tener respuesta inmediata en nuestro asistente virtual: "
+        "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
+        "Puede comunicarse con nosotros 24h, vía mensajes dentro de la plataforma de booking, "
+        "o puede contactarnos por el teléfono oficial +34 622 38 35 87 las 24 horas del día\n"
+    )
+    bloque_contacto_en = (
+        "" if version_minima else
+        "\n\nFor any questions or inquiries, you can get an immediate response from our virtual assistant: "
+        "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
+        "You can communicate with us 24 hours a day via messages within the booking platform or by calling "
+        "our official number at +34 622 38 35 87. "
+    )
 
     if room_id == "702397":  # Playa Lanuza — sin código actualmente
         return (
@@ -475,11 +493,8 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None):
             f"Su habitación es {nombre_hab}\n"
             "No funciona el código, disculpe las molestias. La habitación estará abierta y la llave en la mesita de noche\n\n"
             "WIFI: ALCHOMES\n"
-            "CONTRASEÑA: Alchomes2025\n\n"
-            "Para cualquier duda o consulta, puede tener respuesta inmediata en nuestro asistente virtual: "
-            "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
-            "Puede comunicarse con nosotros 24h, vía mensajes dentro de la plataforma de booking, "
-            "o puede contactarnos por el teléfono oficial +34 622 38 35 87 las 24 horas del día\n"
+            "CONTRASEÑA: Alchomes2025"
+            f"{bloque_contacto_es}"
             "Alc Homes le desea una agradable estancia.\n"
             "_________\n"
             "Welcome to Alc Homes Alicante.\n"
@@ -488,11 +503,9 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None):
             f"Your room is {nombre_hab}.\n"
             "The code is not working, sorry for the inconvenience: The room will be unlocked, and the key will be on the nightstand.\n\n"
             "WIFI: ALCHOMES\n"
-            "PASSWORD: Alchomes2025\n\n"
-            "For any questions or inquiries, you can get an immediate response from our virtual assistant: "
-            "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
-            "You can communicate with us 24 hours a day via messages within the booking platform or by calling "
-            "our official number at +34 622 38 35 87. Alc Homes wishes you a pleasant stay."
+            "PASSWORD: Alchomes2025"
+            f"{bloque_contacto_en}"
+            "Alc Homes wishes you a pleasant stay."
         )
 
     return (
@@ -503,11 +516,8 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None):
         f"Su habitación es {nombre_hab}. Su código es {pin or 'PIN NO CONFIGURADO'}. "
         "Para cerrar la puerta desde fuera, pulse el triángulo\n\n"
         "WIFI: ALCHOMES\n"
-        "CONTRASEÑA: Alchomes2025\n\n"
-        "Para cualquier duda o consulta, puede tener respuesta inmediata en nuestro asistente virtual: "
-        "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
-        "Puede comunicarse con nosotros 24h, vía mensajes dentro de la plataforma de booking, "
-        "o puede contactarnos por el teléfono oficial +34 622 38 35 87 las 24 horas del día\n"
+        "CONTRASEÑA: Alchomes2025"
+        f"{bloque_contacto_es}"
         "Alc Homes le desea una agradable estancia.\n"
         "_________\n"
         f"{saludo_en}Welcome to Alc Homes Alicante.\n"
@@ -515,15 +525,13 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None):
         "code and push the door. Entry code: 130773# (make sure to dial the six numbers and the #)\n\n"
         f"Your room is {nombre_hab}. Your code is {pin or 'PIN NOT CONFIGURED'}. To lock the door from the outside, press the triangle.\n\n"
         "WIFI: ALCHOMES\n"
-        "PASSWORD: Alchomes2025\n\n"
-        "For any questions or inquiries, you can get an immediate response from our virtual assistant: "
-        "https://app-asistente-virtual-alc-homes.vercel.app/\n\n"
-        "You can communicate with us 24 hours a day via messages within the booking platform or by calling "
-        "our official number at +34 622 38 35 87. Alc Homes wishes you a pleasant stay."
+        "PASSWORD: Alchomes2025"
+        f"{bloque_contacto_en}"
+        "Alc Homes wishes you a pleasant stay."
     )
 
 
-def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False):
+def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False):
     """
     Detecta la habitación, busca la reserva en Beds24 y envía el mensaje con el
     código de puerta a través de Booking.com Messages (POST /bookings/messages).
@@ -553,7 +561,7 @@ def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada,
             return resultado
         resultado["book_id"] = book_id
 
-        mensaje = construir_mensaje_codigo(room_id, nombre_cliente)
+        mensaje = construir_mensaje_codigo(room_id, nombre_cliente, version_minima=version_minima)
         resultado["mensaje_generado"] = mensaje
 
         if dry_run:
@@ -1090,6 +1098,9 @@ def probar_ultimo_parte():
 
     Uso (envío real, solo si estás seguro):
         /probar-ultimo-parte?token=Alchomes2025&enviar=1
+
+    Uso (envío real SIN enlace ni teléfono, para diagnosticar bloqueos de Booking.com):
+        /probar-ultimo-parte?token=Alchomes2025&enviar=1&minimo=1
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -1097,6 +1108,7 @@ def probar_ultimo_parte():
         return jsonify({"ok": False, "error": "No autorizado"}), 401
 
     dry_run = request.args.get("enviar", "0") != "1"
+    version_minima = request.args.get("minimo", "0") == "1"
 
     try:
         access_token = get_access_token()
@@ -1134,6 +1146,7 @@ def probar_ultimo_parte():
         fecha_entrada=r["fecha_entrada"],
         nombre_cliente=r.get("nombre"),
         dry_run=dry_run,
+        version_minima=version_minima,
     )
 
     return jsonify({
