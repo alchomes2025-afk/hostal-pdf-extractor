@@ -77,6 +77,216 @@ HABITACIONES = {
     "habitacion deluxe 4": "Habitación Deluxe 4",
     "habitacion deluxe 5": "Habitación Deluxe 5",
 }
+# ════════════════════════════════════════════════════════════════════════════
+# MÓDULO CHECK-IN WEB  ·  Pegar justo DESPUÉS del bloque ROOM_CONFIG
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Reutiliza sin modificar:
+#   get_beds24_access_token, obtener_partes_recibidos_hoy,
+#   detectar_room_id, _extraer_nombre_huesped_beds24, ROOM_CONFIG,
+#   GmailAuthError
+#
+# El asistente virtual llama a Groq DIRECTAMENTE desde el browser (igual
+# que el app en Vercel), por lo que NO se añade ningún proxy /chat aquí.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Links de registroparteviajeros.com por room_id de Beds24 ─────────────
+RPV_LINKS = {
+    "702397": "https://app.registroparteviajeros.com/propiedad/hliPDoDTb9",  # Hab 1 · Playa Lanuza
+    "702398": "https://app.registroparteviajeros.com/propiedad/CgbPrarDLi",  # Hab 2 · Playa del Albir
+    "702399": "https://app.registroparteviajeros.com/propiedad/d1ydBdUSOr",  # Hab 3 · Cala del Moraig
+    "702396": "https://app.registroparteviajeros.com/propiedad/MRgkbMeAt7",  # Hab 4 · Playa de la Fossá
+    "702395": "https://app.registroparteviajeros.com/propiedad/YQGCsngJaN",  # Hab 5 · Cala Coveta Fumá
+}
+
+
+# ── Helper: búsqueda recursiva del número de Booking.com ─────────────────
+
+def _ref_en_booking(obj, ref_norm, _path=""):
+    """
+    Busca ref_norm recursivamente en TODOS los campos del objeto de reserva
+    devuelto por Beds24.
+
+    Beds24 almacena el número de confirmación de Booking.com en un campo
+    cuyo nombre exacto varía según versión de API (externalId, guestCode,
+    channelBookingId…). Esta búsqueda lo encuentra sea cual sea el campo.
+
+    Devuelve el path del campo donde se halló (útil para el log) o None.
+    """
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            r = _ref_en_booking(v, ref_norm, f"{_path}.{k}" if _path else k)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for i, item in enumerate(obj):
+            r = _ref_en_booking(item, ref_norm, f"{_path}[{i}]")
+            if r is not None:
+                return r
+    elif obj is not None:
+        if str(obj).strip().lower() == ref_norm:
+            return _path or "raíz"
+    return None
+
+
+# ── Función principal: buscar reserva por número de Booking.com ──────────
+
+def buscar_booking_por_ref(booking_ref):
+    """
+    Busca en Beds24 la reserva cuyo número de confirmación de Booking.com
+    coincida con booking_ref (el número que el huésped ve en su app/email).
+
+    Estrategia:
+      1. Obtiene TODAS las reservas con arrival en [-5 días, +180 días].
+         Para 5 habitaciones, son ~30-40 objetos como máximo.
+      2. Por cada reserva activa, busca booking_ref en todos sus campos
+         de forma recursiva (_ref_en_booking).
+      3. Loguea en qué campo exacto encontró la coincidencia.
+         (Útil para saber qué campo usa tu versión de Beds24 si
+         algún día necesitas optimizar la búsqueda.)
+
+    Devuelve el dict completo de la reserva, o None si no se encuentra.
+    """
+    if not booking_ref or not booking_ref.strip():
+        return None
+
+    try:
+        token = get_beds24_access_token()
+    except Exception as e:
+        logger.error(f"[check-in] Beds24 auth error en buscar_booking_por_ref: {e}")
+        return None
+
+    hoy   = date.today()
+    desde = (hoy - timedelta(days=5)).isoformat()
+    hasta = (hoy + timedelta(days=180)).isoformat()
+
+    try:
+        resp = requests.get(
+            f"{BEDS24_API_BASE}/bookings",
+            headers={"token": token, "accept": "application/json"},
+            params={"propertyId": BEDS24_PROPERTY_ID,
+                    "arrivalFrom": desde, "arrivalTo": hasta},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        bookings = resp.json().get("data", [])
+        logger.info(f"[check-in] Beds24: {len(bookings)} reservas en rango {desde}→{hasta}")
+    except Exception as e:
+        logger.error(f"[check-in] Error consultando Beds24: {e}")
+        return None
+
+    ref_norm = booking_ref.strip().lower()
+
+    for b in bookings:
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
+        campo = _ref_en_booking(b, ref_norm)
+        if campo is not None:
+            logger.info(
+                f"[check-in] Reserva encontrada: ref='{booking_ref}' "
+                f"en campo '{campo}' → book_id={b.get('id')} room={b.get('roomId')}"
+            )
+            return b
+
+    # Log de diagnóstico: ayuda a ver qué campos devuelve Beds24
+    if bookings:
+        logger.warning(
+            f"[check-in] ref='{booking_ref}' no encontrado. "
+            f"Campos del primer booking: {list(bookings[0].keys())}"
+        )
+    else:
+        logger.warning(f"[check-in] ref='{booking_ref}': sin reservas en el rango.")
+    return None
+
+
+# ── Función: verificar parte de viajero ──────────────────────────────────
+
+def parte_recibido_para(room_id, fecha_entrada_iso):
+    """
+    Verifica si Gmail ya recibió el parte de viajero para esta habitación
+    y fecha de entrada.
+
+    Reutiliza obtener_partes_recibidos_hoy() que ya existe: escanea los
+    últimos 90 días de emails 'Parte de viajeros' en Gmail y devuelve
+    un set de (room_id, fecha_entrada).
+    """
+    try:
+        recibidos = obtener_partes_recibidos_hoy()
+        encontrado = (room_id, fecha_entrada_iso) in recibidos
+        logger.info(
+            f"[check-in] parte_recibido_para "
+            f"room={room_id} fecha={fecha_entrada_iso} → {encontrado}"
+        )
+        return encontrado
+    except GmailAuthError:
+        logger.error("[check-in] Gmail auth caducado — tratando parte como pendiente")
+        return False
+    except Exception as e:
+        logger.error(f"[check-in] Error verificando parte: {e}")
+        return False
+
+
+# ── Endpoint: GET /check-in ───────────────────────────────────────────────
+
+@app.route("/check-in", methods=["GET"])
+def check_in_status():
+    """
+    GET /check-in?ref=<numero_confirmacion_booking_com>
+
+    Endpoint para la web de check-in estática alojada en Firebase.
+    El huésped introduce el número de su confirmación de Booking.com.
+
+    Flujo:
+      1. Busca la reserva en Beds24 por número de Booking.com
+         → obtiene habitación, nombre del huésped, fechas
+      2. Verifica en Gmail (vía Make/Render) si se recibió el parte
+      3. Responde con:
+         - parte_submitted: false  →  rpv_link  (enlace a registroparteviajeros.com)
+         - parte_submitted: true   →  pin        (código de puerta de Render env vars)
+
+    Ejemplo respuesta (parte pendiente):
+    {
+      "ok": true,
+      "room_id": "702396",
+      "room_name": "Playa de la Fossá",
+      "guest_name": "María García",
+      "arrival": "2026-07-20",
+      "departure": "2026-07-22",
+      "parte_submitted": false,
+      "rpv_link": "https://app.registroparteviajeros.com/propiedad/MRgkbMeAt7",
+      "pin": null
+    }
+
+    Ejemplo respuesta (parte recibido):
+    { ...mismo esquema..., "parte_submitted": true, "rpv_link": null, "pin": "191199" }
+    """
+    ref = request.args.get("ref", "").strip()
+    if not ref:
+        return jsonify({"ok": False, "error": "ref_required"}), 400
+
+    booking = buscar_booking_por_ref(ref)
+    if not booking:
+        return jsonify({"ok": False, "error": "no_encontrado"}), 404
+
+    room_id    = str(booking.get("roomId", ""))
+    arrival    = booking.get("arrival", "")
+    departure  = booking.get("departure", "")
+    guest_name = _extraer_nombre_huesped_beds24(booking)
+    cfg        = ROOM_CONFIG.get(room_id, {})
+
+    parte_enviado = parte_recibido_para(room_id, arrival)
+
+    return jsonify({
+        "ok":              True,
+        "room_id":         room_id,
+        "room_name":       cfg.get("nombre", ""),
+        "guest_name":      guest_name,
+        "arrival":         arrival,
+        "departure":       departure,
+        "parte_submitted": parte_enviado,
+        "pin":             cfg.get("pin") if parte_enviado else None,
+        "rpv_link":        RPV_LINKS.get(room_id) if not parte_enviado else None,
+    })
 
 TEST_PAGE = """<!DOCTYPE html>
 <html lang="es">
