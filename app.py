@@ -99,6 +99,18 @@ RPV_LINKS = {
     "702395": "https://app.registroparteviajeros.com/propiedad/YQGCsngJaN",  # Hab 5 · Cala Coveta Fumá
 }
 
+# ── Configuración: API de registroparteviajeros ───────────────────────
+RPV_API_KEY = os.environ.get("RPV_API_KEY", "")
+RPV_API_BASE = "https://app.registroparteviajeros.com/api"
+
+# Mapeo: room_id de Beds24 → property_id de registroparteviajeros
+RPV_PROPERTY_MAP = {
+    "702397": "hliPDoDTb9",   # Playa Lanuza
+    "702398": "CgbPrarDLi",   # Playa del Albir
+    "702399": "d1ydBdUSOr",   # Cala del Moraig
+    "702396": "MRgkbMeAt7",   # Playa de la Fossá
+    "702395": "YQGCsngJaN",   # Cala Coveta Fumá
+}
 
 # ── Helper: búsqueda recursiva del número de Booking.com ─────────────────
 
@@ -203,26 +215,62 @@ def buscar_booking_por_ref(booking_ref):
 
 def parte_recibido_para(room_id, fecha_entrada_iso):
     """
-    Verifica si Gmail ya recibió el parte de viajero para esta habitación
-    y fecha de entrada.
+    Verifica si el parte de viajero fue completado consultando directamente
+    la API de registroparteviajeros.com (sin depender de Gmail).
 
-    Reutiliza obtener_partes_recibidos_hoy() que ya existe: escanea los
-    últimos 90 días de emails 'Parte de viajeros' en Gmail y devuelve
-    un set de (room_id, fecha_entrada).
+    Busca todos los partes de la propiedad y verifica si existe uno para
+    esta habitación y fecha de entrada con status 'submitted' o 'completed'.
+
+    Sin Google tokens caducados — consulta directa a registroparteviajeros.
     """
-    try:
-        recibidos = obtener_partes_recibidos_hoy()
-        encontrado = (room_id, fecha_entrada_iso) in recibidos
-        logger.info(
-            f"[check-in] parte_recibido_para "
-            f"room={room_id} fecha={fecha_entrada_iso} → {encontrado}"
-        )
-        return encontrado
-    except GmailAuthError:
-        logger.error("[check-in] Gmail auth caducado — tratando parte como pendiente")
+    if not RPV_API_KEY:
+        logger.warning("[check-in] RPV_API_KEY no configurada — tratando parte como pendiente")
         return False
+
+    property_id = RPV_PROPERTY_MAP.get(room_id)
+    if not property_id:
+        logger.warning(f"[check-in] room_id {room_id} no tiene property_id en RPV_PROPERTY_MAP")
+        return False
+
+    try:
+        # Consulta la API de registroparteviajeros para obtener todos los partes
+        # de esta propiedad
+        resp = requests.get(
+            f"{RPV_API_BASE}/properties/{property_id}/guests",
+            headers={"Authorization": f"Bearer {RPV_API_KEY}", "accept": "application/json"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        guests = resp.json().get("data", [])
+
+        # Busca un guest cuya fecha de entrada coincida exactamente
+        # y cuyo status indique que completó el registro
+        fecha_entrada = datetime.fromisoformat(fecha_entrada_iso).date()
+        for guest in guests:
+            try:
+                check_in_date = datetime.fromisoformat(guest.get("checkInDate", "")).date()
+            except (ValueError, TypeError):
+                continue
+
+            if check_in_date == fecha_entrada:
+                status = str(guest.get("status", "")).lower()
+                # Asumimos que 'submitted', 'completed', 'checked_in' indican parte recibido
+                if status in ["submitted", "completed", "checked_in", "active"]:
+                    logger.info(
+                        f"[check-in] Parte RECIBIDO vía RPV API: "
+                        f"room={room_id} fecha={fecha_entrada_iso} status={status}"
+                    )
+                    return True
+
+        logger.info(
+            f"[check-in] Parte PENDIENTE (no encontrado en RPV): "
+            f"room={room_id} fecha={fecha_entrada_iso}"
+        )
+        return False
+
     except Exception as e:
-        logger.error(f"[check-in] Error verificando parte: {e}")
+        logger.error(f"[check-in] Error consultando RPV API: {e}")
+        # En caso de error, tratamos como pendiente (muestra RPV link para que intente de nuevo)
         return False
 
 
