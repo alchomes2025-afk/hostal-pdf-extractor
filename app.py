@@ -101,15 +101,16 @@ RPV_LINKS = {
 
 # ── Configuración: API de registroparteviajeros ───────────────────────
 RPV_API_KEY = os.environ.get("RPV_API_KEY", "")
-RPV_API_BASE = "https://app.registroparteviajeros.com/api"
+RPV_API_URL = "https://app.registroparteviajeros.com/api/v1/usuarios"
 
-# Mapeo: room_id de Beds24 → property_id de registroparteviajeros
+# Mapeo: room_id de Beds24 → prop_id real de registroparteviajeros
+# (se obtiene de la sección API → Código de Propiedad del panel de RPV)
 RPV_PROPERTY_MAP = {
-    "702397": "hliPDoDTb9",   # Playa Lanuza
-    "702398": "CgbPrarDLi",   # Playa del Albir
-    "702399": "d1ydBdUSOr",   # Cala del Moraig
-    "702396": "MRgkbMeAt7",   # Playa de la Fossá
-    "702395": "YQGCsngJaN",   # Cala Coveta Fumá
+    "702397": "prop_W17mVBrVyrGinzWt4VvGmw",   # Playa Lanuza        (Hab 1)
+    "702398": "prop_W17mVBrVyrGinzWs_jN1-Q",   # Playa del Albir     (Hab 2)
+    "702399": "prop_W17mVBrVyrGinzWj80wzxw",    # Cala del Moraig     (Hab 3)
+    "702396": "prop_W17mVBrVyrGinzWivGS55Q",    # Playa de la Fossá   (Hab 4)
+    "702395": "prop_W17mVBrVyrGinzWhTOByeA",    # Cala Coveta Fumá    (Hab 5)
 }
 
 # ── Helper: búsqueda recursiva del número de Booking.com ─────────────────
@@ -213,65 +214,59 @@ def buscar_booking_por_ref(booking_ref):
 
 # ── Función: verificar parte de viajero ──────────────────────────────────
 
-def parte_recibido_para(room_id, fecha_entrada_iso):
+def _consultar_rpv_propiedad(prop_id):
     """
-    Verifica si el parte de viajero fue completado consultando directamente
-    la API de registroparteviajeros.com (sin depender de Gmail).
+    Llama a la API de registroparteviajeros.com para una propiedad concreta.
+    Devuelve la lista de registros (cada uno con reserva + huespedes) o [].
 
-    Busca todos los partes de la propiedad y verifica si existe uno para
-    esta habitación y fecha de entrada con status 'submitted' o 'completed'.
-
-    Sin Google tokens caducados — consulta directa a registroparteviajeros.
+    Estructura de respuesta:
+      [ { "reserva": { "fecha_entrada": "YYYY-MM-DD", "fecha_salida": "...", ... },
+          "huespedes": { "huesped": [...] } }, ... ]
     """
-    if not RPV_API_KEY:
-        logger.warning("[check-in] RPV_API_KEY no configurada — tratando parte como pendiente")
-        return False
-
-    property_id = RPV_PROPERTY_MAP.get(room_id)
-    if not property_id:
-        logger.warning(f"[check-in] room_id {room_id} no tiene property_id en RPV_PROPERTY_MAP")
-        return False
-
+    if not RPV_API_KEY or not prop_id:
+        return []
     try:
-        # Consulta la API de registroparteviajeros para obtener todos los partes
-        # de esta propiedad
         resp = requests.get(
-            f"{RPV_API_BASE}/properties/{property_id}/guests",
+            RPV_API_URL,
             headers={"Authorization": f"Bearer {RPV_API_KEY}", "accept": "application/json"},
+            params={"propiedad": prop_id},
             timeout=10,
         )
         resp.raise_for_status()
-        guests = resp.json().get("data", [])
-
-        # Busca un guest cuya fecha de entrada coincida exactamente
-        # y cuyo status indique que completó el registro
-        fecha_entrada = datetime.fromisoformat(fecha_entrada_iso).date()
-        for guest in guests:
-            try:
-                check_in_date = datetime.fromisoformat(guest.get("checkInDate", "")).date()
-            except (ValueError, TypeError):
-                continue
-
-            if check_in_date == fecha_entrada:
-                status = str(guest.get("status", "")).lower()
-                # Asumimos que 'submitted', 'completed', 'checked_in' indican parte recibido
-                if status in ["submitted", "completed", "checked_in", "active"]:
-                    logger.info(
-                        f"[check-in] Parte RECIBIDO vía RPV API: "
-                        f"room={room_id} fecha={fecha_entrada_iso} status={status}"
-                    )
-                    return True
-
-        logger.info(
-            f"[check-in] Parte PENDIENTE (no encontrado en RPV): "
-            f"room={room_id} fecha={fecha_entrada_iso}"
-        )
-        return False
-
+        data = resp.json()
+        # La API puede devolver un dict único o una lista
+        return data if isinstance(data, list) else [data]
     except Exception as e:
-        logger.error(f"[check-in] Error consultando RPV API: {e}")
-        # En caso de error, tratamos como pendiente (muestra RPV link para que intente de nuevo)
+        logger.error(f"[RPV] Error consultando {prop_id}: {e}")
+        return []
+
+
+def parte_recibido_para(room_id, fecha_entrada_iso):
+    """
+    Verifica si el parte de viajero fue completado para esta habitación
+    y fecha de entrada, consultando directamente la API de
+    registroparteviajeros.com (sin depender de Gmail).
+
+    La presencia de un registro con reserva.fecha_entrada coincidente
+    es suficiente para confirmar que el huésped completó el proceso.
+    """
+    prop_id = RPV_PROPERTY_MAP.get(room_id)
+    if not prop_id:
+        logger.warning(f"[check-in] room_id {room_id} no tiene prop_id en RPV_PROPERTY_MAP")
         return False
+
+    registros = _consultar_rpv_propiedad(prop_id)
+    for reg in registros:
+        reserva = reg.get("reserva", {})
+        if reserva.get("fecha_entrada", "") == fecha_entrada_iso:
+            logger.info(
+                f"[check-in] Parte RECIBIDO vía RPV API: "
+                f"room={room_id} fecha={fecha_entrada_iso}"
+            )
+            return True
+
+    logger.info(f"[check-in] Parte PENDIENTE: room={room_id} fecha={fecha_entrada_iso}")
+    return False
 
 
 # ── Endpoint: GET /check-in ───────────────────────────────────────────────
@@ -322,18 +317,55 @@ def check_in_status():
     guest_name = _extraer_nombre_huesped_beds24(booking)
     cfg        = ROOM_CONFIG.get(room_id, {})
 
-    parte_enviado = parte_recibido_para(room_id, arrival)
+    hoy = date.today()
+    try:
+        arrival_date   = date.fromisoformat(arrival)
+        departure_date = date.fromisoformat(departure)
+    except (ValueError, TypeError):
+        arrival_date = departure_date = None
 
+    if arrival_date is None or departure_date is None:
+        # Sin fechas → no podemos determinar estado
+        return jsonify({"ok": False, "error": "fechas_invalidas"}), 500
+
+    if hoy > departure_date:
+        # Estancia finalizada
+        return jsonify({
+            "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
+            "guest_name": guest_name, "arrival": arrival, "departure": departure,
+            "estado": "expired", "parte_submitted": False, "pin_available": False,
+            "pin": None, "rpv_link": None,
+        })
+
+    if hoy > arrival_date:
+        # Ya alojado (check-in fue ayer o antes): asumimos parte enviado
+        # La API solo devuelve huéspedes del día de hoy, por lo que no podemos
+        # verificarlo retrospectivamente — si están dentro, lo enviaron.
+        return jsonify({
+            "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
+            "guest_name": guest_name, "arrival": arrival, "departure": departure,
+            "estado": "staying", "parte_submitted": True, "pin_available": True,
+            "pin": cfg.get("pin"), "rpv_link": None,
+        })
+
+    if hoy == arrival_date:
+        # Día del check-in: verificar con la API de RPV
+        parte_enviado = parte_recibido_para(room_id, arrival)
+        return jsonify({
+            "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
+            "guest_name": guest_name, "arrival": arrival, "departure": departure,
+            "estado": "checkin_day", "parte_submitted": parte_enviado,
+            "pin_available": parte_enviado,
+            "pin": cfg.get("pin") if parte_enviado else None,
+            "rpv_link": RPV_LINKS.get(room_id) if not parte_enviado else None,
+        })
+
+    # hoy < arrival_date: antes del check-in → mostrar enlace RPV
     return jsonify({
-        "ok":              True,
-        "room_id":         room_id,
-        "room_name":       cfg.get("nombre", ""),
-        "guest_name":      guest_name,
-        "arrival":         arrival,
-        "departure":       departure,
-        "parte_submitted": parte_enviado,
-        "pin":             cfg.get("pin") if parte_enviado else None,
-        "rpv_link":        RPV_LINKS.get(room_id) if not parte_enviado else None,
+        "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
+        "guest_name": guest_name, "arrival": arrival, "departure": departure,
+        "estado": "pre_checkin", "parte_submitted": False, "pin_available": False,
+        "pin": None, "rpv_link": RPV_LINKS.get(room_id),
     })
 
 TEST_PAGE = """<!DOCTYPE html>
@@ -1169,16 +1201,26 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
 def obtener_partes_recibidos_hoy():
     """
     Devuelve un set de (room_id, fecha_entrada_iso) de los partes de viajeros
-    ya recibidos por email, usando la misma lógica de detección de habitación
-    que /extraer (nombre fijo de registroparteviajeros.com → room_id real).
-    Se usa para marcar en el resumen si el parte de una entrada ya llegó o no.
+    ya completados, consultando directamente la API de registroparteviajeros.com
+    para las 5 habitaciones.
+
+    Reemplaza la versión anterior basada en Gmail (que requería
+    GOOGLE_REFRESH_TOKEN y caducaba con frecuencia).
     """
-    reservas = obtener_todas_reservas()
     recibidos = set()
-    for r in reservas:
-        room_id = detectar_room_id(r["habitacion"], "")
-        if room_id and r["fecha_entrada"]:
-            recibidos.add((room_id, r["fecha_entrada"]))
+    if not RPV_API_KEY:
+        logger.warning("[resumen] RPV_API_KEY no configurada — no se pueden verificar partes")
+        return recibidos
+
+    for room_id, prop_id in RPV_PROPERTY_MAP.items():
+        registros = _consultar_rpv_propiedad(prop_id)
+        for reg in registros:
+            reserva = reg.get("reserva", {})
+            fecha = reserva.get("fecha_entrada", "")
+            if fecha:
+                recibidos.add((room_id, fecha))
+                logger.info(f"[resumen] Parte recibido: room={room_id} fecha={fecha}")
+
     return recibidos
 
 
