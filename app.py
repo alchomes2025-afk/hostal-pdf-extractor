@@ -9,7 +9,8 @@ from flask import Flask, request, jsonify, render_template_string, redirect
 from flask_cors import CORS
 from pypdf import PdfReader, PdfWriter
 import pdfplumber
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, time as dtime
+from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
 app = Flask(__name__)
@@ -317,56 +318,84 @@ def check_in_status():
     guest_name = _extraer_nombre_huesped_beds24(booking)
     cfg        = ROOM_CONFIG.get(room_id, {})
 
-    hoy = date.today()
+    # Hora local española (CET/CEST) para comparar con horarios del hostal
+    MADRID_TZ     = ZoneInfo('Europe/Madrid')
+    HORA_CHECKIN  = dtime(15, 0)   # Check-in a las 15:00
+    HORA_CHECKOUT = dtime(11, 0)   # Check-out hasta las 11:00
+
+    ahora_madrid = datetime.now(MADRID_TZ)
+    hoy          = ahora_madrid.date()
+    hora_local   = ahora_madrid.time().replace(tzinfo=None)
+
     try:
         arrival_date   = date.fromisoformat(arrival)
         departure_date = date.fromisoformat(departure)
     except (ValueError, TypeError):
-        arrival_date = departure_date = None
-
-    if arrival_date is None or departure_date is None:
-        # Sin fechas → no podemos determinar estado
         return jsonify({"ok": False, "error": "fechas_invalidas"}), 500
 
-    if hoy > departure_date:
-        # Estancia finalizada
-        return jsonify({
-            "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
-            "guest_name": guest_name, "arrival": arrival, "departure": departure,
-            "estado": "expired", "parte_submitted": False, "pin_available": False,
-            "pin": None, "rpv_link": None,
+    base = {
+        "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
+        "guest_name": guest_name, "arrival": arrival, "departure": departure,
+    }
+
+    # ── 1. Estancia finalizada (después de las 11:00 del día de salida) ──
+    if hoy > departure_date or (hoy == departure_date and hora_local >= HORA_CHECKOUT):
+        return jsonify({**base,
+            "estado": "expired", "parte_submitted": False,
+            "pin_available": False, "pin": None, "rpv_link": None,
         })
 
+    # ── 2. Ya alojado (entre check-in y check-out, no es el día de llegada) ──
+    # La API de RPV solo devuelve huéspedes del día actual, por lo que para días
+    # posteriores al de llegada asumimos que el parte fue enviado (ya están dentro).
     if hoy > arrival_date:
-        # Ya alojado (check-in fue ayer o antes): asumimos parte enviado
-        # La API solo devuelve huéspedes del día de hoy, por lo que no podemos
-        # verificarlo retrospectivamente — si están dentro, lo enviaron.
-        return jsonify({
-            "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
-            "guest_name": guest_name, "arrival": arrival, "departure": departure,
-            "estado": "staying", "parte_submitted": True, "pin_available": True,
-            "pin": cfg.get("pin"), "rpv_link": None,
+        return jsonify({**base,
+            "estado": "staying", "parte_submitted": True,
+            "pin_available": True, "pin": cfg.get("pin"), "rpv_link": None,
         })
 
-    if hoy == arrival_date:
-        # Día del check-in: verificar con la API de RPV
-        parte_enviado = parte_recibido_para(room_id, arrival)
-        return jsonify({
-            "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
-            "guest_name": guest_name, "arrival": arrival, "departure": departure,
-            "estado": "checkin_day", "parte_submitted": parte_enviado,
-            "pin_available": parte_enviado,
-            "pin": cfg.get("pin") if parte_enviado else None,
+    # ── 3. Verificar parte via API de RPV (válido para el día de hoy o días previos) ──
+    parte_enviado = parte_recibido_para(room_id, arrival)
+
+    # ── 4. Antes del día de check-in ────────────────────────────────────────
+    if hoy < arrival_date:
+        if parte_enviado:
+            # Parte enviado con antelación: mostrar mensaje de espera
+            estado = "pending_early"
+        else:
+            # Parte pendiente: mostrar enlace RPV
+            estado = "pre_checkin"
+        return jsonify({**base,
+            "estado": estado, "parte_submitted": parte_enviado,
+            "pin_available": False, "pin": None,
             "rpv_link": RPV_LINKS.get(room_id) if not parte_enviado else None,
         })
 
-    # hoy < arrival_date: antes del check-in → mostrar enlace RPV
-    return jsonify({
-        "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
-        "guest_name": guest_name, "arrival": arrival, "departure": departure,
-        "estado": "pre_checkin", "parte_submitted": False, "pin_available": False,
-        "pin": None, "rpv_link": RPV_LINKS.get(room_id),
-    })
+    # ── 5. Día de check-in (hoy == arrival_date) ────────────────────────────
+    if hora_local < HORA_CHECKIN:
+        # Antes de las 15:00 del día de llegada
+        if parte_enviado:
+            estado = "pending_early"   # Parte OK → "vuelve a las 15:00 de hoy"
+        else:
+            estado = "pre_checkin"     # Sin parte → enlace RPV
+        return jsonify({**base,
+            "estado": estado, "parte_submitted": parte_enviado,
+            "pin_available": False, "pin": None,
+            "rpv_link": RPV_LINKS.get(room_id) if not parte_enviado else None,
+        })
+
+    # A partir de las 15:00 del día de check-in
+    if parte_enviado:
+        return jsonify({**base,
+            "estado": "staying", "parte_submitted": True,
+            "pin_available": True, "pin": cfg.get("pin"), "rpv_link": None,
+        })
+    else:
+        return jsonify({**base,
+            "estado": "checkin_pending", "parte_submitted": False,
+            "pin_available": False, "pin": None,
+            "rpv_link": RPV_LINKS.get(room_id),
+        })
 
 TEST_PAGE = """<!DOCTYPE html>
 <html lang="es">
