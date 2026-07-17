@@ -1097,20 +1097,194 @@ def construir_mensaje_codigo(room_id, nombre_cliente=None, version_minima=False)
 
 def avisar_error_critico(titulo, detalle):
     """
-    Envía un aviso por WhatsApp cuando falla un punto crítico del flujo
-    (autenticación Beds24, habitación no detectada, reserva no encontrada,
-    envío de mensaje fallido, etc.). No lanza excepción si el propio envío
-    de WhatsApp falla — solo lo loguea, para no romper el flujo principal.
+    Envía un aviso por WhatsApp cuando falla un punto crítico del flujo.
+    No lanza excepción si el propio envío de WhatsApp falla.
     """
-    mensaje = f"⚠️ ALCHOMES — {titulo}\n\n{detalle}"
-    logger.error(f"[CONTROL] {titulo}: {detalle}")
+    alerta(titulo, detalle, nivel="critico")
+
+
+def alerta(titulo, detalle="", nivel="critico"):
+    """
+    Sistema centralizado de alertas por WhatsApp.
+
+    nivel:
+      "critico"  → 🔴 error que impide el funcionamiento (auth caducada, servicio caído)
+      "warning"  → 🟡 degradación parcial (parte no detectado, PIN no configurado)
+      "info"     → 🟢 evento notable sin impacto en el servicio
+    """
+    emoji = {"critico": "🔴", "warning": "🟡", "info": "🟢"}.get(nivel, "⚠️")
+    hora  = datetime.now(ZoneInfo('Europe/Madrid')).strftime("%d/%m/%Y %H:%M")
+    msg   = f"{emoji} ALCHOMES — {titulo}"
+    if detalle:
+        msg += f"\n\n{detalle}"
+    msg += f"\n\n🕐 {hora}"
+    logger.log(
+        logging.ERROR if nivel == "critico" else
+        logging.WARNING if nivel == "warning" else logging.INFO,
+        f"[ALERTA {nivel.upper()}] {titulo}: {detalle}"
+    )
     try:
-        enviar_whatsapp_callmebot(mensaje)
+        enviar_whatsapp_callmebot(msg)
     except Exception as e:
-        logger.error(f"No se pudo enviar el aviso de error crítico por WhatsApp: {e}")
+        logger.error(f"No se pudo enviar alerta WhatsApp: {e}")
 
 
-def enviar_codigo_puerta_beds24(habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False, enviar_tambien_email=False):
+
+def enviar_codigo_por_room_id(room_id, fecha_entrada, nombre_cliente=None):
+    """
+    Envía el código de puerta vía Beds24/Booking.com Messages para una
+    habitación y fecha conocidas, sin necesitar el PDF del parte.
+
+    Antes de enviar, comprueba el historial de mensajes de la reserva en
+    Beds24: si ya hay un mensaje nuestro (contiene el código 130773#),
+    no lo reenvía para evitar duplicados.
+
+    Devuelve dict con: enviado, ya_enviado, book_id, error.
+    """
+    try:
+        access_token = get_beds24_access_token()
+    except Exception as e:
+        avisar_error_critico("Fallo auth Beds24 (procesar-partes)", str(e))
+        return {"enviado": False, "error": str(e)}
+
+    book_id = buscar_booking_id_beds24(access_token, room_id, fecha_entrada)
+    if not book_id:
+        avisar_error_critico(
+            "Reserva no encontrada (procesar-partes)",
+            f"room={room_id} fecha={fecha_entrada}"
+        )
+        return {"enviado": False, "error": "reserva no encontrada en Beds24"}
+
+    # Comprobar si ya enviamos el código (el mensaje siempre contiene "130773#")
+    try:
+        r = requests.get(
+            f"{BEDS24_API_BASE}/bookings/messages",
+            headers={"token": access_token, "accept": "application/json"},
+            params={"bookingId": book_id},
+            timeout=10,
+        )
+        mensajes = r.json().get("data", []) if r.ok else []
+        if any("130773" in str(m.get("message", "")) for m in mensajes):
+            logger.info(f"[procesar] Código ya enviado a booking {book_id} — omitiendo")
+            return {"enviado": False, "ya_enviado": True, "book_id": book_id}
+    except Exception as e:
+        logger.warning(f"[procesar] No se pudo verificar historial de mensajes: {e}")
+
+    mensaje = construir_mensaje_codigo(room_id, nombre_cliente)
+    try:
+        resp = requests.post(
+            f"{BEDS24_API_BASE}/bookings/messages",
+            headers={"token": access_token, "accept": "application/json",
+                     "Content-Type": "application/json"},
+            json=[{"bookingId": book_id, "message": mensaje, "sendEmail": False}],
+            timeout=20,
+        )
+        resp.raise_for_status()
+        logger.info(f"[procesar] Código enviado a booking {book_id} (room {room_id})")
+        return {"enviado": True, "book_id": book_id}
+    except Exception as e:
+        avisar_error_critico(
+            "Error enviando código (procesar-partes)",
+            f"room={room_id} booking={book_id}: {e}"
+        )
+        return {"enviado": False, "error": str(e)}
+
+
+@app.route("/procesar-partes-hoy", methods=["GET", "POST"])
+def procesar_partes_hoy():
+    """
+    Verifica si se han recibido partes de viajeros para las entradas de hoy
+    y envía automáticamente el código de puerta a los que aún no lo tienen.
+
+    Reemplaza el trigger de Gmail/Make.com — llamar desde Make.com cada
+    10-15 minutos durante el día.
+
+    GET  /procesar-partes-hoy?token=Alchomes2025
+    POST { "token": "Alchomes2025" }
+
+    Respuesta:
+    {
+      "ok": true,
+      "fecha": "2026-07-17",
+      "procesado": [
+        { "habitacion": "Playa del Albir", "parte": "recibido", "accion": "código enviado ahora" },
+        { "habitacion": "Cala Coveta Fumá", "parte": "pendiente", "accion": "ninguna" }
+      ]
+    }
+    """
+    if request.method == "POST":
+        token = (request.get_json(force=True) or {}).get("token", "")
+    else:
+        token = request.args.get("token", "")
+
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    hoy = date.today().isoformat()
+    entradas = obtener_bookings_dia_beds24(hoy, tipo="checkin")
+
+    if not entradas:
+        return jsonify({"ok": True, "fecha": hoy, "procesado": [], "nota": "Sin entradas hoy"})
+
+    resultado = []
+
+    for entrada in entradas:
+        room_id   = entrada["room_id"]
+        huesped   = entrada["huesped"]
+        hab_nombre = entrada["nombre_habitacion"]
+
+        # Consultar RPV: ¿se ha enviado el parte?
+        parte_ok = parte_recibido_para(room_id, hoy)
+
+        if not parte_ok:
+            resultado.append({
+                "habitacion": hab_nombre,
+                "huesped":    huesped,
+                "parte":      "pendiente",
+                "accion":     "ninguna — parte aún no recibido",
+            })
+            continue
+
+        # Enviar código (solo si no se envió ya)
+        envio = enviar_codigo_por_room_id(room_id, hoy, huesped)
+
+        if envio.get("ya_enviado"):
+            resultado.append({
+                "habitacion": hab_nombre,
+                "huesped":    huesped,
+                "parte":      "recibido",
+                "accion":     "código ya enviado anteriormente — omitido",
+            })
+        elif envio.get("enviado"):
+            resultado.append({
+                "habitacion": hab_nombre,
+                "huesped":    huesped,
+                "parte":      "recibido",
+                "accion":     "✅ código enviado ahora por Booking.com",
+            })
+            # Notificación WhatsApp
+            try:
+                enviar_whatsapp_callmebot(
+                    f"✅ ALCHOMES — Parte recibido · Código enviado\n"
+                    f"Habitación: {ROOM_CONFIG.get(room_id, {}).get('nombre', hab_nombre)}\n"
+                    f"Huésped: {huesped}\n"
+                    f"Entrada: {hoy}"
+                )
+            except Exception as e:
+                logger.error(f"[procesar] WhatsApp error: {e}")
+        else:
+            resultado.append({
+                "habitacion": hab_nombre,
+                "huesped":    huesped,
+                "parte":      "recibido",
+                "accion":     f"⚠️ error enviando código: {envio.get('error')}",
+            })
+
+    return jsonify({"ok": True, "fecha": hoy, "procesado": resultado})
+
+
+habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False, enviar_tambien_email=False):
     """
     Detecta la habitación, busca la reserva en Beds24 y envía el mensaje con el
     código de puerta a través de Booking.com Messages (POST /bookings/messages).
@@ -2020,3 +2194,233 @@ def ver_reservas_dia_beds24():
 @app.route("/debug", methods=["GET"])
 def debug_page():
     return render_template_string(DEBUG_PAGE)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# WATCHDOG — Punto de control completo del sistema
+# ════════════════════════════════════════════════════════════════════════════
+
+@app.route("/watchdog", methods=["GET", "POST"])
+def watchdog():
+    """
+    Verifica el estado de TODOS los servicios y variables del sistema.
+    Envía alerta WhatsApp si detecta cualquier problema.
+
+    Llamar desde Make.com una vez al día (ej. 08:00h) o desde UptimeRobot.
+
+    GET /watchdog?token=Alchomes2025
+
+    Puntos de control:
+      ✓ Variables de entorno críticas (tokens, PINs, credenciales)
+      ✓ Autenticación Beds24
+      ✓ API de registroparteviajeros.com (las 5 habitaciones)
+      ✓ API de Groq (chat del asistente)
+      ✓ CallMeBot WhatsApp (los dos números)
+      ✓ PINs de habitación configurados
+      ✓ Accesibilidad de Firebase (web de check-in)
+    """
+    if request.method == "POST":
+        token = (request.get_json(force=True) or {}).get("token", "")
+    else:
+        token = request.args.get("token", "")
+
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    resultados = {}
+    problemas  = []  # (nivel, descripcion, accion_sugerida)
+
+    # ── 1. Variables de entorno ───────────────────────────────────────────
+    env_criticas = {
+        "BEDS24_REFRESH_TOKEN": BEDS24_REFRESH_TOKEN,
+        "RPV_API_KEY":          RPV_API_KEY,
+        "CALLMEBOT_PHONE":      CALLMEBOT_PHONE,
+        "CALLMEBOT_API_KEY":    CALLMEBOT_API_KEY,
+        "GROQ_API_KEY":         GROQ_API_KEY,
+    }
+    env_warning = {
+        "CALLMEBOT_PHONE_2":    CALLMEBOT_PHONE_2,
+        "CALLMEBOT_API_KEY_2":  CALLMEBOT_API_KEY_2,
+        "GOOGLE_REFRESH_TOKEN": GOOGLE_REFRESH_TOKEN,  # para /extraer legacy
+    }
+    pins = {
+        f"PIN hab. {ROOM_CONFIG[rid]['nombre']}": ROOM_CONFIG[rid]["pin"]
+        for rid in ["702398", "702399", "702396", "702395"]  # Lanuza no tiene PIN
+    }
+
+    falt_criticas = [k for k, v in env_criticas.items() if not v]
+    falt_warning  = [k for k, v in env_warning.items() if not v]
+    falt_pins     = [k for k, v in pins.items() if not v]
+
+    resultados["env_vars"] = {
+        "criticas_ok": len(falt_criticas) == 0,
+        "faltantes_criticas": falt_criticas,
+        "faltantes_warning": falt_warning,
+        "pins_faltantes": falt_pins,
+    }
+    if falt_criticas:
+        problemas.append(("critico",
+            f"Variables críticas no configuradas: {', '.join(falt_criticas)}",
+            "Añadirlas en Render → Environment y hacer redeploy"))
+    if falt_pins:
+        problemas.append(("warning",
+            f"PINs sin configurar: {', '.join(falt_pins)}",
+            "Añadir en Render → Environment (PIN_HABITACION_2, PIN_HABITACION_3, PIN_DOBLE, PIN_DELUXE)"))
+
+    # ── 2. Beds24 ─────────────────────────────────────────────────────────
+    try:
+        tok = get_beds24_access_token()
+        # Prueba real: obtener 1 reserva
+        r = requests.get(
+            f"{BEDS24_API_BASE}/bookings",
+            headers={"token": tok, "accept": "application/json"},
+            params={"propertyId": BEDS24_PROPERTY_ID, "arrivalFrom": date.today().isoformat(),
+                    "arrivalTo": (date.today() + timedelta(days=1)).isoformat()},
+            timeout=10,
+        )
+        r.raise_for_status()
+        resultados["beds24"] = {"ok": True, "reservas_hoy_mañana": len(r.json().get("data", []))}
+    except Exception as e:
+        resultados["beds24"] = {"ok": False, "error": str(e)}
+        problemas.append(("critico",
+            f"Beds24 no responde: {e}",
+            "Verificar BEDS24_REFRESH_TOKEN en Render — puede haber caducado"))
+
+    # ── 3. RPV API (probar cada habitación) ───────────────────────────────
+    rpv_ok = []
+    rpv_fail = []
+    for room_id, prop_id in RPV_PROPERTY_MAP.items():
+        nombre = ROOM_CONFIG.get(room_id, {}).get("nombre", room_id)
+        try:
+            resp = requests.get(
+                RPV_API_URL,
+                headers={"Authorization": f"Bearer {RPV_API_KEY}", "accept": "application/json"},
+                params={"propiedad": prop_id},
+                timeout=8,
+            )
+            if resp.status_code == 401:
+                raise Exception("API key inválida (401)")
+            if resp.status_code == 404:
+                raise Exception(f"Propiedad no encontrada: {prop_id}")
+            resp.raise_for_status()
+            rpv_ok.append(nombre)
+        except Exception as e:
+            rpv_fail.append(f"{nombre}: {e}")
+
+    resultados["rpv_api"] = {"ok": len(rpv_fail) == 0, "ok_list": rpv_ok, "fail_list": rpv_fail}
+    if rpv_fail:
+        problemas.append(("critico",
+            f"RPV API falla en {len(rpv_fail)} habitación(es): {'; '.join(rpv_fail)}",
+            "Verificar RPV_API_KEY en Render — puede haber caducado o cambiado"))
+
+    # ── 4. Groq API ───────────────────────────────────────────────────────
+    if GROQ_API_KEY:
+        try:
+            r = requests.post(
+                GROQ_API_URL,
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                         "Content-Type": "application/json"},
+                json={"model": GROQ_MODEL_PRI,
+                      "messages": [{"role": "user", "content": "ping"}],
+                      "max_tokens": 5},
+                timeout=10,
+            )
+            if r.status_code == 401:
+                raise Exception("API key inválida o revocada (401) — Groq la revoca si se publica en repos públicos")
+            if r.status_code == 429:
+                resultados["groq"] = {"ok": True, "nota": "Rate limit (429) — servicio activo pero saturado"}
+            else:
+                r.raise_for_status()
+                resultados["groq"] = {"ok": True, "model": GROQ_MODEL_PRI}
+        except Exception as e:
+            resultados["groq"] = {"ok": False, "error": str(e)}
+            problemas.append(("critico",
+                f"Groq API error: {e}",
+                "Generar nueva API key en console.groq.com y actualizar GROQ_API_KEY en Render"))
+    else:
+        resultados["groq"] = {"ok": False, "error": "GROQ_API_KEY no configurada"}
+        problemas.append(("critico", "GROQ_API_KEY no configurada",
+            "Añadir en Render → Environment"))
+
+    # ── 5. Firebase (web de check-in) ─────────────────────────────────────
+    try:
+        r = requests.get("https://alc-homes-checkin.web.app", timeout=8)
+        resultados["firebase_web"] = {"ok": r.ok, "status": r.status_code}
+        if not r.ok:
+            problemas.append(("critico",
+                f"Web de check-in no accesible (HTTP {r.status_code})",
+                "Revisar Firebase Hosting en console.firebase.google.com"))
+    except Exception as e:
+        resultados["firebase_web"] = {"ok": False, "error": str(e)}
+        problemas.append(("critico", f"Web de check-in inaccesible: {e}",
+            "Revisar Firebase Hosting"))
+
+    # ── 6. CallMeBot ─────────────────────────────────────────────────────
+    # Solo verificamos que los números y keys estén configurados
+    # (no enviamos mensaje de prueba para no molestar)
+    callmebot_ok = bool(CALLMEBOT_PHONE and CALLMEBOT_API_KEY)
+    callmebot2_ok = bool(CALLMEBOT_PHONE_2 and CALLMEBOT_API_KEY_2)
+    resultados["callmebot"] = {
+        "numero_1": "configurado" if callmebot_ok else "⚠️ no configurado",
+        "numero_2": "configurado" if callmebot2_ok else "no configurado (opcional)",
+    }
+
+    # ── 7. Reservas ficticias de prueba ───────────────────────────────────
+    resultados["test_bookings"] = {
+        "disponibles": list(TEST_BOOKINGS.keys()),
+        "nota": "Usar en alc-homes-checkin.web.app para probar cada estado",
+    }
+
+    # ── Resumen y alerta WhatsApp ─────────────────────────────────────────
+    n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")
+    n_warnings  = sum(1 for nivel, _, _ in problemas if nivel == "warning")
+    todo_ok = len(problemas) == 0
+
+    if problemas:
+        lineas = [f"{'🔴' if nivel=='critico' else '🟡'} {desc}\n   → {accion}"
+                  for nivel, desc, accion in problemas]
+        alerta(
+            f"Watchdog — {n_criticos} error(es) crítico(s), {n_warnings} aviso(s)",
+            "\n\n".join(lineas),
+            nivel="critico" if n_criticos > 0 else "warning"
+        )
+    else:
+        alerta("Watchdog — ✅ Todos los sistemas operativos", "", nivel="info")
+
+    return jsonify({
+        "ok":          todo_ok,
+        "timestamp":   datetime.now(ZoneInfo('Europe/Madrid')).strftime("%Y-%m-%d %H:%M:%S (Madrid)"),
+        "resumen":     f"{n_criticos} crítico(s), {n_warnings} aviso(s)" if problemas else "✅ Todo OK",
+        "problemas":   [{"nivel": n, "descripcion": d, "accion": a} for n, d, a in problemas],
+        "servicios":   resultados,
+    })
+
+
+# ── Check de startup ──────────────────────────────────────────────────────
+# Se ejecuta al cargar el módulo (cuando Render arranca el servidor).
+# Verifica variables críticas y avisa por WhatsApp si falta algo.
+def _startup_check():
+    criticas = {
+        "BEDS24_REFRESH_TOKEN": BEDS24_REFRESH_TOKEN,
+        "RPV_API_KEY":          RPV_API_KEY,
+        "CALLMEBOT_PHONE":      CALLMEBOT_PHONE,
+        "CALLMEBOT_API_KEY":    CALLMEBOT_API_KEY,
+        "GROQ_API_KEY":         GROQ_API_KEY,
+    }
+    faltantes = [k for k, v in criticas.items() if not v]
+    if faltantes:
+        logger.error(f"[STARTUP] ⚠️ Variables críticas no configuradas: {faltantes}")
+        try:
+            enviar_whatsapp_callmebot(
+                f"🟡 ALCHOMES — Render reiniciado\n\n"
+                f"⚠️ Variables críticas no configuradas:\n"
+                + "\n".join(f"• {k}" for k in faltantes)
+                + "\n\nAcceder a Render → Environment para añadirlas."
+            )
+        except Exception as e:
+            logger.error(f"[STARTUP] No se pudo enviar alerta WhatsApp: {e}")
+    else:
+        logger.info("[STARTUP] ✅ Todas las variables críticas configuradas")
+
+_startup_check()
