@@ -1284,7 +1284,8 @@ def procesar_partes_hoy():
     return jsonify({"ok": True, "fecha": hoy, "procesado": resultado})
 
 
-habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False, enviar_tambien_email=False):
+def enviar_codigo_puerta_beds24(
+    habitacion_texto, texto_completo, fecha_entrada, nombre_cliente=None, dry_run=False, version_minima=False, enviar_tambien_email=False):
     """
     Detecta la habitación, busca la reserva en Beds24 y envía el mensaje con el
     código de puerta a través de Booking.com Messages (POST /bookings/messages).
