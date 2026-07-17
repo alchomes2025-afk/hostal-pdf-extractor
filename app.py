@@ -270,6 +270,49 @@ def parte_recibido_para(room_id, fecha_entrada_iso):
     return False
 
 
+# ── Reservas de prueba ficticias ─────────────────────────────────────────
+# Números que siempre devuelven un estado concreto para poder probar la web
+# sin depender de reservas reales ni del horario actual.
+TEST_BOOKINGS = {
+    "9999000001": {
+        "estado":        "pre_checkin",
+        "parte_submitted": False,
+        "pin_available": False,
+        "guest_name":    "Hermann Müller",
+        "room_id":       "702398",
+        "room_name":     "Playa del Albir",
+        "arrival":       "2026-07-20",
+        "departure":     "2026-07-22",
+        "pin":           None,
+        "rpv_link":      RPV_LINKS.get("702398"),
+    },
+    "9999000002": {
+        "estado":        "pending_early",
+        "parte_submitted": True,
+        "pin_available": False,
+        "guest_name":    "Hermann Müller",
+        "room_id":       "702398",
+        "room_name":     "Playa del Albir",
+        "arrival":       "2026-07-20",
+        "departure":     "2026-07-22",
+        "pin":           None,
+        "rpv_link":      None,
+    },
+    "9999000003": {
+        "estado":        "staying",
+        "parte_submitted": True,
+        "pin_available": True,
+        "guest_name":    "Hermann Müller",
+        "room_id":       "702398",
+        "room_name":     "Playa del Albir",
+        "arrival":       "2026-07-20",
+        "departure":     "2026-07-22",
+        "pin":           ROOM_CONFIG.get("702398", {}).get("pin", "XXXXXX"),
+        "rpv_link":      None,
+    },
+}
+
+
 # ── Endpoint: GET /check-in ───────────────────────────────────────────────
 
 @app.route("/check-in", methods=["GET"])
@@ -307,6 +350,11 @@ def check_in_status():
     ref = request.args.get("ref", "").strip()
     if not ref:
         return jsonify({"ok": False, "error": "ref_required"}), 400
+
+    # ── Reservas ficticias de prueba ──────────────────────────────────────
+    if ref in TEST_BOOKINGS:
+        t = TEST_BOOKINGS[ref]
+        return jsonify({"ok": True, **t})
 
     booking = buscar_booking_por_ref(ref)
     if not booking:
