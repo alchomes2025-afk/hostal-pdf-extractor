@@ -397,6 +397,134 @@ def check_in_status():
             "rpv_link": RPV_LINKS.get(room_id),
         })
 
+
+# ── Endpoint: GET /diagnostico ────────────────────────────────────────────────
+
+@app.route("/diagnostico", methods=["GET"])
+def diagnostico_checkin():
+    """
+    Devuelve hasta 3 números de reserva reales para probar la web de check-in.
+
+    GET /diagnostico?token=Alchomes2025
+
+    Los 3 estados buscados son exactamente:
+      1. sin_parte     → parte NO enviado (pendiente de registro)
+      2. parte_enviado → parte enviado pero aún no es hora de check-in (antes del día o antes de 15:00)
+      3. check_in_ok   → parte enviado Y ya es hora de check-in (o huésped ya alojado)
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    MADRID_TZ     = ZoneInfo('Europe/Madrid')
+    HORA_CHECKIN  = dtime(15, 0)
+    HORA_CHECKOUT = dtime(11, 0)
+
+    ahora_madrid = datetime.now(MADRID_TZ)
+    hoy          = ahora_madrid.date()
+    hora_local   = ahora_madrid.time().replace(tzinfo=None)
+
+    try:
+        token_beds = get_beds24_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Beds24 auth: {e}"}), 500
+
+    desde = (hoy - timedelta(days=3)).isoformat()
+    hasta = (hoy + timedelta(days=30)).isoformat()
+
+    try:
+        resp = requests.get(
+            f"{BEDS24_API_BASE}/bookings",
+            headers={"token": token_beds, "accept": "application/json"},
+            params={"propertyId": BEDS24_PROPERTY_ID,
+                    "arrivalFrom": desde, "arrivalTo": hasta},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        bookings = resp.json().get("data", [])
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error Beds24: {e}"}), 500
+
+    ejemplos = {"sin_parte": None, "parte_enviado": None, "check_in_ok": None}
+
+    for b in bookings:
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
+        if all(v is not None for v in ejemplos.values()):
+            break
+
+        arrival   = b.get("arrival", "")
+        departure = b.get("departure", "")
+        room_id   = str(b.get("roomId", ""))
+        api_ref   = b.get("apiReference", "")
+
+        if not arrival or not departure or not api_ref:
+            continue
+
+        try:
+            arrival_date   = date.fromisoformat(arrival)
+            departure_date = date.fromisoformat(departure)
+        except ValueError:
+            continue
+
+        # Ignorar estancias ya finalizadas
+        if hoy > departure_date or (hoy == departure_date and hora_local >= HORA_CHECKOUT):
+            continue
+
+        cfg   = ROOM_CONFIG.get(room_id, {})
+        parte = None  # solo consultamos RPV si es necesario
+
+        def info(estado_label, parte_ok):
+            return {
+                "referencia":    api_ref,
+                "habitacion":    cfg.get("nombre", room_id),
+                "arrival":       arrival,
+                "departure":     departure,
+                "parte_enviado": parte_ok,
+                "descripcion":   {
+                    "sin_parte":    "Parte NO enviado — web mostrará enlace RPV",
+                    "parte_enviado":"Parte enviado pero aún no es hora de check-in — web mostrará mensaje de espera",
+                    "check_in_ok": "Parte enviado y hora de check-in alcanzada — web mostrará bienvenida + PIN",
+                }.get(estado_label, ""),
+            }
+
+        # ── Huésped ya alojado (antes del check-out) → check_in_ok seguro ──
+        if hoy > arrival_date:
+            if ejemplos["check_in_ok"] is None:
+                ejemplos["check_in_ok"] = info("check_in_ok", True)
+            continue
+
+        # ── Arrivals futuros o de hoy: consultar RPV ──
+        parte = parte_recibido_para(room_id, arrival)
+
+        es_antes_de_check_in = (hoy < arrival_date) or (hoy == arrival_date and hora_local < HORA_CHECKIN)
+
+        if parte and not es_antes_de_check_in:
+            # Parte enviado + hora OK → check_in_ok
+            if ejemplos["check_in_ok"] is None:
+                ejemplos["check_in_ok"] = info("check_in_ok", True)
+        elif parte and es_antes_de_check_in:
+            # Parte enviado pero demasiado pronto → parte_enviado
+            if ejemplos["parte_enviado"] is None:
+                ejemplos["parte_enviado"] = info("parte_enviado", True)
+        else:
+            # Sin parte → sin_parte
+            if ejemplos["sin_parte"] is None:
+                ejemplos["sin_parte"] = info("sin_parte", False)
+
+    encontrados = {k: v for k, v in ejemplos.items() if v is not None}
+    no_encontrados = [k for k, v in ejemplos.items() if v is None]
+
+    return jsonify({
+        "ok":            True,
+        "hora_local":    ahora_madrid.strftime("%Y-%m-%d %H:%M:%S (Europe/Madrid)"),
+        "nota":          "Introduce el campo 'referencia' en alc-homes-checkin.web.app para probar cada estado",
+        "ejemplos":      encontrados,
+        "no_disponibles": no_encontrados or None,
+    })
+
+
 TEST_PAGE = """<!DOCTYPE html>
 <html lang="es">
 <head>
