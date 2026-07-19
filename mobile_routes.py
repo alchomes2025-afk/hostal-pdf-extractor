@@ -141,7 +141,10 @@ def mobile_calendar():
         )
         cal_data = cal_resp.json()
         overrides = {}
-        for room_entry in ((cal_data.get("data") or {}).get("data") or []):
+        cal_rooms = cal_data.get("data") or []
+        if isinstance(cal_rooms, dict):
+            cal_rooms = cal_rooms.get("data") or []
+        for room_entry in cal_rooms:
             for day in (room_entry.get("calendar") or []):
                 d = day.get("date")
                 if d:
