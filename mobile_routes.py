@@ -1,21 +1,23 @@
 """
-mobile_routes.py
------------------
-Blueprint de Flask con las rutas para la app móvil de gestión de
-precios/disponibilidad. Totalmente aislado del resto de app.py:
-solo hace falta importarlo y registrarlo (ver instrucciones al final).
+mobile_routes.py  v2
+--------------------
+Blueprint Flask para la app móvil de gestión de Beds24.
+Endpoints:
+  GET  /mobile/login          - valida PIN
+  GET  /mobile/rooms          - lista habitaciones
+  GET  /mobile/calendar       - reservas + overrides de precio del mes
+  POST /mobile/update         - actualiza precio/disponibilidad de un día
+  GET|POST /mobile/setup-token - canjea invite code por refresh token (setup)
 
-Reutiliza las variables de entorno que YA tienes configuradas en Render:
-  - BEDS24_REFRESH_TOKEN
-  - BEDS24_PROPERTY_ID
-
-Añade UNA variable de entorno nueva en Render:
-  - MOBILE_APP_PIN   (ej. "4821", el PIN de 4 dígitos que tú elijas)
+Variables de entorno necesarias en Render:
+  MOBILE_BEDS24_TOKEN  -> refresh token con scopes read/write inventory + bookings
+  MOBILE_APP_PIN       -> PIN numérico de 4 dígitos para proteger la app
 """
 
 import os
 import time
 import requests
+from datetime import datetime, date, timedelta
 from flask import Blueprint, request, jsonify
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
@@ -25,14 +27,15 @@ BEDS24_REFRESH_TOKEN = os.environ.get("MOBILE_BEDS24_TOKEN") or os.environ.get("
 MOBILE_APP_PIN = os.environ.get("MOBILE_APP_PIN")
 
 ROOMS = [
-    {"id": 702395, "name": "Deluxe Room"},
-    {"id": 702396, "name": "Double Room"},
-    {"id": 702397, "name": "Standard Queen Room"},
-    {"id": 702398, "name": "Superior Queen Room"},
-    {"id": 702399, "name": "Queen Room"},
+    {"id": 702395, "name": "Deluxe"},
+    {"id": 702396, "name": "Doble"},
+    {"id": 702397, "name": "Std Queen"},
+    {"id": 702398, "name": "Sup Queen"},
+    {"id": 702399, "name": "Queen"},
 ]
+PROPERTY_ID = int(os.environ.get("BEDS24_PROPERTY_ID", "339751"))
 
-# --- Caché simple del access token en memoria del proceso -----------------
+# --- Caché de access token ------------------------------------------------
 _token_cache = {"token": None, "expires_at": 0}
 
 
@@ -40,7 +43,6 @@ def get_access_token():
     now = time.time()
     if _token_cache["token"] and now < _token_cache["expires_at"]:
         return _token_cache["token"]
-
     resp = requests.get(
         f"{BEDS24_API}/authentication/token",
         headers={"accept": "application/json", "refreshToken": BEDS24_REFRESH_TOKEN},
@@ -54,17 +56,19 @@ def get_access_token():
 
 
 def check_pin():
-    pin = request.headers.get("x-app-pin") or (request.json or {}).get("pin") if request.is_json else None
-    if pin is None:
-        pin = request.args.get("pin")
+    pin = (
+        request.headers.get("x-app-pin")
+        or request.args.get("pin")
+        or (request.get_json(silent=True) or {}).get("pin")
+    )
     if not MOBILE_APP_PIN:
         return False
     return str(pin) == str(MOBILE_APP_PIN)
 
 
-# --- Endpoints --------------------------------------------------------------
+# --- Endpoints ------------------------------------------------------------
 
-@mobile_bp.route("/login", methods=["POST"])
+@mobile_bp.route("/login", methods=["POST", "GET"])
 def mobile_login():
     if check_pin():
         return jsonify({"ok": True})
@@ -80,33 +84,93 @@ def mobile_rooms():
 
 @mobile_bp.route("/calendar", methods=["GET"])
 def mobile_calendar():
+    """
+    Devuelve para un roomId y mes (YYYY-MM):
+      - bookings: lista de reservas con arrival, departure, guestName
+      - prices: dict { "2026-08-01": { price1, price2, price3, numAvail } }
+    """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
     room_id = request.args.get("roomId")
-    date_from = request.args.get("from")
-    date_to = request.args.get("to")
-    if not (room_id and date_from and date_to):
-        return jsonify({"ok": False, "error": "Faltan parámetros roomId, from o to"}), 400
+    month = request.args.get("month")  # YYYY-MM
+    if not room_id or not month:
+        return jsonify({"ok": False, "error": "Faltan roomId o month"}), 400
+
+    try:
+        year, mon = int(month.split("-")[0]), int(month.split("-")[1])
+    except Exception:
+        return jsonify({"ok": False, "error": "month debe ser YYYY-MM"}), 400
+
+    date_from = f"{year}-{mon:02d}-01"
+    last_day = (date(year, mon, 1).replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    date_to = last_day.strftime("%Y-%m-%d")
 
     try:
         token = get_access_token()
-        resp = requests.get(
-            f"{BEDS24_API}/inventory/rooms/calendar",
-            params={"roomId": room_id, "startDate": date_from, "endDate": date_to, "includeAllDates": "true"},
+
+        # 1. Reservas del mes para esta habitación
+        bookings_resp = requests.get(
+            f"{BEDS24_API}/bookings",
+            params={
+                "roomId": room_id,
+                "arrivalFrom": date_from,
+                "arrivalTo": date_to,
+                "status": "confirmed",
+            },
             headers={"accept": "application/json", "token": token},
             timeout=20,
         )
-        data = resp.json()
-        if not resp.ok:
-            return jsonify({"ok": False, "error": data}), resp.status_code
-        return jsonify({"ok": True, "data": data})
+        bookings_data = bookings_resp.json()
+        bookings = []
+        for b in (bookings_data.get("data") or []):
+            bookings.append({
+                "arrival": b.get("arrival"),
+                "departure": b.get("departure"),
+                "guestName": b.get("guestFirstName", "") + " " + b.get("guestName", ""),
+                "status": b.get("status"),
+            })
+
+        # 2. Overrides de precio/disponibilidad del mes
+        cal_resp = requests.get(
+            f"{BEDS24_API}/inventory/rooms/calendar",
+            params={"roomId": room_id, "startDate": date_from, "endDate": date_to},
+            headers={"accept": "application/json", "token": token},
+            timeout=20,
+        )
+        cal_data = cal_resp.json()
+        prices = {}
+        for room_entry in (cal_data.get("data") or []):
+            for day in (room_entry.get("calendar") or []):
+                d = day.get("date")
+                if d:
+                    prices[d] = {
+                        "price1": day.get("price1"),
+                        "price2": day.get("price2"),
+                        "price3": day.get("price3"),
+                        "numAvail": day.get("numAvail"),
+                    }
+
+        return jsonify({"ok": True, "bookings": bookings, "prices": prices})
+
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @mobile_bp.route("/update", methods=["POST"])
 def mobile_update():
+    """
+    Body JSON:
+    {
+      "roomId": 702395,
+      "from": "2026-08-10",
+      "to": "2026-08-10",
+      "price1": 140,       (opcional)
+      "price2": 120,       (opcional)
+      "price3": 100,       (opcional)
+      "numAvail": 0        (opcional: 0=bloqueado, 1=disponible)
+    }
+    """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
@@ -114,30 +178,24 @@ def mobile_update():
     room_id = body.get("roomId")
     date_from = body.get("from")
     date_to = body.get("to")
-    price1 = body.get("price1")
-    num_avail = body.get("numAvail")
 
     if not (room_id and date_from and date_to):
-        return jsonify({"ok": False, "error": "Faltan parámetros roomId, from o to"}), 400
-    if price1 is None and num_avail is None:
-        return jsonify({"ok": False, "error": "Debes enviar price1 y/o numAvail"}), 400
+        return jsonify({"ok": False, "error": "Faltan roomId, from o to"}), 400
 
-    calendar_entry = {"from": date_from, "to": date_to}
-    if price1 is not None:
-        calendar_entry["price1"] = float(price1)
-    if num_avail is not None:
-        calendar_entry["numAvail"] = int(num_avail)
+    entry = {"from": date_from, "to": date_to}
+    for field in ["price1", "price2", "price3", "numAvail"]:
+        if body.get(field) is not None:
+            entry[field] = float(body[field]) if field.startswith("price") else int(body[field])
+
+    if len(entry) == 2:
+        return jsonify({"ok": False, "error": "Debes enviar al menos un campo a actualizar"}), 400
 
     try:
         token = get_access_token()
         resp = requests.post(
             f"{BEDS24_API}/inventory/rooms/calendar",
-            json=[{"roomId": int(room_id), "calendar": [calendar_entry]}],
-            headers={
-                "content-type": "application/json",
-                "accept": "application/json",
-                "token": token,
-            },
+            json=[{"roomId": int(room_id), "calendar": [entry]}],
+            headers={"content-type": "application/json", "accept": "application/json", "token": token},
             timeout=20,
         )
         data = resp.json()
@@ -150,7 +208,7 @@ def mobile_update():
 
 @mobile_bp.route("/setup-token", methods=["GET", "POST"])
 def setup_token():
-    """Endpoint temporal para canjear un invite code de Beds24 por un refresh token real."""
+    """Canjea un invite code de Beds24 por un refresh token permanente."""
     if request.method == "POST":
         code = request.form.get("code", "").strip()
         try:
@@ -166,8 +224,7 @@ def setup_token():
 <html><body style="font-family:sans-serif;padding:20px">
 <h2>Canjear Invite Code de Beds24</h2>
 <form method="POST">
-  <label>Pega el invite code aquí:</label><br><br>
-  <textarea name="code" rows="5" cols="60" style="font-size:13px"></textarea><br><br>
-  <button type="submit" style="padding:10px 20px;font-size:16px">Canjear → obtener Refresh Token</button>
-</form>
-</body></html>"""
+  <label>Pega el invite code:</label><br><br>
+  <textarea name="code" rows="5" cols="60"></textarea><br><br>
+  <button type="submit" style="padding:10px 20px">Canjear</button>
+</form></body></html>"""
