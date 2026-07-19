@@ -310,12 +310,13 @@ async function loadCalendar() {
   $("#status-bar").textContent = "Cargando...";
   try {
     const res = await fetch(
-      `${API_BASE}/calendar?roomId=${CURRENT_ROOM.id}&from=${from}&to=${to}`,
+      `${API_BASE}/calendar?roomId=${CURRENT_ROOM.id}&from=${from}&to=${to}&includeAllDates=true`,
       { headers: { "x-app-pin": PIN } }
     );
     const data = await res.json();
     CALENDAR_DATA = {};
-    (data.data || []).forEach((entry) => {
+    const roomsData = (data.data && data.data.data) ? data.data.data : [];
+    roomsData.forEach((entry) => {
       (entry.calendar || []).forEach((day) => {
         CALENDAR_DATA[day.date] = day;
       });
