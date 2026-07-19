@@ -1,17 +1,11 @@
 """
-mobile_routes.py  v2
+mobile_routes.py  v3
 --------------------
 Blueprint Flask para la app móvil de gestión de Beds24.
-Endpoints:
-  GET  /mobile/login          - valida PIN
-  GET  /mobile/rooms          - lista habitaciones
-  GET  /mobile/calendar       - reservas + overrides de precio del mes
-  POST /mobile/update         - actualiza precio/disponibilidad de un día
-  GET|POST /mobile/setup-token - canjea invite code por refresh token (setup)
 
-Variables de entorno necesarias en Render:
+Variables de entorno en Render:
   MOBILE_BEDS24_TOKEN  -> refresh token con scopes read/write inventory + bookings
-  MOBILE_APP_PIN       -> PIN numérico de 4 dígitos para proteger la app
+  MOBILE_APP_PIN       -> PIN numérico de 4 dígitos
 """
 
 import os
@@ -35,7 +29,16 @@ ROOMS = [
 ]
 PROPERTY_ID = int(os.environ.get("BEDS24_PROPERTY_ID", "339751"))
 
-# --- Caché de access token ------------------------------------------------
+# Precios base por defecto por habitación (los que vemos en Booking.com UI)
+# Se usan cuando no hay override en el calendario de Beds24
+BASE_PRICES = {
+    702395: {"price1": 140.0, "price2": 133.0, "price3": 112.0},  # Deluxe
+    702396: {"price1": 120.0, "price2": 114.0, "price3":  96.0},  # Doble
+    702397: {"price1":  75.0, "price2":  71.25,"price3":  60.0},  # Std Queen
+    702398: {"price1":  85.0, "price2":  80.75,"price3":  68.0},  # Sup Queen
+    702399: {"price1":  75.0, "price2":  71.25,"price3":  60.0},  # Queen
+}
+
 _token_cache = {"token": None, "expires_at": 0}
 
 
@@ -66,8 +69,6 @@ def check_pin():
     return str(pin) == str(MOBILE_APP_PIN)
 
 
-# --- Endpoints ------------------------------------------------------------
-
 @mobile_bp.route("/login", methods=["POST", "GET"])
 def mobile_login():
     if check_pin():
@@ -84,16 +85,11 @@ def mobile_rooms():
 
 @mobile_bp.route("/calendar", methods=["GET"])
 def mobile_calendar():
-    """
-    Devuelve para un roomId y mes (YYYY-MM):
-      - bookings: lista de reservas con arrival, departure, guestName
-      - prices: dict { "2026-08-01": { price1, price2, price3, numAvail } }
-    """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
     room_id = request.args.get("roomId")
-    month = request.args.get("month")  # YYYY-MM
+    month = request.args.get("month")
     if not room_id or not month:
         return jsonify({"ok": False, "error": "Faltan roomId o month"}), 400
 
@@ -109,7 +105,7 @@ def mobile_calendar():
     try:
         token = get_access_token()
 
-        # 1. Reservas del mes para esta habitación
+        # Reservas del mes
         bookings_resp = requests.get(
             f"{BEDS24_API}/bookings",
             params={
@@ -117,6 +113,7 @@ def mobile_calendar():
                 "arrivalFrom": date_from,
                 "arrivalTo": date_to,
                 "status": "confirmed",
+                "includePersonalInfo": "true",
             },
             headers={"accept": "application/json", "token": token},
             timeout=20,
@@ -124,14 +121,18 @@ def mobile_calendar():
         bookings_data = bookings_resp.json()
         bookings = []
         for b in (bookings_data.get("data") or []):
+            guest = b.get("guest") or {}
+            first = guest.get("firstName") or b.get("guestFirstName") or b.get("firstName") or ""
+            last = guest.get("lastName") or b.get("guestLastName") or b.get("lastName") or ""
+            name = f"{first} {last}".strip() or b.get("guestName", "Huésped")
             bookings.append({
                 "arrival": b.get("arrival"),
                 "departure": b.get("departure"),
-                "guestName": b.get("guestFirstName", "") + " " + b.get("guestName", ""),
+                "guestName": name,
                 "status": b.get("status"),
             })
 
-        # 2. Overrides de precio/disponibilidad del mes
+        # Overrides de precio del calendario
         cal_resp = requests.get(
             f"{BEDS24_API}/inventory/rooms/calendar",
             params={"roomId": room_id, "startDate": date_from, "endDate": date_to},
@@ -139,17 +140,33 @@ def mobile_calendar():
             timeout=20,
         )
         cal_data = cal_resp.json()
-        prices = {}
-        for room_entry in (cal_data.get("data") or []):
+        overrides = {}
+        for room_entry in ((cal_data.get("data") or {}).get("data") or []):
             for day in (room_entry.get("calendar") or []):
                 d = day.get("date")
                 if d:
-                    prices[d] = {
+                    overrides[d] = {
                         "price1": day.get("price1"),
                         "price2": day.get("price2"),
                         "price3": day.get("price3"),
                         "numAvail": day.get("numAvail"),
                     }
+
+        # Construir precios por día: base + overrides
+        base = BASE_PRICES.get(int(room_id), {})
+        prices = {}
+        current = date(year, mon, 1)
+        while current <= last_day:
+            ds = current.strftime("%Y-%m-%d")
+            ov = overrides.get(ds, {})
+            prices[ds] = {
+                "price1": ov.get("price1") if ov.get("price1") is not None else base.get("price1"),
+                "price2": ov.get("price2") if ov.get("price2") is not None else base.get("price2"),
+                "price3": ov.get("price3") if ov.get("price3") is not None else base.get("price3"),
+                "numAvail": ov.get("numAvail"),
+                "isOverride": bool(ov),
+            }
+            current += timedelta(days=1)
 
         return jsonify({"ok": True, "bookings": bookings, "prices": prices})
 
@@ -159,18 +176,6 @@ def mobile_calendar():
 
 @mobile_bp.route("/update", methods=["POST"])
 def mobile_update():
-    """
-    Body JSON:
-    {
-      "roomId": 702395,
-      "from": "2026-08-10",
-      "to": "2026-08-10",
-      "price1": 140,       (opcional)
-      "price2": 120,       (opcional)
-      "price3": 100,       (opcional)
-      "numAvail": 0        (opcional: 0=bloqueado, 1=disponible)
-    }
-    """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
@@ -208,7 +213,6 @@ def mobile_update():
 
 @mobile_bp.route("/setup-token", methods=["GET", "POST"])
 def setup_token():
-    """Canjea un invite code de Beds24 por un refresh token permanente."""
     if request.method == "POST":
         code = request.form.get("code", "").strip()
         try:
