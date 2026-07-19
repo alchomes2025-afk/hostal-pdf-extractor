@@ -93,7 +93,7 @@ def mobile_calendar():
         token = get_access_token()
         resp = requests.get(
             f"{BEDS24_API}/inventory/rooms/calendar",
-            params={"roomId": room_id, "startDate": date_from, "endDate": date_to},
+            params={"roomId": room_id, "startDate": date_from, "endDate": date_to, "includeAllDates": "true"},
             headers={"accept": "application/json", "token": token},
             timeout=20,
         )
