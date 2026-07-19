@@ -1,450 +1,324 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>Alc Homes · Gestión</title>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+<title>Alc Homes</title>
 <style>
-  :root {
-    --bg: #f7f5f1;
-    --card: #ffffff;
-    --ink: #1f2937;
-    --muted: #6b7280;
-    --accent: #c27b54;
-    --accent-dark: #a8623f;
-    --ok: #2f8f5b;
-    --blocked: #c0392b;
-    --border: #e6e1d8;
-  }
-  * { box-sizing: border-box; }
-  html, body {
-    margin: 0; padding: 0;
-    background: var(--bg);
-    color: var(--ink);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    -webkit-tap-highlight-color: transparent;
-  }
-  #app { max-width: 480px; margin: 0 auto; min-height: 100vh; padding-bottom: 40px; }
+:root{--bg:#f7f5f1;--card:#fff;--ink:#1f2937;--muted:#6b7280;--accent:#c27b54;--ok:#2f8f5b;--blocked:#c0392b;--booked:#2563eb;--border:#e6e1d8}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+#app{max-width:480px;margin:0 auto;min-height:100vh;padding-bottom:60px}
 
-  header {
-    padding: 20px 16px 12px;
-    display: flex; align-items: center; justify-content: space-between;
-  }
-  header h1 { font-size: 18px; margin: 0; font-weight: 700; }
-  header .sub { font-size: 12px; color: var(--muted); }
+/* LOGIN */
+#login-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:24px}
+#login-screen h1{font-size:24px;margin-bottom:4px}
+#login-screen p{color:var(--muted);margin:0 0 28px;font-size:14px}
+#pin-dots{display:flex;gap:14px;margin-bottom:28px}
+.pin-dot{width:14px;height:14px;border-radius:50%;border:2px solid var(--border);background:transparent}
+.pin-dot.filled{background:var(--accent);border-color:var(--accent)}
+#keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;width:100%;max-width:280px}
+.key{background:var(--card);border:1px solid var(--border);border-radius:14px;font-size:22px;padding:18px 0;text-align:center;color:var(--ink);cursor:pointer}
+.key:active{background:#efece5}
+.key.wide{font-size:14px;color:var(--muted)}
+#login-error{color:var(--blocked);font-size:13px;height:18px;margin-top:12px}
 
-  /* --- Login PIN --- */
-  #login-screen {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    min-height: 100vh; padding: 24px;
-  }
-  #login-screen h1 { font-size: 22px; margin-bottom: 4px; }
-  #login-screen p { color: var(--muted); margin-top: 0; margin-bottom: 24px; font-size: 14px; }
-  #pin-dots { display: flex; gap: 12px; margin-bottom: 24px; }
-  .pin-dot {
-    width: 14px; height: 14px; border-radius: 50%;
-    border: 2px solid var(--border); background: transparent;
-  }
-  .pin-dot.filled { background: var(--accent); border-color: var(--accent); }
-  #keypad {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; width: 100%; max-width: 280px;
-  }
-  .key {
-    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
-    font-size: 22px; padding: 18px 0; text-align: center; color: var(--ink);
-  }
-  .key:active { background: #efece5; }
-  .key.wide { grid-column: span 1; font-size: 14px; color: var(--muted); }
-  #login-error { color: var(--blocked); font-size: 13px; height: 18px; margin-top: 12px; }
+/* MAIN */
+header{padding:16px 16px 8px;display:flex;align-items:center;justify-content:space-between}
+header h1{font-size:17px;margin:0;font-weight:700}
+#room-tabs{display:flex;gap:8px;overflow-x:auto;padding:0 16px 10px;scrollbar-width:none}
+#room-tabs::-webkit-scrollbar{display:none}
+.room-tab{flex:0 0 auto;padding:7px 13px;border-radius:999px;background:var(--card);border:1px solid var(--border);font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer}
+.room-tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 
-  /* --- Room selector --- */
-  #room-tabs {
-    display: flex; gap: 8px; overflow-x: auto; padding: 4px 16px 12px;
-  }
-  .room-tab {
-    flex: 0 0 auto; padding: 8px 14px; border-radius: 999px;
-    background: var(--card); border: 1px solid var(--border);
-    font-size: 13px; color: var(--muted); white-space: nowrap;
-  }
-  .room-tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+/* MONTH NAV */
+#month-nav{display:flex;align-items:center;justify-content:space-between;padding:4px 16px 8px}
+#month-nav button{background:var(--card);border:1px solid var(--border);border-radius:10px;width:36px;height:36px;font-size:18px;color:var(--ink);cursor:pointer}
+#month-label{font-size:15px;font-weight:600}
 
-  /* --- Calendar --- */
-  #month-nav {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 4px 16px 8px;
-  }
-  #month-nav button {
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    width: 36px; height: 36px; font-size: 16px; color: var(--ink);
-  }
-  #month-label { font-size: 15px; font-weight: 600; }
+/* CALENDAR */
+#calendar-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:0 12px}
+.dow{text-align:center;font-size:10px;color:var(--muted);padding-bottom:3px}
+.day-cell{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 2px;text-align:center;min-height:52px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:1px;cursor:pointer;position:relative}
+.day-cell.empty{background:transparent;border:none;pointer-events:none}
+.day-cell .dnum{font-size:11px;color:var(--muted);font-weight:600}
+.day-cell .guest{font-size:9px;color:var(--booked);font-weight:600;line-height:1.1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 2px}
+.day-cell .price-row{font-size:9px;color:var(--ok);font-weight:700}
+.day-cell.booked{border-color:var(--booked);background:#eff6ff}
+.day-cell.blocked{border-color:var(--blocked);background:#fbecea}
+.day-cell.has-override{border-color:var(--accent)}
+.day-cell.today .dnum{background:var(--accent);color:#fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;margin:0 auto}
 
-  #calendar-grid {
-    display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px;
-    padding: 0 16px;
-  }
-  .dow { text-align: center; font-size: 11px; color: var(--muted); padding-bottom: 4px; }
-  .day-cell {
-    background: var(--card); border: 1px solid var(--border); border-radius: 10px;
-    padding: 6px 2px; text-align: center; min-height: 56px;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 2px;
-  }
-  .day-cell.empty { background: transparent; border: none; }
-  .day-cell .num { font-size: 12px; color: var(--muted); }
-  .day-cell .price { font-size: 12px; font-weight: 700; }
-  .day-cell.available { border-color: var(--ok); }
-  .day-cell.available .price { color: var(--ok); }
-  .day-cell.blocked { border-color: var(--blocked); background: #fbecea; }
-  .day-cell.blocked .price { color: var(--blocked); }
-  .day-cell.selected { outline: 2px solid var(--accent); }
+/* LEGEND */
+#legend{display:flex;gap:12px;padding:8px 16px;flex-wrap:wrap}
+.leg{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.leg-dot{width:10px;height:10px;border-radius:3px}
 
-  #status-bar {
-    padding: 10px 16px; font-size: 12px; color: var(--muted); text-align: center;
-  }
+/* STATUS */
+#status-bar{padding:6px 16px;font-size:12px;color:var(--muted);text-align:center}
 
-  /* --- Bottom sheet edit panel --- */
-  #edit-panel {
-    position: fixed; left: 0; right: 0; bottom: 0;
-    background: var(--card); border-radius: 20px 20px 0 0;
-    box-shadow: 0 -6px 24px rgba(0,0,0,0.12);
-    padding: 18px 20px 28px; max-width: 480px; margin: 0 auto;
-    transform: translateY(110%); transition: transform 0.25s ease;
-  }
-  #edit-panel.open { transform: translateY(0); }
-  #edit-panel h2 { font-size: 15px; margin: 0 0 14px; }
-  .field-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .field-row label { font-size: 14px; color: var(--muted); }
-  .field-row input[type=number] {
-    width: 110px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
-    font-size: 16px; text-align: right;
-  }
-  .toggle-row { display: flex; gap: 8px; }
-  .toggle-btn {
-    flex: 1; padding: 10px 0; border-radius: 10px; border: 1px solid var(--border);
-    background: var(--card); font-size: 13px; color: var(--muted);
-  }
-  .toggle-btn.active.open { background: var(--ok); color: white; border-color: var(--ok); }
-  .toggle-btn.active.blocked { background: var(--blocked); color: white; border-color: var(--blocked); }
-  #edit-actions { display: flex; gap: 10px; margin-top: 16px; }
-  #edit-actions button {
-    flex: 1; padding: 12px 0; border-radius: 12px; border: none; font-size: 14px; font-weight: 600;
-  }
-  #save-btn { background: var(--accent); color: white; }
-  #cancel-btn { background: #f1efe9; color: var(--muted); }
-  #overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.25);
-    opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
-  }
-  #overlay.open { opacity: 1; pointer-events: auto; }
+/* EDIT PANEL */
+#overlay{position:fixed;inset:0;background:rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s;z-index:10}
+#overlay.open{opacity:1;pointer-events:auto}
+#edit-panel{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-radius:20px 20px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.12);padding:18px 20px 32px;max-width:480px;margin:0 auto;transform:translateY(110%);transition:transform .25s ease;z-index:11}
+#edit-panel.open{transform:translateY(0)}
+#edit-panel h2{font-size:15px;margin:0 0 14px;font-weight:700}
+.field-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.field-row label{font-size:13px;color:var(--muted)}
+.field-row input[type=number]{width:100px;padding:7px 10px;border-radius:10px;border:1px solid var(--border);font-size:15px;text-align:right}
+.toggle-row{display:flex;gap:8px;margin-bottom:14px}
+.toggle-btn{flex:1;padding:10px 0;border-radius:10px;border:1px solid var(--border);background:var(--card);font-size:13px;color:var(--muted);cursor:pointer}
+.toggle-btn.sel-open{background:var(--ok);color:#fff;border-color:var(--ok)}
+.toggle-btn.sel-blocked{background:var(--blocked);color:#fff;border-color:var(--blocked)}
+#edit-actions{display:flex;gap:10px;margin-top:4px}
+#edit-actions button{flex:1;padding:12px 0;border-radius:12px;border:none;font-size:14px;font-weight:600;cursor:pointer}
+#save-btn{background:var(--accent);color:#fff}
+#cancel-btn{background:#f1efe9;color:var(--muted)}
 </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- LOGIN -->
-  <div id="login-screen">
-    <h1>Alc Homes</h1>
-    <p>Introduce tu PIN</p>
-    <div id="pin-dots"></div>
-    <div id="keypad"></div>
-    <div id="login-error"></div>
-  </div>
-
-  <!-- MAIN (oculto hasta login) -->
-  <div id="main-screen" style="display:none;">
-    <header>
-      <div>
-        <h1>Alc Homes</h1>
-        <div class="sub">Calendario y precios</div>
-      </div>
-    </header>
-
-    <div id="room-tabs"></div>
-
-    <div id="month-nav">
-      <button id="prev-month">‹</button>
-      <div id="month-label"></div>
-      <button id="next-month">›</button>
-    </div>
-
-    <div id="calendar-grid"></div>
-    <div id="status-bar">Toca un día para editar precio o disponibilidad</div>
-  </div>
-
-  <div id="overlay"></div>
-  <div id="edit-panel">
-    <h2 id="edit-date-label">Fecha</h2>
-    <div class="field-row">
-      <label>Precio (€)</label>
-      <input type="number" id="edit-price" inputmode="numeric" />
-    </div>
-    <div class="field-row">
-      <label>Disponibilidad</label>
-      <div class="toggle-row">
-        <button class="toggle-btn open" id="btn-open">Abierto</button>
-        <button class="toggle-btn blocked" id="btn-blocked">Bloqueado</button>
-      </div>
-    </div>
-    <div id="edit-actions">
-      <button id="cancel-btn">Cancelar</button>
-      <button id="save-btn">Guardar</button>
-    </div>
-  </div>
-
+<!-- LOGIN -->
+<div id="login-screen">
+  <h1>Alc Homes</h1>
+  <p>Introduce tu PIN</p>
+  <div id="pin-dots"></div>
+  <div id="keypad"></div>
+  <div id="login-error"></div>
 </div>
 
+<!-- MAIN -->
+<div id="main-screen" style="display:none">
+  <header>
+    <h1>Alc Homes · Gestión</h1>
+  </header>
+  <div id="room-tabs"></div>
+  <div id="month-nav">
+    <button id="prev-month">‹</button>
+    <div id="month-label"></div>
+    <button id="next-month">›</button>
+  </div>
+  <div id="calendar-grid"></div>
+  <div id="legend">
+    <div class="leg"><div class="leg-dot" style="background:var(--booked)"></div>Reservado</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--blocked)"></div>Bloqueado</div>
+    <div class="leg"><div class="leg-dot" style="background:var(--accent)"></div>Precio editado</div>
+  </div>
+  <div id="status-bar">Toca un día para editar</div>
+</div>
+
+<div id="overlay"></div>
+<div id="edit-panel">
+  <h2 id="edit-date-label"></h2>
+  <div class="toggle-row">
+    <button class="toggle-btn" id="btn-open">✓ Disponible</button>
+    <button class="toggle-btn" id="btn-blocked">✗ Bloqueado</button>
+  </div>
+  <div class="field-row"><label>Tarifa Normal (€)</label><input type="number" id="ep1" inputmode="numeric"/></div>
+  <div class="field-row"><label>No Reembolsable (€)</label><input type="number" id="ep2" inputmode="numeric"/></div>
+  <div class="field-row"><label>Tarifa Semanal (€)</label><input type="number" id="ep3" inputmode="numeric"/></div>
+  <div id="edit-actions">
+    <button id="cancel-btn">Cancelar</button>
+    <button id="save-btn">Guardar</button>
+  </div>
+</div>
+
+</div>
 <script>
-/**
- * Backend: rutas del blueprint mobile_routes.py en tu Flask de Render.
- */
 const API_BASE = "https://hostal-pdf-extractor.onrender.com/mobile";
 
-let PIN = "";
-let ROOMS = [];
-let CURRENT_ROOM = null;
+let PIN = "", ROOMS = [], CURRENT_ROOM = null;
 let CURRENT_MONTH = new Date();
-let CALENDAR_DATA = {}; // { "2026-08-01": { price1, numAvail } }
-let SELECTED_DATE = null;
+let BOOKINGS = [], PRICES = {};
+let SELECTED_DATE = null, EDIT_AVAIL = 1;
 
-const $ = (sel) => document.querySelector(sel);
+const $ = s => document.querySelector(s);
 
-// ---------- LOGIN ----------
-function renderKeypad() {
-  const keys = ["1","2","3","4","5","6","7","8","9","borrar","0","ok"];
-  const keypad = $("#keypad");
-  keypad.innerHTML = "";
-  keys.forEach((k) => {
-    const btn = document.createElement("button");
-    btn.className = "key" + (isNaN(parseInt(k)) ? " wide" : "");
-    btn.textContent = k === "borrar" ? "⌫" : k === "ok" ? "OK" : k;
-    btn.onclick = () => handleKey(k);
-    keypad.appendChild(btn);
+// ---- LOGIN ----
+function renderDots(){
+  $("#pin-dots").innerHTML="";
+  for(let i=0;i<4;i++){
+    const d=document.createElement("div");
+    d.className="pin-dot"+(i<PIN.length?" filled":"");
+    $("#pin-dots").appendChild(d);
+  }
+}
+function renderKeypad(){
+  const keys=["1","2","3","4","5","6","7","8","9","⌫","0","OK"];
+  $("#keypad").innerHTML="";
+  keys.forEach(k=>{
+    const b=document.createElement("button");
+    b.className="key"+( k==="⌫"||k==="OK"?" wide":"");
+    b.textContent=k;
+    b.onclick=()=>handleKey(k);
+    $("#keypad").appendChild(b);
   });
 }
-
-function renderPinDots() {
-  const dots = $("#pin-dots");
-  dots.innerHTML = "";
-  for (let i = 0; i < 4; i++) {
-    const d = document.createElement("div");
-    d.className = "pin-dot" + (i < PIN.length ? " filled" : "");
-    dots.appendChild(d);
-  }
+async function handleKey(k){
+  if(k==="⌫"){PIN=PIN.slice(0,-1);}
+  else if(k==="OK"){await tryLogin();return;}
+  else if(PIN.length<4){PIN+=k;}
+  renderDots();
+  if(PIN.length===4) await tryLogin();
 }
-
-async function handleKey(k) {
-  if (k === "borrar") {
-    PIN = PIN.slice(0, -1);
-  } else if (k === "ok") {
-    await tryLogin();
-    return;
-  } else if (PIN.length < 4) {
-    PIN += k;
-  }
-  renderPinDots();
-  if (PIN.length === 4) await tryLogin();
-}
-
-async function tryLogin() {
-  $("#login-error").textContent = "";
-  try {
-    const res = await fetch(`${API_BASE}/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ pin: PIN }),
+async function tryLogin(){
+  $("#login-error").textContent="";
+  try{
+    const r=await fetch(`${API_BASE}/login`,{
+      method:"POST",
+      headers:{"content-type":"application/json","x-app-pin":PIN},
+      body:JSON.stringify({pin:PIN})
     });
-    const data = await res.json();
-    if (data.ok) {
-      $("#login-screen").style.display = "none";
-      $("#main-screen").style.display = "block";
+    const d=await r.json();
+    if(d.ok){
+      $("#login-screen").style.display="none";
+      $("#main-screen").style.display="block";
       await loadRooms();
     } else {
-      $("#login-error").textContent = "PIN incorrecto";
-      PIN = "";
-      renderPinDots();
+      $("#login-error").textContent="PIN incorrecto";
+      PIN="";renderDots();
     }
-  } catch (err) {
-    $("#login-error").textContent = "Error de conexión";
-    PIN = "";
-    renderPinDots();
+  }catch(e){
+    $("#login-error").textContent="Error de conexión";
+    PIN="";renderDots();
   }
 }
 
-// ---------- ROOMS ----------
-async function loadRooms() {
-  const res = await fetch(`${API_BASE}/rooms`, { headers: { "x-app-pin": PIN } });
-  const data = await res.json();
-  ROOMS = data.rooms || [];
-  CURRENT_ROOM = ROOMS[0];
+// ---- ROOMS ----
+async function loadRooms(){
+  const r=await fetch(`${API_BASE}/rooms`,{headers:{"x-app-pin":PIN}});
+  const d=await r.json();
+  ROOMS=d.rooms||[];
+  CURRENT_ROOM=ROOMS[0];
   renderRoomTabs();
   await loadCalendar();
 }
-
-function renderRoomTabs() {
-  const wrap = $("#room-tabs");
-  wrap.innerHTML = "";
-  ROOMS.forEach((room) => {
-    const tab = document.createElement("div");
-    tab.className = "room-tab" + (room.id === CURRENT_ROOM.id ? " active" : "");
-    tab.textContent = room.name;
-    tab.onclick = async () => {
-      CURRENT_ROOM = room;
-      renderRoomTabs();
-      await loadCalendar();
-    };
-    wrap.appendChild(tab);
+function renderRoomTabs(){
+  const w=$("#room-tabs");w.innerHTML="";
+  ROOMS.forEach(room=>{
+    const t=document.createElement("div");
+    t.className="room-tab"+(room.id===CURRENT_ROOM.id?" active":"");
+    t.textContent=room.name;
+    t.onclick=async()=>{CURRENT_ROOM=room;renderRoomTabs();await loadCalendar();};
+    w.appendChild(t);
   });
 }
 
-// ---------- CALENDAR ----------
-function monthRange(date) {
-  const from = new Date(date.getFullYear(), date.getMonth(), 1);
-  const to = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  const fmt = (d) => d.toISOString().slice(0, 10);
-  return { from: fmt(from), to: fmt(to) };
-}
+// ---- CALENDAR ----
+function monthStr(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;}
 
-async function loadCalendar() {
-  const { from, to } = monthRange(CURRENT_MONTH);
-  $("#status-bar").textContent = "Cargando...";
-  try {
-    const res = await fetch(
-      `${API_BASE}/calendar?roomId=${CURRENT_ROOM.id}&from=${from}&to=${to}&includeAllDates=true`,
-      { headers: { "x-app-pin": PIN } }
+async function loadCalendar(){
+  $("#status-bar").textContent="Cargando...";
+  const month=monthStr(CURRENT_MONTH);
+  try{
+    const r=await fetch(
+      `${API_BASE}/calendar?roomId=${CURRENT_ROOM.id}&month=${month}&pin=${PIN}`,
+      {headers:{"x-app-pin":PIN}}
     );
-    const data = await res.json();
-    CALENDAR_DATA = {};
-    const roomsData = (data.data && data.data.data) ? data.data.data : [];
-    roomsData.forEach((entry) => {
-      (entry.calendar || []).forEach((day) => {
-        CALENDAR_DATA[day.date] = day;
-      });
-    });
+    const d=await r.json();
+    if(!d.ok){throw new Error(d.error);}
+    BOOKINGS=d.bookings||[];
+    PRICES=d.prices||{};
     renderCalendar();
-    $("#status-bar").textContent = "Toca un día para editar precio o disponibilidad";
-  } catch (err) {
-    $("#status-bar").textContent = "Error al cargar el calendario";
+    $("#status-bar").textContent="Toca un día para editar precio o disponibilidad";
+  }catch(e){
+    $("#status-bar").textContent="Error: "+e.message;
   }
 }
 
-function renderCalendar() {
-  $("#month-label").textContent = CURRENT_MONTH.toLocaleDateString("es-ES", {
-    month: "long",
-    year: "numeric",
+function isBooked(dateStr){
+  return BOOKINGS.some(b=>{
+    if(!b.arrival||!b.departure) return false;
+    return dateStr>=b.arrival && dateStr<b.departure;
   });
+}
+function guestName(dateStr){
+  const b=BOOKINGS.find(b=>b.arrival&&b.departure&&dateStr>=b.arrival&&dateStr<b.departure);
+  return b ? b.guestName.trim().split(" ")[0] : "";
+}
 
-  const grid = $("#calendar-grid");
-  grid.innerHTML = "";
-
-  ["L", "M", "X", "J", "V", "S", "D"].forEach((d) => {
-    const el = document.createElement("div");
-    el.className = "dow";
-    el.textContent = d;
-    grid.appendChild(el);
+function renderCalendar(){
+  const y=CURRENT_MONTH.getFullYear(), m=CURRENT_MONTH.getMonth();
+  $("#month-label").textContent=CURRENT_MONTH.toLocaleDateString("es-ES",{month:"long",year:"numeric"});
+  const grid=$("#calendar-grid");
+  grid.innerHTML="";
+  ["L","M","X","J","V","S","D"].forEach(d=>{
+    const el=document.createElement("div");el.className="dow";el.textContent=d;grid.appendChild(el);
   });
-
-  const year = CURRENT_MONTH.getFullYear();
-  const month = CURRENT_MONTH.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const startOffset = (firstDay.getDay() + 6) % 7; // lunes = 0
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  for (let i = 0; i < startOffset; i++) {
-    const empty = document.createElement("div");
-    empty.className = "day-cell empty";
-    grid.appendChild(empty);
-  }
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    const info = CALENDAR_DATA[dateStr] || {};
-    const cell = document.createElement("div");
-    const available = info.numAvail === undefined ? true : info.numAvail > 0;
-    cell.className = "day-cell " + (available ? "available" : "blocked");
-    cell.innerHTML = `<div class="num">${day}</div><div class="price">${
-      info.price1 !== undefined ? "€" + info.price1 : "—"
-    }</div>`;
-    cell.onclick = () => openEditPanel(dateStr, info);
+  const firstDay=(new Date(y,m,1).getDay()+6)%7;
+  const days=new Date(y,m+1,0).getDate();
+  const todayStr=new Date().toISOString().slice(0,10);
+  for(let i=0;i<firstDay;i++){const e=document.createElement("div");e.className="day-cell empty";grid.appendChild(e);}
+  for(let day=1;day<=days;day++){
+    const ds=`${y}-${String(m+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    const booked=isBooked(ds);
+    const priceInfo=PRICES[ds];
+    const blocked=priceInfo&&priceInfo.numAvail===0;
+    const hasOverride=!!priceInfo;
+    const cell=document.createElement("div");
+    let cls="day-cell";
+    if(booked) cls+=" booked";
+    else if(blocked) cls+=" blocked";
+    else if(hasOverride) cls+=" has-override";
+    if(ds===todayStr) cls+=" today";
+    cell.className=cls;
+    const numEl=document.createElement("div");numEl.className="dnum";numEl.textContent=day;cell.appendChild(numEl);
+    if(booked){
+      const g=document.createElement("div");g.className="guest";g.textContent=guestName(ds);cell.appendChild(g);
+    } else if(priceInfo&&priceInfo.price1!=null){
+      const p=document.createElement("div");p.className="price-row";p.textContent="€"+priceInfo.price1;cell.appendChild(p);
+    }
+    cell.onclick=()=>openEdit(ds,priceInfo||{});
     grid.appendChild(cell);
   }
 }
 
-$("#prev-month").onclick = async () => {
-  CURRENT_MONTH = new Date(CURRENT_MONTH.getFullYear(), CURRENT_MONTH.getMonth() - 1, 1);
-  await loadCalendar();
-};
-$("#next-month").onclick = async () => {
-  CURRENT_MONTH = new Date(CURRENT_MONTH.getFullYear(), CURRENT_MONTH.getMonth() + 1, 1);
-  await loadCalendar();
-};
+$("#prev-month").onclick=async()=>{CURRENT_MONTH=new Date(CURRENT_MONTH.getFullYear(),CURRENT_MONTH.getMonth()-1,1);await loadCalendar();};
+$("#next-month").onclick=async()=>{CURRENT_MONTH=new Date(CURRENT_MONTH.getFullYear(),CURRENT_MONTH.getMonth()+1,1);await loadCalendar();};
 
-// ---------- EDIT PANEL ----------
-let editAvailability = 1;
-
-function openEditPanel(dateStr, info) {
-  SELECTED_DATE = dateStr;
-  $("#edit-date-label").textContent = new Date(dateStr).toLocaleDateString("es-ES", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-  $("#edit-price").value = info.price1 !== undefined ? info.price1 : "";
-  editAvailability = info.numAvail === undefined ? 1 : info.numAvail;
-  updateToggleButtons();
+// ---- EDIT PANEL ----
+function openEdit(ds,info){
+  SELECTED_DATE=ds;
+  EDIT_AVAIL=info.numAvail===0?0:1;
+  $("#edit-date-label").textContent=new Date(ds+"T12:00:00").toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long"});
+  $("#ep1").value=info.price1!=null?info.price1:"";
+  $("#ep2").value=info.price2!=null?info.price2:"";
+  $("#ep3").value=info.price3!=null?info.price3:"";
+  updateToggle();
   $("#edit-panel").classList.add("open");
   $("#overlay").classList.add("open");
 }
-
-function closeEditPanel() {
-  $("#edit-panel").classList.remove("open");
-  $("#overlay").classList.remove("open");
+function closeEdit(){$("#edit-panel").classList.remove("open");$("#overlay").classList.remove("open");}
+function updateToggle(){
+  $("#btn-open").className="toggle-btn"+(EDIT_AVAIL===1?" sel-open":"");
+  $("#btn-blocked").className="toggle-btn"+(EDIT_AVAIL===0?" sel-blocked":"");
 }
+$("#btn-open").onclick=()=>{EDIT_AVAIL=1;updateToggle();};
+$("#btn-blocked").onclick=()=>{EDIT_AVAIL=0;updateToggle();};
+$("#cancel-btn").onclick=closeEdit;
+$("#overlay").onclick=closeEdit;
 
-function updateToggleButtons() {
-  $("#btn-open").classList.toggle("active", editAvailability > 0);
-  $("#btn-blocked").classList.toggle("active", editAvailability === 0);
-}
-
-$("#btn-open").onclick = () => { editAvailability = 1; updateToggleButtons(); };
-$("#btn-blocked").onclick = () => { editAvailability = 0; updateToggleButtons(); };
-$("#cancel-btn").onclick = closeEditPanel;
-$("#overlay").onclick = closeEditPanel;
-
-$("#save-btn").onclick = async () => {
-  const priceVal = $("#edit-price").value;
-  const body = {
-    pin: PIN,
-    roomId: CURRENT_ROOM.id,
-    from: SELECTED_DATE,
-    to: SELECTED_DATE,
-    numAvail: editAvailability,
-  };
-  if (priceVal !== "") body.price1 = Number(priceVal);
-
-  $("#save-btn").textContent = "Guardando...";
-  try {
-    const res = await fetch(`${API_BASE}/update`, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-app-pin": PIN },
-      body: JSON.stringify(body),
+$("#save-btn").onclick=async()=>{
+  const body={pin:PIN,roomId:CURRENT_ROOM.id,from:SELECTED_DATE,to:SELECTED_DATE,numAvail:EDIT_AVAIL};
+  if($("#ep1").value!="") body.price1=Number($("#ep1").value);
+  if($("#ep2").value!="") body.price2=Number($("#ep2").value);
+  if($("#ep3").value!="") body.price3=Number($("#ep3").value);
+  $("#save-btn").textContent="Guardando...";
+  try{
+    const r=await fetch(`${API_BASE}/update`,{
+      method:"POST",
+      headers:{"content-type":"application/json","x-app-pin":PIN},
+      body:JSON.stringify(body)
     });
-    const data = await res.json();
-    if (data.ok) {
-      closeEditPanel();
-      await loadCalendar();
-    } else {
-      alert("Error al guardar: " + (data.error?.message || JSON.stringify(data.error)));
-    }
-  } catch (err) {
-    alert("Error de conexión al guardar");
-  } finally {
-    $("#save-btn").textContent = "Guardar";
-  }
+    const d=await r.json();
+    if(d.ok){closeEdit();await loadCalendar();}
+    else{alert("Error: "+(d.error?.message||JSON.stringify(d.error)));}
+  }catch(e){alert("Error de conexión");}
+  finally{$("#save-btn").textContent="Guardar";}
 };
 
-renderKeypad();
-renderPinDots();
+renderKeypad();renderDots();
 </script>
 </body>
 </html>
