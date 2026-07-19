@@ -1,16 +1,7 @@
 """
-mobile_routes.py  v3
---------------------
-Blueprint Flask para la app móvil de gestión de Beds24.
-
-Variables de entorno en Render:
-  MOBILE_BEDS24_TOKEN  -> refresh token con scopes read/write inventory + bookings
-  MOBILE_APP_PIN       -> PIN numérico de 4 dígitos
+mobile_routes.py  v4
 """
-
-import os
-import time
-import requests
+import os, time, requests
 from datetime import datetime, date, timedelta
 from flask import Blueprint, request, jsonify
 
@@ -19,28 +10,25 @@ mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
 BEDS24_API = "https://beds24.com/api/v2"
 BEDS24_REFRESH_TOKEN = os.environ.get("MOBILE_BEDS24_TOKEN") or os.environ.get("BEDS24_REFRESH_TOKEN")
 MOBILE_APP_PIN = os.environ.get("MOBILE_APP_PIN")
+PROPERTY_ID = int(os.environ.get("BEDS24_PROPERTY_ID", "339751"))
 
 ROOMS = [
     {"id": 702395, "name": "Deluxe"},
     {"id": 702396, "name": "Doble"},
-    {"id": 702397, "name": "Std Queen"},
-    {"id": 702398, "name": "Sup Queen"},
-    {"id": 702399, "name": "Queen"},
+    {"id": 702397, "name": "Habitación 1"},
+    {"id": 702398, "name": "Habitación 2"},
+    {"id": 702399, "name": "Habitación 3"},
 ]
-PROPERTY_ID = int(os.environ.get("BEDS24_PROPERTY_ID", "339751"))
 
-# Precios base por defecto por habitación (los que vemos en Booking.com UI)
-# Se usan cuando no hay override en el calendario de Beds24
 BASE_PRICES = {
-    702395: {"price1": 140.0, "price2": 133.0, "price3": 112.0},  # Deluxe
-    702396: {"price1": 120.0, "price2": 114.0, "price3":  96.0},  # Doble
-    702397: {"price1":  75.0, "price2":  71.25,"price3":  60.0},  # Std Queen
-    702398: {"price1":  85.0, "price2":  80.75,"price3":  68.0},  # Sup Queen
-    702399: {"price1":  75.0, "price2":  71.25,"price3":  60.0},  # Queen
+    702395: {"price1": 140.0, "price2": 133.0, "price3": 112.0},
+    702396: {"price1": 120.0, "price2": 114.0, "price3":  96.0},
+    702397: {"price1":  75.0, "price2":  71.25,"price3":  60.0},
+    702398: {"price1":  85.0, "price2":  80.75,"price3":  68.0},
+    702399: {"price1":  75.0, "price2":  71.25,"price3":  60.0},
 }
 
 _token_cache = {"token": None, "expires_at": 0}
-
 
 def get_access_token():
     now = time.time()
@@ -57,7 +45,6 @@ def get_access_token():
     _token_cache["expires_at"] = now + data.get("expiresIn", 3600) - 60
     return _token_cache["token"]
 
-
 def check_pin():
     pin = (
         request.headers.get("x-app-pin")
@@ -68,20 +55,17 @@ def check_pin():
         return False
     return str(pin) == str(MOBILE_APP_PIN)
 
-
 @mobile_bp.route("/login", methods=["POST", "GET"])
 def mobile_login():
     if check_pin():
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
-
 @mobile_bp.route("/rooms", methods=["GET"])
 def mobile_rooms():
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
     return jsonify({"ok": True, "rooms": ROOMS})
-
 
 @mobile_bp.route("/calendar", methods=["GET"])
 def mobile_calendar():
@@ -102,17 +86,20 @@ def mobile_calendar():
     last_day = (date(year, mon, 1).replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
     date_to = last_day.strftime("%Y-%m-%d")
 
+    # Para capturar reservas que empezaron ANTES del mes pero siguen activas,
+    # buscamos con arrivalFrom 60 días atrás del inicio del mes.
+    arrival_search_from = (date(year, mon, 1) - timedelta(days=60)).isoformat()
+
     try:
         token = get_access_token()
 
-        # Reservas del mes
+        # Reservas: buscamos desde 60 días antes para capturar estancias en curso
         bookings_resp = requests.get(
             f"{BEDS24_API}/bookings",
             params={
                 "roomId": room_id,
-                "arrivalFrom": date_from,
+                "arrivalFrom": arrival_search_from,
                 "arrivalTo": date_to,
-                "status": "confirmed",
                 "includePersonalInfo": "true",
             },
             headers={"accept": "application/json", "token": token},
@@ -121,13 +108,24 @@ def mobile_calendar():
         bookings_data = bookings_resp.json()
         bookings = []
         for b in (bookings_data.get("data") or []):
+            if str(b.get("status", "")).lower() == "cancelled":
+                continue
+            # Solo incluir si la estancia se solapa con el mes que se muestra
+            arrival = b.get("arrival", "")
+            departure = b.get("departure", "")
+            if not arrival or not departure:
+                continue
+            if departure <= date_from:
+                continue  # ya salió antes de que empiece el mes
+            if arrival > date_to:
+                continue  # aún no ha llegado
             guest = b.get("guest") or {}
             first = guest.get("firstName") or b.get("guestFirstName") or b.get("firstName") or ""
             last = guest.get("lastName") or b.get("guestLastName") or b.get("lastName") or ""
             name = f"{first} {last}".strip() or b.get("guestName", "Huésped")
             bookings.append({
-                "arrival": b.get("arrival"),
-                "departure": b.get("departure"),
+                "arrival": arrival,
+                "departure": departure,
                 "guestName": name,
                 "status": b.get("status"),
             })
@@ -155,7 +153,7 @@ def mobile_calendar():
                         "numAvail": day.get("numAvail"),
                     }
 
-        # Construir precios por día: base + overrides
+        # Precios por día: base + overrides
         base = BASE_PRICES.get(int(room_id), {})
         prices = {}
         current = date(year, mon, 1)
@@ -196,7 +194,7 @@ def mobile_update():
             entry[field] = float(body[field]) if field.startswith("price") else int(body[field])
 
     if len(entry) == 2:
-        return jsonify({"ok": False, "error": "Debes enviar al menos un campo a actualizar"}), 400
+        return jsonify({"ok": False, "error": "Debes enviar al menos un campo"}), 400
 
     try:
         token = get_access_token()
