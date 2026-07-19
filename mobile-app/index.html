@@ -437,9 +437,12 @@ function renderCalendar(){
 
   $("#month-label").textContent=`${MONTHS_ES[m]} ${y}`;
 
-  // Build date list
+  // Build date list — empezar desde HOY si es el mes actual
   const dates=[];
-  for(let d=1;d<=days;d++){
+  const todayDate = new Date();
+  const isCurrentMonth = (y === todayDate.getFullYear() && m === todayDate.getMonth());
+  const startDay = isCurrentMonth ? todayDate.getDate() : 1;
+  for(let d=startDay;d<=days;d++){
     const ds=`${y}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
     const dow=new Date(ds+"T12:00:00").getDay();
     dates.push({ds,d,dow});
