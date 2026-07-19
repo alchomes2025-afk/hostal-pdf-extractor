@@ -21,7 +21,7 @@ from flask import Blueprint, request, jsonify
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
 
 BEDS24_API = "https://beds24.com/api/v2"
-BEDS24_REFRESH_TOKEN = os.environ.get("BEDS24_REFRESH_TOKEN")
+BEDS24_REFRESH_TOKEN = os.environ.get("MOBILE_BEDS24_TOKEN") or os.environ.get("BEDS24_REFRESH_TOKEN")
 MOBILE_APP_PIN = os.environ.get("MOBILE_APP_PIN")
 
 ROOMS = [
