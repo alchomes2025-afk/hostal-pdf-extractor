@@ -15,6 +15,7 @@ from urllib.parse import quote
 from mobile_routes import mobile_bp
 
 app = Flask(__name__)
+app.register_blueprint(mobile_bp)
 CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
