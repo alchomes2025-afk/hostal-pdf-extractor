@@ -12,6 +12,7 @@ import pdfplumber
 from datetime import date, datetime, timedelta, time as dtime
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
+from mobile_routes import mobile_bp
 
 app = Flask(__name__)
 CORS(app)
