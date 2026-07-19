@@ -128,6 +128,26 @@ def mobile_update():
     if num_avail is not None:
         calendar_entry["numAvail"] = int(num_avail)
 
+  @mobile_bp.route("/setup-token", methods=["GET", "POST"])
+def setup_token():
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        try:
+            resp = requests.get(
+                f"{BEDS24_API}/authentication/setup",
+                headers={"accept": "application/json", "code": code},
+                timeout=15,
+            )
+            return jsonify(resp.json())
+        except Exception as e:
+            return jsonify({"error": str(e)})
+    return """
+    <form method="POST">
+        <textarea name="code" rows="4" cols="80" placeholder="Pega aquí el invite code"></textarea><br>
+        <button type="submit">Canjear</button>
+    </form>
+    """
+  
     try:
         token = get_access_token()
         resp = requests.post(
