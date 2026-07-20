@@ -375,4 +375,30 @@ def debug_prices():
         return jsonify({"ok": True, "status": resp.status_code, "raw": resp.json()})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
-  
+
+
+@mobile_bp.route("/debug-offers", methods=["GET"])
+def debug_offers():
+    """Diagnóstico: prueba GET /inventory/rooms/offers para obtener precios calculados."""
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    try:
+        token = get_access_token()
+        # Probamos con Deluxe (702395) para una semana concreta
+        resp = requests.get(
+            f"{BEDS24_API}/inventory/rooms/offers",
+            params={
+                "roomId": 702395,
+                "arrival": "2026-08-01",
+                "departure": "2026-08-08",
+            },
+            headers={"accept": "application/json", "token": token},
+            timeout=20,
+        )
+        return jsonify({
+            "ok": True,
+            "status": resp.status_code,
+            "raw": resp.json()
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
