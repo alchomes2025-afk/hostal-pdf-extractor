@@ -1,14 +1,18 @@
 """
-mobile_routes.py  v6
+mobile_routes.py  v7
 --------------------
 Blueprint Flask para la app móvil de gestión de Beds24.
 
-Novedades v6:
-- Nuevo endpoint POST /bookings para crear reservas (Nombre, Teléfono, Email)
-- Bloqueo de fechas: POST a /inventory/rooms/calendar con numAvail=0
-- Guardado de precios con botón (no autosave)
-- Validación de fechas en backend
-- Feedback visual mejorado
+Novedades v7 (respecto a v6):
+- Respuesta de /calendar incluye phone y email del huésped
+  (necesario para que la app muestre botones Llamar y WhatsApp)
+
+Todo lo demás es idéntico a v6:
+- POST /create-booking — crear reservas
+- POST /block-dates    — bloquear fechas
+- POST /update         — editar precio y disponibilidad
+- GET  /calendar       — reservas + precios del mes
+- GET  /rooms          — lista de habitaciones
 
 Variables de entorno en Render:
   MOBILE_BEDS24_TOKEN  -> refresh token con scopes read/write inventory + bookings
@@ -563,10 +567,21 @@ def mobile_calendar():
                 guest.get("lastName") or b.get("guestLastName") or b.get("lastName") or ""
             )
             name = f"{first} {last}".strip() or "Huésped"
+            # v7: extraer teléfono y email para botones Llamar/WhatsApp en la app
+            phone = (
+                guest.get("phone") or guest.get("mobile") or
+                b.get("guestPhone") or b.get("phone") or ""
+            )
+            email = (
+                guest.get("email") or
+                b.get("guestEmail") or b.get("email") or ""
+            )
             bookings.append({
                 "arrival": arrival,
                 "departure": departure,
                 "guestName": name,
+                "phone": phone,
+                "email": email,
                 "status": b.get("status"),
             })
 
