@@ -708,17 +708,20 @@ def create_booking():
         token = get_access_token()
         
         # POST a /bookings de Beds24
+        # Nota: Beds24 API v2 exige status "new" para reservas nuevas.
+        # "confirmed" es válido solo para actualizaciones posteriores.
         booking_data = {
             "roomId": int(room_id),
             "arrival": arrival,
             "departure": departure,
+            "numAdult": 1,
             "guest": {
                 "firstName": name.split()[0],
                 "lastName": " ".join(name.split()[1:]) if len(name.split()) > 1 else "",
                 "email": email,
                 "phone": phone,
             },
-            "status": "confirmed",
+            "status": "new",
         }
 
         resp = requests.post(
@@ -734,7 +737,17 @@ def create_booking():
         
         data = resp.json()
         if not resp.ok:
-            return jsonify({"ok": False, "error": data}), resp.status_code
+            # Extraer mensaje legible de la respuesta de Beds24
+            err_msg = data
+            if isinstance(data, dict):
+                errs = data.get("errors") or data.get("error") or data.get("message")
+                if isinstance(errs, list) and errs:
+                    err_msg = errs[0].get("message") or errs[0].get("type") or str(errs[0])
+                elif isinstance(errs, str):
+                    err_msg = errs
+                else:
+                    err_msg = str(data)
+            return jsonify({"ok": False, "error": str(err_msg)}), resp.status_code
         
         return jsonify({"ok": True, "data": data})
 
