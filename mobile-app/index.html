@@ -634,7 +634,7 @@ async function loadData() {
   setPill("Cargando…");
   const today = new Date();
   const months = [];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 12; i++) {
     const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
     months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
   }
@@ -683,9 +683,9 @@ function renderCalendar() {
   const todaySt = todayStr();
   const tb = $("#cal-body"); tb.innerHTML = "";
 
-  // Build 90 days from today
+  // Build 365 days from today (1 año vista)
   const dates = [];
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 365; i++) {
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
     const ds = d.toISOString().slice(0,10);
     dates.push({ds, d, dow: d.getDay(), day: d.getDate(), month: d.getMonth(), year: d.getFullYear()});
