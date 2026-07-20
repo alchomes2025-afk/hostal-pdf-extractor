@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-<title>Alc Homes</title>
+<title>Alc Homes · Beds24</title>
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
 :root{
@@ -11,7 +11,7 @@
   --avail:#e8f7ea;--avail-t:#1e7e34;
   --blocked:#fde8e8;--blocked-t:#c0392b;
   --booked:#dce9ff;--booked-t:#003580;
-  --ov:#f0a500;
+  --ov:#f0a500;--warn:#ff9800;
   --border:#d9d9d9;--ink:#1a1a1a;--muted:#6b7280;
   --bg:#f2f2f2;--card:#fff;
   --cell:68px;--lbl:108px;
@@ -41,7 +41,28 @@ html,body{background:var(--bg);color:var(--ink);
 .key.wide{font-size:13px;color:rgba(255,255,255,.65)}
 #login-error{color:#ffbbbb;font-size:12px;height:18px;margin-top:12px}
 
-/* TOPBAR */
+/* HOME SCREEN */
+#home-screen{display:none;padding:16px;background:#f2f2f2;min-height:100vh}
+.home-header{text-align:center;margin-bottom:28px;margin-top:12px}
+.home-header h1{font-size:24px;font-weight:800;color:var(--bk);margin-bottom:4px}
+.home-header p{font-size:12px;color:var(--muted)}
+.home-actions{display:flex;flex-direction:column;gap:10px}
+.action-btn{
+  padding:16px;border-radius:12px;border:none;font-size:14px;font-weight:700;
+  cursor:pointer;display:flex;align-items:center;justify-content:space-between;
+  color:#fff;transition:all .2s;
+}
+.action-btn.primary{background:var(--acc)}
+.action-btn.primary:active{background:var(--bk);transform:scale(.98)}
+.action-btn.secondary{background:var(--warn)}
+.action-btn.secondary:active{background:#f57c00}
+.action-btn.success{background:#4caf50}
+.action-btn.success:active{background:#388e3c}
+.action-btn-icon{font-size:18px;margin-right:12px}
+.action-btn span{flex:1;text-align:left}
+
+/* MAIN */
+#main-screen{display:none}
 #topbar{
   background:var(--bk);padding:10px 12px;
   display:flex;align-items:center;justify-content:space-between;
@@ -77,6 +98,11 @@ html,body{background:var(--bg);color:var(--ink);
 #cal-wrap{overflow-x:auto;background:var(--card)}
 #cal-wrap::-webkit-scrollbar{height:4px}
 #cal-wrap::-webkit-scrollbar-thumb{background:var(--acc);border-radius:2px}
+.scroll-hint{
+  position:absolute;top:50%;right:8px;transform:translateY(-50%);
+  font-size:20px;color:var(--acc);opacity:.6;animation:pulse 1.5s infinite;
+}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:.8}}
 
 table#cal{border-collapse:collapse;min-width:max-content}
 table#cal th,table#cal td{border-bottom:1px solid var(--border);border-right:1px solid var(--border)}
@@ -130,46 +156,56 @@ table#cal th,table#cal td{border-bottom:1px solid var(--border);border-right:1px
 .c-price.dim{color:#bbb;text-decoration:line-through;font-weight:400}
 .c-price:active{background:#f0f7ff}
 
-/* OVERLAY + EDIT PANEL */
-#overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .2s;z-index:30}
-#overlay.open{opacity:1;pointer-events:auto}
-#edit-panel{
+/* OVERLAY + MODALS */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);opacity:0;pointer-events:none;transition:opacity .2s;z-index:30}
+.overlay.open{opacity:1;pointer-events:auto}
+
+.modal{
   position:fixed;left:0;right:0;bottom:0;background:var(--card);
   border-radius:18px 18px 0 0;box-shadow:0 -4px 24px rgba(0,0,0,.15);
   padding:20px 20px 36px;max-width:520px;margin:0 auto;
   transform:translateY(110%);transition:transform .25s ease;z-index:31;
 }
-#edit-panel.open{transform:translateY(0)}
-.ep-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-.ep-hd h2{font-size:15px;font-weight:700;color:var(--bk)}
-.ep-x{background:#f2f2f2;border:none;border-radius:50%;width:28px;height:28px;font-size:16px;cursor:pointer;color:var(--muted)}
+.modal.open{transform:translateY(0)}
 
-.av-row{display:flex;gap:8px;margin-bottom:14px}
-.av-btn{
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+.modal-header h2{font-size:15px;font-weight:700;color:var(--bk)}
+.modal-x{background:#f2f2f2;border:none;border-radius:50%;width:28px;height:28px;font-size:16px;cursor:pointer;color:var(--muted)}
+
+.form-group{margin-bottom:14px}
+.form-label{font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+.form-input,.form-select{
+  width:100%;padding:10px 12px;border:1.5px solid var(--border);
+  border-radius:8px;font-size:13px;font-family:inherit;
+}
+.form-input:focus,.form-select:focus{outline:none;border-color:var(--acc)}
+
+.form-row{display:flex;gap:8px}
+.form-row .form-group{flex:1}
+
+.av-toggle{display:flex;gap:8px;margin-bottom:14px}
+.toggle-btn{
   flex:1;padding:10px 0;border-radius:8px;border:1.5px solid var(--border);
   font-size:13px;font-weight:600;cursor:pointer;background:var(--card);color:var(--muted);
 }
-.av-btn.ok{background:var(--avail);border-color:var(--avail-t);color:var(--avail-t)}
-.av-btn.no{background:var(--blocked);border-color:var(--blocked-t);color:var(--blocked-t)}
+.toggle-btn.ok{background:var(--avail);border-color:var(--avail-t);color:var(--avail-t)}
+.toggle-btn.no{background:var(--blocked);border-color:var(--blocked-t);color:var(--blocked-t)}
 
-.range-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:12px;color:var(--muted)}
-.range-row input{flex:1;padding:7px 8px;border:1.5px solid var(--border);border-radius:8px;font-size:12px}
-.range-row input:focus{outline:none;border-color:var(--acc)}
+.form-hint{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4}
 
-.price-row-ep{margin-bottom:14px}
-.price-row-ep label{font-size:11px;font-weight:700;color:var(--muted);display:block;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
-.price-row-ep input{
-  width:100%;padding:10px 12px;border:1.5px solid var(--border);
-  border-radius:8px;font-size:18px;font-weight:700;text-align:right;
+.modal-footer{display:flex;gap:10px;margin-top:16px}
+.btn{flex:1;padding:12px 0;border-radius:10px;border:none;font-size:14px;font-weight:700;cursor:pointer}
+.btn.primary{background:var(--acc);color:#fff}
+.btn.primary:active{background:var(--bk)}
+.btn.secondary{background:#f2f2f2;color:var(--muted)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.alert{
+  padding:12px;border-radius:8px;font-size:12px;margin-bottom:12px;line-height:1.4;
 }
-.price-row-ep input:focus{outline:none;border-color:var(--acc)}
-.price-hint{font-size:11px;color:var(--muted);margin-top:3px}
-
-.ep-acts{display:flex;gap:10px;margin-top:4px}
-.ep-acts button{flex:1;padding:12px 0;border-radius:10px;border:none;font-size:14px;font-weight:700;cursor:pointer}
-#save-btn{background:var(--acc);color:#fff}
-#save-btn:active{background:var(--bk)}
-#cancel-btn{background:#f2f2f2;color:var(--muted)}
+.alert.error{background:#ffebee;color:#c0392b;border:1px solid #ffcdd2}
+.alert.success{background:#e8f7ea;color:#1e7e34;border:1px solid #c8e6c9}
+.alert.info{background:#e3f2fd;color:#003580;border:1px solid #bbdefb}
 </style>
 </head>
 <body>
@@ -184,8 +220,30 @@ table#cal th,table#cal td{border-bottom:1px solid var(--border);border-right:1px
   <div id="login-error"></div>
 </div>
 
+<!-- HOME -->
+<div id="home-screen">
+  <div class="home-header">
+    <h1>Beds24 Manager</h1>
+    <p>Gestión de reservas y precios</p>
+  </div>
+  <div class="home-actions">
+    <button class="action-btn primary" id="btn-edit-prices">
+      <span class="action-btn-icon">💲</span>
+      <span>Editar Precios y Disponibilidad</span>
+    </button>
+    <button class="action-btn success" id="btn-new-booking">
+      <span class="action-btn-icon">➕</span>
+      <span>Crear Nueva Reserva</span>
+    </button>
+    <button class="action-btn secondary" id="btn-block-dates">
+      <span class="action-btn-icon">🚫</span>
+      <span>Bloquear Fechas</span>
+    </button>
+  </div>
+</div>
+
 <!-- MAIN -->
-<div id="main-screen" style="display:none">
+<div id="main-screen">
   <div id="topbar">
     <div class="logo">alc<span>homes</span></div>
     <div id="status-pill">Cargando…</div>
@@ -196,38 +254,121 @@ table#cal th,table#cal td{border-bottom:1px solid var(--border);border-right:1px
     <div id="month-label"></div>
     <button class="mnav" id="next-m">›</button>
   </div>
-  <div id="cal-wrap">
+  <div id="cal-wrap" style="position:relative">
     <table id="cal"><tbody id="cal-body"></tbody></table>
   </div>
 </div>
 
-<!-- EDIT PANEL -->
-<div id="overlay"></div>
-<div id="edit-panel">
-  <div class="ep-hd">
+<!-- MODALS -->
+<div class="overlay" id="overlay"></div>
+
+<!-- EDIT PRICES MODAL -->
+<div class="modal" id="edit-panel">
+  <div class="modal-header">
     <h2 id="ep-title">Editar</h2>
-    <button class="ep-x" id="ep-x">✕</button>
+    <button class="modal-x" id="ep-x">✕</button>
   </div>
-  <div class="av-row">
-    <button class="av-btn" id="btn-open">✓ Disponible</button>
-    <button class="av-btn" id="btn-blocked">✗ Cerrar</button>
+  <div id="ep-alerts"></div>
+  <div class="av-toggle">
+    <button class="toggle-btn" id="btn-open">✓ Disponible</button>
+    <button class="toggle-btn" id="btn-blocked">✗ Cerrar</button>
   </div>
-  <div class="range-row">
-    <span>Del</span>
-    <input type="date" id="ep-from"/>
-    <span>al</span>
-    <input type="date" id="ep-to"/>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Del</label>
+      <input type="date" id="ep-from" class="form-input"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">al</label>
+      <input type="date" id="ep-to" class="form-input"/>
+    </div>
   </div>
-  <div class="price-row-ep">
-    <label>Standard Rate (€)</label>
-    <input type="number" id="ep1" inputmode="decimal" step="0.5" placeholder="—"/>
-    <div class="price-hint">No Reembolsable y Tarifa Semanal las calcula Booking.com automáticamente</div>
+  <div class="form-group">
+    <label class="form-label">Standard Rate (€)</label>
+    <input type="number" id="ep1" class="form-input" inputmode="decimal" step="0.5" placeholder="—"/>
+    <div class="form-hint">No Reembolsable y Tarifa Semanal las calcula Booking.com</div>
   </div>
-  <div class="ep-acts">
-    <button id="cancel-btn">Cancelar</button>
-    <button id="save-btn">Guardar en Beds24</button>
+  <div class="modal-footer">
+    <button class="btn secondary" id="cancel-btn">Cancelar</button>
+    <button class="btn primary" id="save-btn">Guardar en Beds24</button>
   </div>
 </div>
+
+<!-- NEW BOOKING MODAL -->
+<div class="modal" id="new-booking-modal">
+  <div class="modal-header">
+    <h2>Crear Nueva Reserva</h2>
+    <button class="modal-x" id="nb-x">✕</button>
+  </div>
+  <div id="nb-alerts"></div>
+  <div class="form-group">
+    <label class="form-label">Nombre Completo *</label>
+    <input type="text" id="nb-name" class="form-input" placeholder="Ej: Juan García"/>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Teléfono *</label>
+    <input type="tel" id="nb-phone" class="form-input" placeholder="Ej: +34 623 456 789"/>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Email *</label>
+    <input type="email" id="nb-email" class="form-input" placeholder="Ej: juan@example.com"/>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Habitación *</label>
+    <select id="nb-room" class="form-select"></select>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Entrada *</label>
+      <input type="date" id="nb-arrival" class="form-input"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Salida *</label>
+      <input type="date" id="nb-departure" class="form-input"/>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn secondary" id="nb-cancel">Cancelar</button>
+    <button class="btn primary" id="nb-save">Crear Reserva</button>
+  </div>
+</div>
+
+<!-- BLOCK DATES MODAL -->
+<div class="modal" id="block-dates-modal">
+  <div class="modal-header">
+    <h2>Bloquear Fechas</h2>
+    <button class="modal-x" id="bd-x">✕</button>
+  </div>
+  <div id="bd-alerts"></div>
+  <div class="form-group">
+    <label class="form-label">Habitación *</label>
+    <select id="bd-room" class="form-select"></select>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Desde *</label>
+      <input type="date" id="bd-from" class="form-input"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Hasta *</label>
+      <input type="date" id="bd-to" class="form-input"/>
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Motivo *</label>
+    <select id="bd-reason" class="form-select">
+      <option value="Reparación">🔧 Reparación</option>
+      <option value="Mantenimiento">🧹 Mantenimiento</option>
+      <option value="Limpieza">🧼 Limpieza</option>
+      <option value="Otro">📌 Otro</option>
+    </select>
+  </div>
+  <div class="modal-footer">
+    <button class="btn secondary" id="bd-cancel">Cancelar</button>
+    <button class="btn primary" id="bd-save">Bloquear Fechas</button>
+  </div>
+</div>
+
 </div>
 
 <script>
@@ -237,45 +378,200 @@ const MONTHS=["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto",
 
 let PIN="",ROOMS=[],ROOM=null,CUR=new Date();
 let BOOKINGS=[],PRICES={},SEL=null,AVAIL=1;
-const $=s=>document.querySelector(s);
 
-// LOGIN
+const $=s=>document.querySelector(s);
+const $$=s=>document.querySelectorAll(s);
+
+// ── LOGIN ──
 function dots(){
   const w=$("#pin-dots");w.innerHTML="";
   for(let i=0;i<4;i++){const d=document.createElement("div");d.className="pin-dot"+(i<PIN.length?" filled":"");w.appendChild(d);}
 }
+
 function keypad(){
   const keys=["1","2","3","4","5","6","7","8","9","⌫","0","OK"];
   const w=$("#keypad");w.innerHTML="";
   keys.forEach(k=>{const b=document.createElement("button");b.className="key"+(k==="⌫"||k==="OK"?" wide":"");b.textContent=k;b.onclick=()=>key(k);w.appendChild(b);});
 }
+
 async function key(k){
   if(k==="⌫")PIN=PIN.slice(0,-1);
   else if(k==="OK"){await login();return;}
   else if(PIN.length<4)PIN+=k;
   dots();if(PIN.length===4)await login();
 }
+
 async function login(){
   $("#login-error").textContent="";
   try{
-    const r=await fetch(`${API}/login`,{method:"POST",headers:{"content-type":"application/json","x-app-pin":PIN},body:JSON.stringify({pin:PIN})});
+    const r=await fetch(`${API}/login`,{method:"POST",headers:{"x-app-pin":PIN},body:JSON.stringify({pin:PIN})});
     const d=await r.json();
-    if(d.ok){$("#login-screen").style.display="none";$("#main-screen").style.display="block";await init();}
-    else{$("#login-error").textContent="PIN incorrecto";PIN="";dots();}
+    if(d.ok){
+      $("#login-screen").style.display="none";
+      $("#home-screen").style.display="block";
+    }else{$("#login-error").textContent="PIN incorrecto";PIN="";dots();}
   }catch{$("#login-error").textContent="Sin conexión";PIN="";dots();}
 }
 
-// MAIN
-async function init(){
+// ── HOME SCREEN ──
+$("#btn-edit-prices").onclick=async()=>{
+  $("#home-screen").style.display="none";
+  $("#main-screen").style.display="block";
+  await initCalendar();
+};
+
+$("#btn-new-booking").onclick=()=>openModal("new-booking-modal");
+$("#btn-block-dates").onclick=()=>openModal("block-dates-modal");
+
+// ── MODALS ──
+function openModal(id){
+  $("#overlay").classList.add("open");
+  $(`#${id}`).classList.add("open");
+}
+
+function closeModal(id){
+  $("#overlay").classList.remove("open");
+  $(`#${id}`).classList.remove("open");
+}
+
+function showAlert(containerId,type,msg){
+  const c=$(containerId);
+  c.innerHTML=`<div class="alert ${type}">${msg}</div>`;
+  setTimeout(()=>c.innerHTML="",5000);
+}
+
+// ── EDIT PRICES MODAL ──
+function openEditPrice(ds,info){
+  SEL=ds;AVAIL=info.numAvail===0?0:1;
+  const lbl=new Date(ds+"T12:00:00").toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long"});
+  $("#ep-title").textContent=lbl.charAt(0).toUpperCase()+lbl.slice(1);
+  $("#ep-from").value=ds;$("#ep-to").value=ds;
+  $("#ep1").value=info.price1!=null?info.price1:"";
+  updToggle();
+  openModal("edit-panel");
+}
+
+function updToggle(){
+  $("#btn-open").className="toggle-btn"+(AVAIL===1?" ok":"");
+  $("#btn-blocked").className="toggle-btn"+(AVAIL===0?" no":"");
+}
+
+$("#btn-open").onclick=()=>{AVAIL=1;updToggle();};
+$("#btn-blocked").onclick=()=>{AVAIL=0;updToggle();};
+$("#cancel-btn").onclick=()=>closeModal("edit-panel");
+$("#ep-x").onclick=()=>closeModal("edit-panel");
+
+$("#save-btn").onclick=async()=>{
+  const from=$("#ep-from").value||SEL;
+  const to=$("#ep-to").value||SEL;
+  const body={pin:PIN,roomId:ROOM.id,from,to,numAvail:AVAIL};
+  const v=$("#ep1").value;
+  if(v!="")body.price1=Number(v);
+  const btn=$("#save-btn");btn.textContent="Guardando…";btn.disabled=true;
+  try{
+    const r=await fetch(`${API}/update`,{
+      method:"POST",
+      headers:{"content-type":"application/json","x-app-pin":PIN},
+      body:JSON.stringify(body)
+    });
+    const d=await r.json();
+    if(d.ok){showAlert("#ep-alerts","success","✓ Guardado en Beds24");setTimeout(()=>{closeModal("edit-panel");load()},1500);}
+    else showAlert("#ep-alerts","error","✗ Error: "+(d.error?.message||JSON.stringify(d.error)));
+  }catch{showAlert("#ep-alerts","error","✗ Error de conexión");}
+  finally{btn.textContent="Guardar en Beds24";btn.disabled=false;}
+};
+
+// ── NEW BOOKING MODAL ──
+$("#nb-x").onclick=()=>closeModal("new-booking-modal");
+$("#nb-cancel").onclick=()=>closeModal("new-booking-modal");
+
+function populateRoomSelect(selectId){
+  const sel=$(selectId);sel.innerHTML="";
+  ROOMS.forEach(r=>{const opt=document.createElement("option");opt.value=r.id;opt.textContent=r.name;sel.appendChild(opt);});
+}
+
+$("#nb-save").onclick=async()=>{
+  const name=($("#nb-name").value||"").trim();
+  const phone=($("#nb-phone").value||"").trim();
+  const email=($("#nb-email").value||"").trim();
+  const roomId=$("#nb-room").value;
+  const arrival=$("#nb-arrival").value;
+  const departure=$("#nb-departure").value;
+
+  if(!name||!phone||!email||!roomId||!arrival||!departure){
+    showAlert("#nb-alerts","error","✗ Completa todos los campos");return;
+  }
+
+  const btn=$("#nb-save");btn.textContent="Creando…";btn.disabled=true;
+  try{
+    const r=await fetch(`${API}/create-booking`,{
+      method:"POST",
+      headers:{"content-type":"application/json","x-app-pin":PIN},
+      body:JSON.stringify({name,phone,email,roomId:parseInt(roomId),arrival,departure})
+    });
+    const d=await r.json();
+    if(d.ok){
+      showAlert("#nb-alerts","success","✓ Reserva creada en Beds24");
+      setTimeout(()=>{
+        $("#nb-name").value="";$("#nb-phone").value="";$("#nb-email").value="";
+        $("#nb-arrival").value="";$("#nb-departure").value="";
+        closeModal("new-booking-modal");
+      },1500);
+    }else showAlert("#nb-alerts","error","✗ Error: "+(d.error||JSON.stringify(d)));
+  }catch(e){showAlert("#nb-alerts","error","✗ Error: "+e.message);}
+  finally{btn.textContent="Crear Reserva";btn.disabled=false;}
+};
+
+// ── BLOCK DATES MODAL ──
+$("#bd-x").onclick=()=>closeModal("block-dates-modal");
+$("#bd-cancel").onclick=()=>closeModal("block-dates-modal");
+
+$("#bd-save").onclick=async()=>{
+  const roomId=$("#bd-room").value;
+  const from=$("#bd-from").value;
+  const to=$("#bd-to").value;
+  const reason=$("#bd-reason").value;
+
+  if(!roomId||!from||!to){
+    showAlert("#bd-alerts","error","✗ Completa todos los campos");return;
+  }
+
+  const btn=$("#bd-save");btn.textContent="Bloqueando…";btn.disabled=true;
+  try{
+    const r=await fetch(`${API}/block-dates`,{
+      method:"POST",
+      headers:{"content-type":"application/json","x-app-pin":PIN},
+      body:JSON.stringify({roomId:parseInt(roomId),from,to,reason})
+    });
+    const d=await r.json();
+    if(d.ok){
+      showAlert("#bd-alerts","success","✓ Fechas bloqueadas");
+      setTimeout(()=>{
+        $("#bd-room").value=ROOMS[0]?.id||"";
+        $("#bd-from").value="";$("#bd-to").value="";
+        closeModal("block-dates-modal");
+      },1500);
+    }else showAlert("#bd-alerts","error","✗ Error: "+(d.error||JSON.stringify(d)));
+  }catch(e){showAlert("#bd-alerts","error","✗ Error: "+e.message);}
+  finally{btn.textContent="Bloquear Fechas";btn.disabled=false;}
+};
+
+// ── CALENDAR ──
+async function initCalendar(){
   const r=await fetch(`${API}/rooms`,{headers:{"x-app-pin":PIN}});
   const d=await r.json();
   ROOMS=d.rooms||[];ROOM=ROOMS[0];
-  renderTabs();await load();
+  renderTabs();
+  populateRoomSelect("#nb-room");
+  populateRoomSelect("#bd-room");
+  await load();
 }
+
 function renderTabs(){
   const w=$("#room-tabs");w.innerHTML="";
   ROOMS.forEach(rm=>{const t=document.createElement("div");t.className="rtab"+(rm.id===ROOM.id?" active":"");t.textContent=rm.name;t.onclick=async()=>{ROOM=rm;renderTabs();await load();};w.appendChild(t);});
 }
+
 function mstr(){return`${CUR.getFullYear()}-${String(CUR.getMonth()+1).padStart(2,"0")}`;}
 
 async function load(){
@@ -288,11 +584,11 @@ async function load(){
     render();pill(`${ROOM.name} · ${MONTHS[CUR.getMonth()]}`);
   }catch(e){pill("Error: "+e.message);}
 }
+
 function pill(t){$("#status-pill").textContent=t}
 $("#prev-m").onclick=async()=>{CUR=new Date(CUR.getFullYear(),CUR.getMonth()-1,1);await load();};
 $("#next-m").onclick=async()=>{CUR=new Date(CUR.getFullYear(),CUR.getMonth()+1,1);await load();};
 
-// RENDER
 function bookedOn(ds){return BOOKINGS.find(b=>b.arrival&&b.departure&&ds>=b.arrival&&ds<b.departure);}
 function fmtPrice(v){return v!=null?("€"+Number(v).toFixed(0)):"—";}
 
@@ -310,7 +606,7 @@ function render(){
     dates.push({ds,d,dow});
   }
 
-  // ── Header row ──
+  // Header
   const trH=document.createElement("tr");
   const cornerTh=document.createElement("th");cornerTh.className="col-lbl hd";trH.appendChild(cornerTh);
   dates.forEach(({ds,d,dow})=>{
@@ -321,7 +617,7 @@ function render(){
   });
   tb.appendChild(trH);
 
-  // ── Status row ──
+  // Status
   const trS=document.createElement("tr");
   const lblS=document.createElement("td");lblS.className="col-lbl row-lbl main";lblS.textContent="Disponibilidad";trS.appendChild(lblS);
   dates.forEach(({ds})=>{
@@ -331,22 +627,22 @@ function render(){
     const td=document.createElement("td");
     td.className="c-status"+(bk?" bk":bl?" bl":" av");
     td.textContent=bk?"✖":bl?"—":"✔";
-    td.onclick=()=>openEdit(ds,pr);trS.appendChild(td);
+    td.onclick=()=>openEditPrice(ds,pr);trS.appendChild(td);
   });
   tb.appendChild(trS);
 
-  // ── Guest row ──
+  // Guests
   const trG=document.createElement("tr");
   const lblG=document.createElement("td");lblG.className="col-lbl row-lbl guest";lblG.textContent="Huésped";trG.appendChild(lblG);
   dates.forEach(({ds})=>{
     const bk=bookedOn(ds);
     const td=document.createElement("td");td.className="c-guest";
     td.textContent=bk?(bk.guestName||"").split(" ")[0]:"";
-    td.onclick=()=>openEdit(ds,PRICES[ds]||{});trG.appendChild(td);
+    td.onclick=()=>openEditPrice(ds,PRICES[ds]||{});trG.appendChild(td);
   });
   tb.appendChild(trG);
 
-  // ── Standard Rate row ──
+  // Price
   const trP=document.createElement("tr");
   const lblP=document.createElement("td");lblP.className="col-lbl row-lbl price";lblP.textContent="Standard Rate";trP.appendChild(lblP);
   dates.forEach(({ds})=>{
@@ -358,50 +654,14 @@ function render(){
     else if(pr.price1==null)cls+=" na";
     td.className=cls;
     td.textContent=fmtPrice(pr.price1);
-    td.onclick=()=>openEdit(ds,pr);trP.appendChild(td);
+    td.onclick=()=>openEditPrice(ds,pr);trP.appendChild(td);
   });
   tb.appendChild(trP);
 }
 
-// EDIT PANEL
-function openEdit(ds,info){
-  SEL=ds;AVAIL=info.numAvail===0?0:1;
-  const lbl=new Date(ds+"T12:00:00").toLocaleDateString("es-ES",{weekday:"long",day:"numeric",month:"long"});
-  $("#ep-title").textContent=lbl.charAt(0).toUpperCase()+lbl.slice(1);
-  $("#ep-from").value=ds;$("#ep-to").value=ds;
-  $("#ep1").value=info.price1!=null?info.price1:"";
-  updToggle();
-  $("#edit-panel").classList.add("open");$("#overlay").classList.add("open");
-}
-function closeEdit(){$("#edit-panel").classList.remove("open");$("#overlay").classList.remove("open");}
-function updToggle(){
-  $("#btn-open").className="av-btn"+(AVAIL===1?" ok":"");
-  $("#btn-blocked").className="av-btn"+(AVAIL===0?" no":"");
-}
-$("#btn-open").onclick=()=>{AVAIL=1;updToggle();};
-$("#btn-blocked").onclick=()=>{AVAIL=0;updToggle();};
-$("#cancel-btn").onclick=closeEdit;
-$("#ep-x").onclick=closeEdit;
-$("#overlay").onclick=closeEdit;
-
-$("#save-btn").onclick=async()=>{
-  const from=$("#ep-from").value||SEL;
-  const to=$("#ep-to").value||SEL;
-  const body={pin:PIN,roomId:ROOM.id,from,to,numAvail:AVAIL};
-  const v=$("#ep1").value;
-  if(v!="")body.price1=Number(v);
-  const btn=$("#save-btn");btn.textContent="Guardando…";btn.disabled=true;
-  try{
-    const r=await fetch(`${API}/update`,{
-      method:"POST",
-      headers:{"content-type":"application/json","x-app-pin":PIN},
-      body:JSON.stringify(body)
-    });
-    const d=await r.json();
-    if(d.ok){closeEdit();await load();}
-    else alert("Error: "+(d.error?.message||JSON.stringify(d.error)));
-  }catch{alert("Error de conexión");}
-  finally{btn.textContent="Guardar en Beds24";btn.disabled=false;}
+$("#overlay").onclick=()=>{
+  $$(".modal.open").forEach(m=>m.classList.remove("open"));
+  $("#overlay").classList.remove("open");
 };
 
 keypad();dots();
