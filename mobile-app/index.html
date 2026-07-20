@@ -69,25 +69,39 @@ html,body{
   background:rgba(255,255,255,.12);padding:3px 10px;border-radius:99px;
 }
 
-/* Room tabs */
-#room-tabs{
-  display:flex;gap:5px;overflow-x:auto;padding:8px 12px;
-  background:var(--bk2);scrollbar-width:none;flex-shrink:0;
+/* ── TABLA MULTI-HABITACIÓN ─────────────────────────── */
+/* Columna sticky de nombre de habitación */
+.col-corner{
+  position:sticky;left:0;top:0;z-index:30;
+  width:82px;min-width:82px;
+  background:var(--bk);
 }
-#room-tabs::-webkit-scrollbar{display:none}
-.rtab{
-  flex:0 0 auto;padding:5px 14px;border-radius:99px;font-size:12px;font-weight:600;
-  color:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.2);
-  cursor:pointer;white-space:nowrap;transition:all .15s;user-select:none;
+.room-lbl{
+  position:sticky;left:0;z-index:10;
+  width:82px;min-width:82px;
+  background:#f0f4ff;
+  border-right:3px solid var(--bk);
+  padding:0 8px;vertical-align:middle;
+  cursor:default;
 }
-.rtab.active{background:#fff;color:var(--bk);border-color:#fff}
+.room-name{
+  font-size:12px;font-weight:800;
+  color:var(--bk);line-height:1.2;
+  text-transform:uppercase;letter-spacing:.3px;
+}
+.room-sub{
+  font-size:10px;color:var(--muted);font-weight:500;margin-top:1px;
+}
+/* Separadores entre habitaciones */
+.room-row td,.room-row th{border-bottom:2px solid #e2e8f0}
+.room-row:last-child td{border-bottom:none}
 
-/* Calendar wrapper */
+/* Calendar wrapper — scroll bidireccional */
 #cal-wrap{
-  flex:1;overflow-x:auto;overflow-y:hidden;background:#fff;
+  flex:1;overflow:auto;background:#fff;
   -webkit-overflow-scrolling:touch;
 }
-#cal-wrap::-webkit-scrollbar{height:3px}
+#cal-wrap::-webkit-scrollbar{height:3px;width:3px}
 #cal-wrap::-webkit-scrollbar-thumb{background:var(--acc);border-radius:2px}
 
 /* Barra de mes sticky */
@@ -115,72 +129,53 @@ html,body{
   user-select:none;
 }
 
-/* Month separator header */
-.th-month{
-  background:var(--bk);color:#fff;font-size:10px;font-weight:700;
-  letter-spacing:1px;text-transform:uppercase;
-  padding:5px 8px;text-align:left;
-  position:sticky;top:0;z-index:10;
-  border-right:none;border-bottom:none;
-}
-
-/* Day header */
+/* Day header — sticky top */
 .th-date{
-  background:#f9fafb;text-align:center;padding:7px 2px 6px;
-  cursor:pointer;position:sticky;top:0;z-index:5;
+  background:#f0f4ff;text-align:center;padding:6px 2px 5px;
+  cursor:default;position:sticky;top:0;z-index:20;
 }
-.th-date .dname{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-.th-date .dnum{font-size:18px;font-weight:300;color:var(--ink);line-height:1.2;margin-top:1px}
+.th-date .dname{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+.th-date .dnum{font-size:20px;font-weight:300;color:var(--ink);line-height:1.1;margin-top:2px}
+.th-date.today{background:#e8f0fe}
 .th-date.today .dnum{
-  background:var(--acc);color:#fff;width:30px;height:30px;border-radius:50%;
-  display:flex;align-items:center;justify-content:center;margin:1px auto 0;
-  font-weight:600;font-size:15px;
+  background:var(--acc);color:#fff;width:32px;height:32px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;margin:2px auto 0;
+  font-weight:700;font-size:17px;
 }
-.th-date.wknd{background:#f0f2f5}
-/* Celda con separador de mes */
-.th-date.new-month{
-  border-left:3px solid var(--yel);
-}
+.th-date.wknd{background:#f5f0ff}
+.th-date.wknd .dnum{color:#6c5ce7}
+.th-date.new-month{border-left:3px solid var(--yel)}
 .month-chip{
-  display:block;
-  background:var(--acc);color:#fff;
+  display:block;background:var(--bk);color:#fff;
   font-size:8px;font-weight:800;letter-spacing:.6px;
-  text-transform:uppercase;
-  padding:2px 0;border-radius:3px;
-  margin-bottom:3px;
-  /* Sin nowrap: ocupa el ancho de la celda */
-  white-space:normal;text-align:center;
-  line-height:1.2;
+  text-transform:uppercase;padding:2px 0;border-radius:3px;
+  margin-bottom:3px;text-align:center;line-height:1.2;
 }
 
-/* Status cell */
-.c-status{
-  text-align:center;padding:8px 2px;cursor:pointer;
-  font-size:10px;font-weight:700;transition:opacity .1s;
+/* ── Celdas de día (una por habitación) ── */
+.day-cell{
+  text-align:center;padding:5px 2px;cursor:pointer;
+  vertical-align:middle;height:62px;
 }
-.c-status:active{opacity:.7}
-.c-status.av{background:var(--avail-bg);color:var(--avail)}
-.c-status.bk{background:var(--booked-bg);color:var(--booked)}
-.c-status.bl{background:var(--blocked-bg);color:var(--blocked)}
-
-/* Guest name cell */
-.c-guest{
-  text-align:center;padding:3px 2px;cursor:pointer;
-  font-size:9px;font-weight:600;color:var(--booked);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  max-width:var(--cell);height:18px;
+.day-cell:active{opacity:.65}
+.day-cell.av{background:var(--avail-bg)}
+.day-cell.bk{background:var(--booked-bg)}
+.day-cell.bl{background:var(--blocked-bg)}
+/* Icono de estado (✔ o —) */
+.dc-icon{font-size:15px;font-weight:700;line-height:1}
+.dc-icon.av-c{color:var(--avail)}
+.dc-icon.bl-c{color:var(--blocked)}
+/* Nombre del huésped */
+.dc-name{
+  font-size:11px;font-weight:700;color:var(--booked);
+  line-height:1.2;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;max-width:52px;padding:0 2px;
 }
-.c-guest:active{opacity:.7}
-
-/* Price cell */
-.c-price{
-  text-align:center;padding:7px 2px;cursor:pointer;
-  font-size:11px;font-weight:700;color:var(--ink);
-}
-.c-price.ov{color:#e65c00}
-.c-price.na{color:#d1d5db;font-weight:400}
-.c-price.dim{color:#d1d5db;font-weight:400;text-decoration:line-through}
-.c-price:active{opacity:.7}
+/* Precio */
+.dc-price{font-size:11px;font-weight:600;color:var(--ink);margin-top:2px;line-height:1}
+.dc-price.dim{color:#bbb;text-decoration:line-through;font-weight:400}
+.dc-price.ov{color:#e65c00}
+.dc-price.na{color:#ccc;font-weight:400}
 
 /* ── OVERLAY + SHEET ──────────────────────────────── */
 #overlay{
@@ -369,7 +364,6 @@ html,body{
     <div class="logo" style="font-size:17px">alc<em>homes</em></div>
     <div id="sync-pill">Cargando…</div>
   </div>
-  <div id="room-tabs"></div>
   <div id="month-bar">
     <span id="month-bar-text">Cargando…</span>
     <span id="month-bar-today">Hoy</span>
@@ -517,9 +511,18 @@ const MONTHS_LONG = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","A
 const MONTHS_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 
 // ── STATE ──────────────────────────────────────────────
-let PIN = "", ROOMS = [], ROOM = null;
-let ALL_BOOKINGS = [], ALL_PRICES = {};
-let SEL_DATE = null, AVAIL_STATE = 1;
+let PIN = "", ROOMS = [];
+let DATA = {};        // { roomId: { bookings:[], prices:{} } }
+let SEL_DATE = null, SEL_ROOM = null, AVAIL_STATE = 1;
+
+// Nombres cortos para la columna lateral
+const ROOM_LABEL = {
+  702395: { name: "Deluxe",  sub: "Suite" },
+  702396: { name: "Doble",   sub: "Estándar" },
+  702397: { name: "Hab. 1",  sub: "Std Queen" },
+  702398: { name: "Hab. 2",  sub: "Sup Queen" },
+  702399: { name: "Hab. 3",  sub: "Queen" },
+};
 
 // ── HELPERS ────────────────────────────────────────────
 const $ = s => document.querySelector(s);
@@ -599,25 +602,12 @@ async function initApp() {
     const r = await fetch(`${API}/rooms`, {headers: {"x-app-pin": PIN}});
     const d = await r.json();
     ROOMS = d.rooms || [];
-    ROOM = ROOMS[0];
-    renderTabs();
+    ROOMS.forEach(r => { DATA[r.id] = {bookings: [], prices: {}}; });
     populateRoomSelects();
     await loadData();
   } catch(e) {
     setPill("Error al iniciar");
   }
-}
-function renderTabs() {
-  const w = $("#room-tabs"); w.innerHTML = "";
-  ROOMS.forEach(rm => {
-    const t = document.createElement("div");
-    t.className = "rtab" + (rm.id === ROOM.id ? " active" : "");
-    t.textContent = rm.name;
-    t.addEventListener("click", async () => {
-      ROOM = rm; renderTabs(); await loadData();
-    });
-    w.appendChild(t);
-  });
 }
 function populateRoomSelects() {
   ["#nb-room","#bl-room"].forEach(sel => {
@@ -638,31 +628,42 @@ async function loadData() {
     const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
     months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
   }
-  try {
-    const results = await Promise.all(months.map(m => fetchMonth(ROOM.id, m)));
-    ALL_BOOKINGS = [];
-    ALL_PRICES = {};
-    results.forEach(res => {
-      if (!res || !res.ok) return;
-      (res.bookings || []).forEach(b => {
-        // Dedup by arrival+guestName
-        if (!ALL_BOOKINGS.find(x => x.arrival === b.arrival && x.guestName === b.guestName)) {
-          ALL_BOOKINGS.push(b);
-        }
-      });
-      Object.assign(ALL_PRICES, res.prices || {});
-    });
+  // Reiniciar data
+  ROOMS.forEach(r => { DATA[r.id] = {bookings:[], prices:{}}; });
+
+  // Fase 1: primeros 2 meses × 5 hab. en paralelo → render rápido
+  await Promise.allSettled(
+    months.slice(0,2).flatMap(m => ROOMS.map(r => fetchAndMerge(r.id, m)))
+  );
+  renderCalendar();
+  updateMonthBar();
+  setPill("● cargando…");
+
+  // Fase 2: meses restantes, de uno en uno (5 hab. en paralelo por mes)
+  for (const m of months.slice(2)) {
+    await Promise.allSettled(ROOMS.map(r => fetchAndMerge(r.id, m)));
     renderCalendar();
-    updateMonthBar();
-    setPill(ROOM.name);
-    // Scroll listener: actualiza la barra de mes al desplazarse
-    const cw = $("#cal-wrap");
-    cw.removeEventListener("scroll", handleCalScroll);
-    cw.addEventListener("scroll", handleCalScroll);
-  } catch(e) {
-    setPill("Error: " + e.message);
   }
+  setPill("✓");
+
+  const cw = $("#cal-wrap");
+  cw.removeEventListener("scroll", handleCalScroll);
+  cw.addEventListener("scroll", handleCalScroll);
 }
+
+async function fetchAndMerge(roomId, month) {
+  try {
+    const res = await fetchMonth(roomId, month);
+    if (!res?.ok) return;
+    const d = DATA[roomId];
+    (res.bookings || []).forEach(b => {
+      if (!d.bookings.find(x => x.arrival === b.arrival && x.guestName === b.guestName))
+        d.bookings.push(b);
+    });
+    Object.assign(d.prices, res.prices || {});
+  } catch {}
+}
+
 async function fetchMonth(roomId, month) {
   const r = await fetch(`${API}/calendar?roomId=${roomId}&month=${month}&pin=${PIN}`, {
     headers: {"x-app-pin": PIN}
@@ -671,8 +672,8 @@ async function fetchMonth(roomId, month) {
 }
 
 // ── CALENDAR RENDER ────────────────────────────────────
-function bookedOn(ds) {
-  return ALL_BOOKINGS.find(b => b.arrival <= ds && b.departure > ds);
+function roomBookedOn(roomId, ds) {
+  return (DATA[roomId]?.bookings || []).find(b => b.arrival <= ds && b.departure > ds);
 }
 function fmtPrice(v) {
   return v != null ? "€" + Number(v).toFixed(0) : "—";
@@ -683,98 +684,76 @@ function renderCalendar() {
   const todaySt = todayStr();
   const tb = $("#cal-body"); tb.innerHTML = "";
 
-  // Build 365 days from today (1 año vista)
+  // 365 días desde hoy
   const dates = [];
   for (let i = 0; i < 365; i++) {
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
     const ds = d.toISOString().slice(0,10);
-    dates.push({ds, d, dow: d.getDay(), day: d.getDate(), month: d.getMonth(), year: d.getFullYear()});
+    dates.push({ds, dow: d.getDay(), day: d.getDate(), month: d.getMonth(), year: d.getFullYear()});
   }
 
-  // ── Row 1: Day headers ──
+  // ── Fila de cabecera: esquina + fechas ──
   const trH = document.createElement("tr");
-  // Month separator rows (span columns)
-  // We'll insert them as separate rows using a different approach
+  // Celda esquina (sticky top+left)
+  const corner = document.createElement("th");
+  corner.className = "col-corner";
+  corner.style.cssText = "position:sticky;left:0;top:0;z-index:30;width:82px;min-width:82px;background:var(--bk);border-right:3px solid rgba(255,255,255,.2)";
+  trH.appendChild(corner);
 
-  // Build date header row
-  dates.forEach(({ds, d, dow, day, month, year}, i) => {
+  dates.forEach(({ds, dow, day, month, year}, i) => {
     const th = document.createElement("th");
     const isToday = ds === todaySt;
     const isWknd = dow === 0 || dow === 6;
-    // Mostrar mes: siempre en el primer día visible Y en cada 1 de mes
     const showMonth = i === 0 || day === 1;
-    const chipText = MONTHS_SHORT[month].toUpperCase();
-    const monthChip = showMonth
-      ? `<div class="month-chip">${chipText}</div>`
-      : "";
+    const chip = showMonth ? `<div class="month-chip">${MONTHS_SHORT[month].toUpperCase()}</div>` : "";
     th.className = "th-date"
       + (isToday ? " today" : "")
       + (isWknd ? " wknd" : "")
       + (showMonth && i > 0 ? " new-month" : "");
-    th.dataset.date = ds;
-    th.innerHTML = monthChip + `<div class="dname">${DAYS[dow]}</div><div class="dnum">${day}</div>`;
-    th.addEventListener("click", () => openDaySheet(ds));
+    th.innerHTML = chip + `<div class="dname">${DAYS[dow]}</div><div class="dnum">${day}</div>`;
     trH.appendChild(th);
   });
   tb.appendChild(trH);
 
-  // ── Row 2: Status ──
-  const trS = document.createElement("tr");
-  dates.forEach(({ds}) => {
-    const bk = bookedOn(ds);
-    const pr = ALL_PRICES[ds] || {};
-    const bl = pr.numAvail === 0;
-    const td = document.createElement("td");
-    td.dataset.date = ds;
-    td.addEventListener("click", () => openDaySheet(ds));
-    if (bk) {
-      td.className = "c-status bk";
-      td.textContent = "✖";
-    } else if (bl) {
-      td.className = "c-status bl";
-      td.textContent = "—";
-    } else {
-      td.className = "c-status av";
-      td.textContent = "✔";
-    }
-    trS.appendChild(td);
-  });
-  tb.appendChild(trS);
+  // ── Una fila por habitación ──
+  ROOMS.forEach((room, ri) => {
+    const tr = document.createElement("tr");
+    tr.className = "room-row";
 
-  // ── Row 3: Guest / Price ──
-  const trG = document.createElement("tr");
-  dates.forEach(({ds}) => {
-    const bk = bookedOn(ds);
-    const td = document.createElement("td");
-    td.dataset.date = ds;
-    td.className = "c-guest";
-    td.addEventListener("click", () => openDaySheet(ds));
-    if (bk) {
-      const parts = (bk.guestName || "").split(" ");
-      td.textContent = parts[0] ? parts[0].substring(0,6) : "";
-    }
-    trG.appendChild(td);
-  });
-  tb.appendChild(trG);
+    // Celda nombre (sticky left)
+    const lbl = document.createElement("td");
+    lbl.className = "room-lbl";
+    const rl = ROOM_LABEL[room.id] || {name: room.name, sub: ""};
+    lbl.innerHTML = `<div class="room-name">${rl.name}</div><div class="room-sub">${rl.sub}</div>`;
+    tr.appendChild(lbl);
 
-  const trP = document.createElement("tr");
-  dates.forEach(({ds}) => {
-    const bk = bookedOn(ds);
-    const pr = ALL_PRICES[ds] || {};
-    const bl = pr.numAvail === 0;
-    const td = document.createElement("td");
-    td.dataset.date = ds;
-    td.addEventListener("click", () => openDaySheet(ds));
-    let cls = "c-price";
-    if (bk || bl) cls += " dim";
-    else if (pr.isOverride) cls += " ov";
-    else if (pr.price1 == null) cls += " na";
-    td.className = cls;
-    td.textContent = fmtPrice(pr.price1);
-    trP.appendChild(td);
+    // Celdas de días
+    dates.forEach(({ds}) => {
+      const bk = roomBookedOn(room.id, ds);
+      const pr = (DATA[room.id]?.prices || {})[ds] || {};
+      const bl = pr.numAvail === 0;
+
+      const td = document.createElement("td");
+      td.className = "day-cell" + (bk ? " bk" : bl ? " bl" : " av");
+
+      if (bk) {
+        const first = (bk.guestName || "Hués.").split(" ")[0].substring(0, 7);
+        td.innerHTML = `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(pr.price1)}</div>`;
+      } else if (bl) {
+        td.innerHTML = `<div class="dc-icon bl-c">—</div>`;
+      } else {
+        const pCls = pr.price1 == null ? " na" : pr.isOverride ? " ov" : "";
+        td.innerHTML = `<div class="dc-icon av-c">✔</div><div class="dc-price${pCls}">${fmtPrice(pr.price1)}</div>`;
+      }
+
+      td.addEventListener("click", () => openDaySheet(ds, room));
+      tr.appendChild(td);
+    });
+
+    tb.appendChild(tr);
   });
-  tb.appendChild(trP);
 }
+
 
 // ── SHEET SYSTEM ───────────────────────────────────────
 function openSheet() {
@@ -791,14 +770,16 @@ function showPanel(id) {
 }
 
 // ── DAY SHEET ──────────────────────────────────────────
-function openDaySheet(ds) {
+function openDaySheet(ds, room) {
   SEL_DATE = ds;
-  const bk = bookedOn(ds);
-  const pr = ALL_PRICES[ds] || {};
+  SEL_ROOM = room;
+  const bk = roomBookedOn(room.id, ds);
+  const pr = (DATA[room.id]?.prices || {})[ds] || {};
   const bl = pr.numAvail === 0;
 
+  const rl = ROOM_LABEL[room.id] || {name: room.name};
   $("#sh-day-title").textContent = dateLabel(ds, {weekday:"long",day:"numeric",month:"long"});
-  $("#sh-day-sub").textContent = ROOM.name;
+  $("#sh-day-sub").textContent = rl.name;
 
   const body = $("#sh-day-body");
   body.innerHTML = "";
@@ -911,7 +892,7 @@ function openDaySheet(ds) {
 
     // Pre-fill price panel when tapping "Editar precio"
     $("#act-price").addEventListener("click", () => {
-      $("#price-subtitle").textContent = dateLabel(ds, {day:"numeric",month:"long"}) + " · " + ROOM.name;
+      $("#price-subtitle").textContent = dateLabel(ds, {day:"numeric",month:"long"}) + " · " + SEL_ROOM.name;
       $("#pr-from").value = ds;
       $("#pr-to").value = ds;
       $("#pr-price").value = price != null ? price : "";
@@ -926,10 +907,10 @@ function openDaySheet(ds) {
       const next = new Date(ds + "T12:00:00");
       next.setDate(next.getDate() + 1);
       const depDate = next.toISOString().slice(0,10);
-      $("#booking-subtitle").textContent = ROOM.name;
+      $("#booking-subtitle").textContent = SEL_ROOM.name;
       $("#nb-arrival").value = ds;
       $("#nb-departure").value = depDate;
-      $("#nb-room").value = ROOM.id;
+      $("#nb-room").value = SEL_ROOM.id;
       clearAlert("#booking-alert");
       showPanel("panel-booking");
     });
@@ -939,10 +920,10 @@ function openDaySheet(ds) {
       const next = new Date(ds + "T12:00:00");
       next.setDate(next.getDate() + 1);
       const toDate = next.toISOString().slice(0,10);
-      $("#block-subtitle").textContent = ROOM.name;
+      $("#block-subtitle").textContent = SEL_ROOM.name;
       $("#bl-from").value = ds;
       $("#bl-to").value = toDate;
-      $("#bl-room").value = ROOM.id;
+      $("#bl-room").value = SEL_ROOM.id;
       clearAlert("#block-alert");
       showPanel("panel-block");
     });
@@ -960,7 +941,7 @@ async function unblockDate(ds) {
     const r = await fetch(`${API}/update`, {
       method: "POST",
       headers: {"content-type":"application/json","x-app-pin":PIN},
-      body: JSON.stringify({pin: PIN, roomId: ROOM.id, from: ds, to: ds, numAvail: 1})
+      body: JSON.stringify({pin: PIN, roomId: SEL_ROOM.id, from: ds, to: ds, numAvail: 1})
     });
     const d = await r.json();
     if (d.ok) {
@@ -1001,7 +982,7 @@ $("#pr-save").addEventListener("click", async () => {
   clearAlert("#price-alert");
   const from = $("#pr-from").value || SEL_DATE;
   const to = $("#pr-to").value || SEL_DATE;
-  const body = {pin: PIN, roomId: ROOM.id, from, to, numAvail: AVAIL_STATE};
+  const body = {pin: PIN, roomId: SEL_ROOM.id, from, to, numAvail: AVAIL_STATE};
   const v = $("#pr-price").value;
   if (v !== "") body.price1 = Number(v);
   const btn = $("#pr-save");
