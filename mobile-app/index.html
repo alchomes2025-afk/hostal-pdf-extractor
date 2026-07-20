@@ -1,498 +1,1078 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <!-- Meta tags para diseño nativo en móviles y PWA -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
-    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
-    <title>Gestión Beds24</title>
-    
-    <!-- Iconos de Google -->
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0" rel="stylesheet" />
-    
-    <style>
-        /* ================= VARIABLES Y TEMA ================= */
-        :root {
-            --primary: #007aff;
-            --primary-hover: #005bb5;
-            --bg-color: #f2f2f7;
-            --card-bg: #ffffff;
-            --text-main: #1c1c1e;
-            --text-muted: #8e8e93;
-            --border-color: rgba(60, 60, 67, 0.1);
-            --nav-bg: rgba(255, 255, 255, 0.85);
-            --danger: #ff3b30;
-            --success: #34c759;
-        }
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --primary: #0a84ff;
-                --bg-color: #000000;
-                --card-bg: #1c1c1e;
-                --text-main: #f2f2f7;
-                --text-muted: #98989d;
-                --border-color: rgba(84, 84, 88, 0.3);
-                --nav-bg: rgba(28, 28, 30, 0.85);
-            }
-        }
+<!-- PWA: oculta barra del navegador al añadir a pantalla de inicio -->
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black"/>
+<meta name="apple-mobile-web-app-title" content="Alchomes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="theme-color" content="#003580"/>
+<link rel="manifest" href="manifest.json"/>
 
-        /* ================= RESET Y BASE ================= */
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-tap-highlight-color: transparent; }
-        body { background-color: var(--bg-color); color: var(--text-main); overflow: hidden; height: 100vh; width: 100vw; display: flex; flex-direction: column; }
-        
-        /* ================= COMPONENTES DE UI ================= */
-        .screen { display: none; height: 100vh; width: 100vw; flex-direction: column; }
-        .screen.active { display: flex; animation: fadeIn 0.3s ease; }
-        
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+<title>Alchomes</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;margin:0;padding:0}
+:root{
+  --bk:#003580;--bk2:#1a4ea0;--acc:#0071c2;--yel:#febb02;
+  --avail:#1e7e34;--avail-bg:#e8f7ea;
+  --blocked:#c0392b;--blocked-bg:#fde8e8;
+  --booked:#0071c2;--booked-bg:#dce9ff;
+  --muted:#6b7280;--border:#e5e7eb;--ink:#111827;
+  --cell:56px;--radius:16px;
+}
+html,body{
+  height:100%;background:#f5f5f7;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:13px;color:var(--ink);
+  /* Prevent bounce scroll on iOS */
+  overscroll-behavior:none;
+}
+#app{display:flex;flex-direction:column;height:100%;max-width:520px;margin:0 auto}
 
-        /* Header tipo iOS */
-        header {
-            padding: calc(env(safe-area-inset-top) + 20px) 20px 15px;
-            background: var(--bg-color);
-            position: sticky; top: 0; z-index: 10;
-        }
-        header h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.5px; }
+/* ── LOGIN ─────────────────────────────────────────── */
+#login-screen{
+  flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;background:var(--bk);padding:32px 24px;
+}
+.logo{color:#fff;font-size:24px;font-weight:800;letter-spacing:.3px;margin-bottom:4px}
+.logo em{color:var(--yel);font-style:normal}
+.logo-sub{color:rgba(255,255,255,.5);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:40px}
+#pin-dots{display:flex;gap:18px;margin-bottom:32px}
+.pin-dot{width:13px;height:13px;border-radius:50%;border:2px solid rgba(255,255,255,.3);background:transparent;transition:all .15s}
+.pin-dot.filled{background:#fff;border-color:#fff;transform:scale(1.15)}
+#keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:100%;max-width:264px}
+.key{
+  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);
+  border-radius:14px;color:#fff;font-size:22px;font-weight:400;
+  padding:15px 0;text-align:center;cursor:pointer;user-select:none;
+  transition:background .1s;
+}
+.key:active{background:rgba(255,255,255,.2)}
+.key.sub{font-size:12px;color:rgba(255,255,255,.5);font-weight:500}
+#login-err{color:#ff8a80;font-size:12px;height:16px;margin-top:14px;text-align:center}
 
-        /* Contenedor principal */
-        .content { flex: 1; overflow-y: auto; padding: 0 20px 100px; }
+/* ── MAIN SCREEN ────────────────────────────────────── */
+#main-screen{flex:1;display:none;flex-direction:column;overflow:hidden}
 
-        /* Tarjetas (Cards) */
-        .card { background: var(--card-bg); border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.03); border: 1px solid var(--border-color); }
-        .card h3 { margin-bottom: 15px; font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+/* Topbar */
+#topbar{
+  background:var(--bk);padding:10px 14px;
+  display:flex;align-items:center;justify-content:space-between;
+  flex-shrink:0;
+}
+#topbar .logo{font-size:17px;margin-bottom:0}
+#sync-pill{
+  font-size:11px;font-weight:600;color:rgba(255,255,255,.7);
+  background:rgba(255,255,255,.12);padding:3px 10px;border-radius:99px;
+}
 
-        /* Formularios e Inputs */
-        .input-group { margin-bottom: 16px; }
-        .input-group label { display: block; font-size: 13px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px; }
-        input[type="text"], input[type="number"], input[type="tel"], input[type="email"], input[type="date"], input[type="password"] {
-            width: 100%; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-main); font-size: 16px; outline: none; transition: border 0.2s;
-        }
-        input:focus { border-color: var(--primary); }
+/* Room tabs */
+#room-tabs{
+  display:flex;gap:5px;overflow-x:auto;padding:8px 12px;
+  background:var(--bk2);scrollbar-width:none;flex-shrink:0;
+}
+#room-tabs::-webkit-scrollbar{display:none}
+.rtab{
+  flex:0 0 auto;padding:5px 14px;border-radius:99px;font-size:12px;font-weight:600;
+  color:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.2);
+  cursor:pointer;white-space:nowrap;transition:all .15s;user-select:none;
+}
+.rtab.active{background:#fff;color:var(--bk);border-color:#fff}
 
-        /* Switches (Toggles iOS) */
-        .toggle-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; padding: 10px 0; border-bottom: 1px solid var(--border-color); }
-        .toggle-switch { position: relative; width: 50px; height: 30px; appearance: none; background: #e5e5ea; border-radius: 30px; outline: none; cursor: pointer; transition: 0.3s; }
-        .toggle-switch:checked { background: var(--success); }
-        .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 26px; height: 26px; background: white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: 0.3s; }
-        .toggle-switch:checked::after { transform: translateX(20px); }
+/* Calendar wrapper */
+#cal-wrap{
+  flex:1;overflow-x:auto;overflow-y:hidden;background:#fff;
+  /* Smooth iOS scroll */
+  -webkit-overflow-scrolling:touch;
+}
+#cal-wrap::-webkit-scrollbar{height:3px}
+#cal-wrap::-webkit-scrollbar-thumb{background:var(--acc);border-radius:2px}
 
-        /* Botones */
-        button { background: var(--primary); color: white; border: none; padding: 16px; border-radius: 14px; width: 100%; font-size: 17px; font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.1s; display: flex; justify-content: center; align-items: center; gap: 8px; }
-        button:active { transform: scale(0.98); background: var(--primary-hover); }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
+/* Calendar table */
+#cal{border-collapse:collapse;table-layout:fixed}
+#cal th,#cal td{
+  width:var(--cell);min-width:var(--cell);
+  border-right:1px solid var(--border);border-bottom:1px solid var(--border);
+  user-select:none;
+}
 
-        /* Navegación Inferior (Bottom Bar) */
-        .bottom-nav {
-            position: fixed; bottom: 0; left: 0; right: 0; height: calc(65px + env(safe-area-inset-bottom));
-            background: var(--nav-bg); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px);
-            border-top: 1px solid var(--border-color); display: flex; justify-content: space-around; align-items: center; padding-bottom: env(safe-area-inset-bottom); z-index: 100;
-        }
-        .nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-muted); text-decoration: none; font-size: 10px; font-weight: 500; cursor: pointer; transition: color 0.2s; width: 33%; }
-        .nav-item.active { color: var(--primary); }
-        .nav-item .material-symbols-rounded { font-size: 26px; margin-bottom: 2px; }
+/* Month separator header */
+.th-month{
+  background:var(--bk);color:#fff;font-size:10px;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase;
+  padding:5px 8px;text-align:left;
+  position:sticky;top:0;z-index:10;
+  border-right:none;border-bottom:none;
+}
 
-        /* Sistema de Toasts (Notificaciones) */
-        #toast-container { position: fixed; top: env(safe-area-inset-top); left: 50%; transform: translateX(-50%); z-index: 1000; display: flex; flex-direction: column; gap: 10px; width: 90%; pointer-events: none; }
-        .toast { background: rgba(30, 30, 30, 0.9); backdrop-filter: blur(10px); color: white; padding: 14px 20px; border-radius: 30px; font-size: 14px; font-weight: 500; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.2); animation: slideDown 0.3s ease forwards; }
-        @keyframes slideDown { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(10px); opacity: 1; } }
+/* Day header */
+.th-date{
+  background:#f9fafb;text-align:center;padding:7px 2px 6px;
+  cursor:pointer;position:sticky;top:0;z-index:5;
+}
+.th-date .dname{font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.th-date .dnum{font-size:18px;font-weight:300;color:var(--ink);line-height:1.2;margin-top:1px}
+.th-date.today .dnum{
+  background:var(--acc);color:#fff;width:30px;height:30px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;margin:1px auto 0;
+  font-weight:600;font-size:15px;
+}
+.th-date.wknd{background:#f0f2f5}
 
-        /* Pantalla de Login (PIN) */
-        .pin-display { font-size: 40px; letter-spacing: 15px; text-align: center; margin: 40px 0; height: 50px; font-weight: bold; }
-        .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; max-width: 300px; margin: 0 auto; }
-        .key { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 50%; height: 75px; width: 75px; display: flex; justify-content: center; align-items: center; font-size: 28px; margin: 0 auto; cursor: pointer; user-select: none; }
-        .key:active { background: var(--border-color); }
-        .login-wrapper { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 20px; margin-top: -50px; }
+/* Status cell */
+.c-status{
+  text-align:center;padding:8px 2px;cursor:pointer;
+  font-size:10px;font-weight:700;transition:opacity .1s;
+}
+.c-status:active{opacity:.7}
+.c-status.av{background:var(--avail-bg);color:var(--avail)}
+.c-status.bk{background:var(--booked-bg);color:var(--booked)}
+.c-status.bl{background:var(--blocked-bg);color:var(--blocked)}
 
-        /* Loader */
-        .loader { width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: white; animation: spin 1s ease-in-out infinite; display: none; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-    </style>
+/* Guest name cell */
+.c-guest{
+  text-align:center;padding:3px 2px;cursor:pointer;
+  font-size:9px;font-weight:600;color:var(--booked);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:var(--cell);height:18px;
+}
+.c-guest:active{opacity:.7}
+
+/* Price cell */
+.c-price{
+  text-align:center;padding:7px 2px;cursor:pointer;
+  font-size:11px;font-weight:700;color:var(--ink);
+}
+.c-price.ov{color:#e65c00}
+.c-price.na{color:#d1d5db;font-weight:400}
+.c-price.dim{color:#d1d5db;font-weight:400;text-decoration:line-through}
+.c-price:active{opacity:.7}
+
+/* ── OVERLAY + SHEET ──────────────────────────────── */
+#overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.4);
+  opacity:0;pointer-events:none;transition:opacity .25s;z-index:40;
+}
+#overlay.open{opacity:1;pointer-events:auto}
+
+#sheet{
+  position:fixed;left:0;right:0;bottom:0;
+  max-width:520px;margin:0 auto;
+  background:#fff;border-radius:20px 20px 0 0;
+  box-shadow:0 -8px 40px rgba(0,0,0,.18);
+  z-index:41;
+  transform:translateY(110%);
+  transition:transform .28s cubic-bezier(.32,.72,0,1);
+  max-height:88vh;overflow-y:auto;
+  /* iOS safe area */
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+#sheet.open{transform:translateY(0)}
+
+/* Handle bar */
+.sh-handle{
+  width:36px;height:4px;border-radius:2px;
+  background:#d1d5db;margin:10px auto 0;
+}
+
+/* Sheet panels */
+.sh-panel{display:none;padding:0 20px 24px}
+.sh-panel.active{display:block}
+
+/* Sheet header row */
+.sh-head{
+  display:flex;align-items:center;gap:10px;
+  padding:16px 0 12px;
+  border-bottom:1px solid var(--border);margin-bottom:16px;
+}
+.sh-back{
+  background:#f3f4f6;border:none;border-radius:10px;
+  width:34px;height:34px;font-size:18px;cursor:pointer;color:var(--ink);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+}
+.sh-close{
+  background:none;border:none;
+  font-size:18px;cursor:pointer;color:var(--muted);
+  margin-left:auto;padding:4px;
+}
+.sh-title{font-size:14px;font-weight:700;color:var(--bk);line-height:1.3}
+.sh-subtitle{font-size:11px;color:var(--muted);margin-top:1px}
+
+/* Day detail: status badge */
+.day-badge{
+  display:inline-flex;align-items:center;gap:6px;
+  padding:5px 12px;border-radius:99px;font-size:12px;font-weight:700;
+  margin-bottom:16px;
+}
+.day-badge.av{background:var(--avail-bg);color:var(--avail)}
+.day-badge.bk{background:var(--booked-bg);color:var(--booked)}
+.day-badge.bl{background:var(--blocked-bg);color:var(--blocked)}
+
+/* Booking detail rows */
+.bk-info{display:flex;flex-direction:column;gap:2px;margin-bottom:20px}
+.bk-name{font-size:20px;font-weight:700;color:var(--ink);margin-bottom:10px}
+.bk-row{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 0;border-bottom:1px solid #f3f4f6;font-size:13px;
+}
+.bk-row:last-child{border-bottom:none}
+.bk-icon{font-size:16px;width:24px;text-align:center;flex-shrink:0}
+.bk-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);display:block;margin-bottom:1px}
+.bk-val{font-weight:600;color:var(--ink)}
+.bk-link{font-weight:600;color:var(--acc);text-decoration:none}
+.bk-link:active{opacity:.7}
+
+/* Nights badge */
+.nights-badge{
+  display:inline-block;background:#f3f4f6;color:var(--muted);
+  font-size:10px;font-weight:600;padding:2px 8px;border-radius:99px;margin-left:6px;
+}
+
+/* Call/WhatsApp buttons */
+.contact-btns{display:flex;gap:10px;margin-top:4px}
+.contact-btn{
+  flex:1;padding:13px 0;border-radius:12px;border:none;
+  font-size:13px;font-weight:700;cursor:pointer;text-decoration:none;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.contact-btn.call{background:#e8f7ea;color:var(--avail)}
+.contact-btn.wa{background:#dcf8c6;color:#1a7832}
+.contact-btn:active{opacity:.8}
+
+/* Available day action buttons */
+.day-actions{display:flex;flex-direction:column;gap:8px}
+.day-action{
+  display:flex;align-items:center;gap:12px;
+  padding:14px 16px;background:#f9fafb;border:none;
+  border-radius:12px;cursor:pointer;text-align:left;width:100%;
+  transition:background .1s;
+}
+.day-action:active{background:#f3f4f6}
+.day-action-icon{font-size:18px;width:24px;text-align:center}
+.day-action-text{flex:1}
+.day-action-title{font-size:13px;font-weight:700;color:var(--ink);display:block}
+.day-action-sub{font-size:11px;color:var(--muted);display:block;margin-top:1px}
+.day-action-arrow{color:var(--muted);font-size:16px}
+
+/* Price badge inside available actions */
+.price-display{
+  font-size:28px;font-weight:700;color:var(--ink);margin-bottom:16px;
+}
+.price-display span{font-size:14px;font-weight:400;color:var(--muted)}
+.price-ov{color:#e65c00}
+
+/* Unblock button */
+.unblock-btn{
+  width:100%;padding:14px;background:var(--avail-bg);
+  border:1.5px solid var(--avail);border-radius:12px;
+  color:var(--avail);font-size:14px;font-weight:700;
+  cursor:pointer;margin-top:4px;
+}
+.unblock-btn:active{opacity:.8}
+
+/* ── FORM PANELS ───────────────────────────────────── */
+.form-grp{margin-bottom:14px}
+.form-lbl{
+  display:block;font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.5px;
+  color:var(--muted);margin-bottom:5px;
+}
+.form-inp,.form-sel{
+  width:100%;padding:11px 13px;
+  border:1.5px solid var(--border);border-radius:10px;
+  font-size:14px;font-family:inherit;color:var(--ink);
+  background:#fff;appearance:none;
+  transition:border-color .15s;
+}
+.form-inp:focus,.form-sel:focus{outline:none;border-color:var(--acc)}
+.form-row{display:flex;gap:10px}
+.form-row .form-grp{flex:1}
+.form-hint{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.4}
+
+/* Availability toggle */
+.avail-toggle{display:flex;gap:8px;margin-bottom:14px}
+.av-tog{
+  flex:1;padding:10px 0;border-radius:10px;
+  border:1.5px solid var(--border);font-size:12px;font-weight:700;
+  cursor:pointer;background:#fff;color:var(--muted);transition:all .15s;
+}
+.av-tog.on{background:var(--avail-bg);border-color:var(--avail);color:var(--avail)}
+.av-tog.off{background:var(--blocked-bg);border-color:var(--blocked);color:var(--blocked)}
+
+/* Form alert */
+.form-alert{
+  padding:10px 13px;border-radius:10px;font-size:12px;
+  margin-bottom:12px;line-height:1.4;display:none;
+}
+.form-alert.err{background:#ffebee;color:var(--blocked);border:1px solid #ffcdd2;display:block}
+.form-alert.ok{background:var(--avail-bg);color:var(--avail);border:1px solid #c8e6c9;display:block}
+
+/* Submit button */
+.sh-submit{
+  width:100%;padding:14px;border-radius:12px;border:none;
+  background:var(--acc);color:#fff;font-size:15px;font-weight:700;
+  cursor:pointer;margin-top:8px;transition:background .15s;
+}
+.sh-submit:active{background:var(--bk)}
+.sh-submit:disabled{opacity:.5;cursor:not-allowed}
+</style>
 </head>
 <body>
+<div id="app">
 
-    <!-- Contenedor de Notificaciones -->
-    <div id="toast-container"></div>
+<!-- ══ LOGIN ══════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="logo">alc<em>homes</em></div>
+  <div class="logo-sub">Beds24 Manager</div>
+  <div id="pin-dots"></div>
+  <div id="keypad"></div>
+  <div id="login-err"></div>
+</div>
 
-    <!-- PANTALLA 1: LOGIN (PIN) -->
-    <div id="screen-login" class="screen active">
-        <div class="login-wrapper">
-            <div style="text-align: center; margin-bottom: 20px;">
-                <span class="material-symbols-rounded" style="font-size: 60px; color: var(--primary);">admin_panel_settings</span>
-                <h1 style="font-size: 24px; margin-top: 10px;">Acceso Beds24</h1>
-                <p style="color: var(--text-muted); font-size: 15px; margin-top: 5px;">Introduce el PIN de 4 dígitos</p>
-            </div>
-            
-            <div class="pin-display" id="pin-dots">••••</div>
-            <input type="hidden" id="pin-value" value="">
+<!-- ══ MAIN ═══════════════════════════════════════════ -->
+<div id="main-screen">
+  <div id="topbar">
+    <div class="logo" style="font-size:17px">alc<em>homes</em></div>
+    <div id="sync-pill">Cargando…</div>
+  </div>
+  <div id="room-tabs"></div>
+  <div id="cal-wrap">
+    <table id="cal"><tbody id="cal-body"></tbody></table>
+  </div>
+</div>
 
-            <div class="keypad">
-                <div class="key" onclick="addPin('1')">1</div>
-                <div class="key" onclick="addPin('2')">2</div>
-                <div class="key" onclick="addPin('3')">3</div>
-                <div class="key" onclick="addPin('4')">4</div>
-                <div class="key" onclick="addPin('5')">5</div>
-                <div class="key" onclick="addPin('6')">6</div>
-                <div class="key" onclick="addPin('7')">7</div>
-                <div class="key" onclick="addPin('8')">8</div>
-                <div class="key" onclick="addPin('9')">9</div>
-                <div class="key" onclick="clearPin()" style="background: transparent; border: none;"><span class="material-symbols-rounded">backspace</span></div>
-                <div class="key" onclick="addPin('0')">0</div>
-                <div class="key" onclick="submitPin()" style="background: transparent; border: none; color: var(--primary);"><span class="material-symbols-rounded" style="font-size: 34px;">login</span></div>
-            </div>
-        </div>
+<!-- ══ SHEET ══════════════════════════════════════════ -->
+<div id="overlay"></div>
+<div id="sheet">
+  <div class="sh-handle"></div>
+
+  <!-- Panel: detalle del día -->
+  <div id="panel-day" class="sh-panel">
+    <div class="sh-head">
+      <div>
+        <div class="sh-title" id="sh-day-title">—</div>
+        <div class="sh-subtitle" id="sh-day-sub"></div>
+      </div>
+      <button class="sh-close" id="sh-day-close">✕</button>
     </div>
+    <div id="sh-day-body"></div>
+  </div>
 
-    <!-- PANTALLA 2: APLICACIÓN PRINCIPAL -->
-    <div id="screen-app" class="screen">
-        
-        <!-- Pestaña: Inventario / Calendario -->
-        <div id="tab-inventory" class="tab-content">
-            <header>
-                <h1>Calendario</h1>
-            </header>
-            <div class="content">
-                <div class="card">
-                    <h3><span class="material-symbols-rounded">date_range</span> Rango de Fechas</h3>
-                    <div class="input-group">
-                        <label>Fecha Inicio</label>
-                        <input type="date" id="inv-start" required>
-                    </div>
-                    <div class="input-group">
-                        <label>Fecha Fin</label>
-                        <input type="date" id="inv-end" required>
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h3><span class="material-symbols-rounded">edit_attributes</span> Modificar Disponibilidad</h3>
-                    
-                    <div class="input-group">
-                        <label>ID de la Habitación</label>
-                        <!-- He puesto las IDs de tu código Python como opciones -->
-                        <select id="inv-room" style="width: 100%; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-main); font-size: 16px;">
-                            <option value="702395">Habitación 702395</option>
-                            <option value="702396">Habitación 702396</option>
-                            <option value="702397">Habitación 702397</option>
-                            <option value="702398">Habitación 702398</option>
-                        </select>
-                    </div>
-
-                    <div class="input-group">
-                        <label>Precio por noche (€)</label>
-                        <input type="number" id="inv-price" placeholder="Ej: 140">
-                    </div>
-
-                    <div class="toggle-container">
-                        <div>
-                            <span style="font-weight: 600; display: block;">Bloquear Fechas</span>
-                            <span style="font-size: 12px; color: var(--text-muted);">Establece la disponibilidad a 0</span>
-                        </div>
-                        <input type="checkbox" id="inv-block" class="toggle-switch">
-                    </div>
-
-                    <button onclick="saveInventory()" id="btn-save-inv">
-                        <span class="btn-text">Guardar Cambios</span>
-                        <div class="loader"></div>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Pestaña: Nueva Reserva -->
-        <div id="tab-booking" class="tab-content" style="display: none;">
-            <header>
-                <h1>Nueva Reserva</h1>
-            </header>
-            <div class="content">
-                <div class="card">
-                    <h3><span class="material-symbols-rounded">person_add</span> Datos del Cliente</h3>
-                    <div class="input-group">
-                        <label>Nombre Completo</label>
-                        <input type="text" id="book-name" placeholder="Ej: Juan Pérez">
-                    </div>
-                    <div class="input-group">
-                        <label>Teléfono</label>
-                        <input type="tel" id="book-phone" placeholder="+34 600 000 000">
-                    </div>
-                    <div class="input-group">
-                        <label>Correo Electrónico</label>
-                        <input type="email" id="book-email" placeholder="correo@ejemplo.com">
-                    </div>
-                </div>
-
-                <div class="card">
-                    <h3><span class="material-symbols-rounded">hotel</span> Detalles de la Estancia</h3>
-                    <div class="input-group">
-                        <label>Habitación</label>
-                        <select id="book-room" style="width: 100%; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--border-color); background: var(--bg-color); color: var(--text-main); font-size: 16px;">
-                            <option value="702395">Habitación 702395</option>
-                            <option value="702396">Habitación 702396</option>
-                            <option value="702397">Habitación 702397</option>
-                            <option value="702398">Habitación 702398</option>
-                        </select>
-                    </div>
-                    <div style="display: flex; gap: 10px;">
-                        <div class="input-group" style="flex: 1;">
-                            <label>Check-in</label>
-                            <input type="date" id="book-checkin">
-                        </div>
-                        <div class="input-group" style="flex: 1;">
-                            <label>Check-out</label>
-                            <input type="date" id="book-checkout">
-                        </div>
-                    </div>
-                    
-                    <button onclick="createBooking()" id="btn-save-book" style="margin-top: 10px;">
-                        <span class="btn-text">Confirmar Reserva</span>
-                        <div class="loader"></div>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Bottom Navigation -->
-        <div class="bottom-nav">
-            <div class="nav-item active" onclick="switchTab('inventory', this)">
-                <span class="material-symbols-rounded">calendar_month</span>
-                Calendario
-            </div>
-            <div class="nav-item" onclick="switchTab('booking', this)">
-                <span class="material-symbols-rounded">add_circle</span>
-                Reserva
-            </div>
-            <div class="nav-item" onclick="logout()">
-                <span class="material-symbols-rounded">logout</span>
-                Salir
-            </div>
-        </div>
+  <!-- Panel: editar precio -->
+  <div id="panel-price" class="sh-panel">
+    <div class="sh-head">
+      <button class="sh-back" id="back-price">‹</button>
+      <div>
+        <div class="sh-title">Editar precio</div>
+        <div class="sh-subtitle" id="price-subtitle"></div>
+      </div>
+      <button class="sh-close" id="price-close">✕</button>
     </div>
+    <div id="price-alert" class="form-alert"></div>
+    <div class="avail-toggle">
+      <button class="av-tog on" id="av-open">✓ Disponible</button>
+      <button class="av-tog" id="av-close">✗ Cerrar</button>
+    </div>
+    <div class="form-row">
+      <div class="form-grp">
+        <label class="form-lbl">Del</label>
+        <input type="date" id="pr-from" class="form-inp"/>
+      </div>
+      <div class="form-grp">
+        <label class="form-lbl">Al</label>
+        <input type="date" id="pr-to" class="form-inp"/>
+      </div>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Standard Rate (€)</label>
+      <input type="number" id="pr-price" class="form-inp" inputmode="decimal" step="0.5" placeholder="—"/>
+      <div class="form-hint">No Reembolsable y Tarifa Semanal las calcula Booking.com automáticamente</div>
+    </div>
+    <button class="sh-submit" id="pr-save">Guardar en Beds24</button>
+  </div>
 
-    <script>
-        /* ================= CONFIGURACIÓN ================= */
-        // IMPORTANTE: Cambia esta URL por la URL de tu backend Flask alojado en Render.
-        const API_BASE_URL = "http://localhost:5000/mobile"; 
-        
-        let appPin = localStorage.getItem('beds24_pin') || '';
+  <!-- Panel: nueva reserva -->
+  <div id="panel-booking" class="sh-panel">
+    <div class="sh-head">
+      <button class="sh-back" id="back-booking">‹</button>
+      <div>
+        <div class="sh-title">Nueva reserva</div>
+        <div class="sh-subtitle" id="booking-subtitle"></div>
+      </div>
+      <button class="sh-close" id="booking-close">✕</button>
+    </div>
+    <div id="booking-alert" class="form-alert"></div>
+    <div class="form-grp">
+      <label class="form-lbl">Nombre completo *</label>
+      <input type="text" id="nb-name" class="form-inp" placeholder="Ej: María García"/>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Teléfono *</label>
+      <input type="tel" id="nb-phone" class="form-inp" placeholder="+34 623 456 789"/>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Email *</label>
+      <input type="email" id="nb-email" class="form-inp" placeholder="Ej: maria@email.com"/>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Habitación *</label>
+      <select id="nb-room" class="form-sel"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-grp">
+        <label class="form-lbl">Check-in *</label>
+        <input type="date" id="nb-arrival" class="form-inp"/>
+      </div>
+      <div class="form-grp">
+        <label class="form-lbl">Check-out *</label>
+        <input type="date" id="nb-departure" class="form-inp"/>
+      </div>
+    </div>
+    <button class="sh-submit" id="nb-save">Crear reserva</button>
+  </div>
 
-        /* ================= INICIALIZACIÓN ================= */
-        window.onload = () => {
-            // Establecer fechas de hoy por defecto
-            const today = new Date().toISOString().split('T')[0];
-            const tomorrow = new Date(new Date().setDate(new Date().getDate() + 1)).toISOString().split('T')[0];
-            
-            document.getElementById('inv-start').value = today;
-            document.getElementById('inv-end').value = tomorrow;
-            document.getElementById('book-checkin').value = today;
-            document.getElementById('book-checkout').value = tomorrow;
+  <!-- Panel: bloquear fechas -->
+  <div id="panel-block" class="sh-panel">
+    <div class="sh-head">
+      <button class="sh-back" id="back-block">‹</button>
+      <div>
+        <div class="sh-title">Bloquear fecha</div>
+        <div class="sh-subtitle" id="block-subtitle"></div>
+      </div>
+      <button class="sh-close" id="block-close">✕</button>
+    </div>
+    <div id="block-alert" class="form-alert"></div>
+    <div class="form-grp">
+      <label class="form-lbl">Habitación *</label>
+      <select id="bl-room" class="form-sel"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-grp">
+        <label class="form-lbl">Desde *</label>
+        <input type="date" id="bl-from" class="form-inp"/>
+      </div>
+      <div class="form-grp">
+        <label class="form-lbl">Hasta *</label>
+        <input type="date" id="bl-to" class="form-inp"/>
+      </div>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Motivo *</label>
+      <select id="bl-reason" class="form-sel">
+        <option value="Reparación">🔧 Reparación</option>
+        <option value="Mantenimiento">🧹 Mantenimiento</option>
+        <option value="Limpieza">🧼 Limpieza</option>
+        <option value="Otro">📌 Otro</option>
+      </select>
+    </div>
+    <button class="sh-submit" id="bl-save">Bloquear fechas</button>
+  </div>
 
-            // Mostrar app si ya hay PIN guardado
-            if(appPin.length === 4) {
-                document.getElementById('screen-login').classList.remove('active');
-                document.getElementById('screen-app').classList.add('active');
-            } else {
-                updatePinDisplay();
-            }
-        };
+</div><!-- /sheet -->
+</div><!-- /app -->
 
-        /* ================= UTILIDADES UI ================= */
-        function showToast(message, type = 'info') {
-            const container = document.getElementById('toast-container');
-            const toast = document.createElement('div');
-            toast.className = 'toast';
-            toast.innerText = message;
-            if(type === 'error') toast.style.borderLeft = "4px solid var(--danger)";
-            if(type === 'success') toast.style.borderLeft = "4px solid var(--success)";
-            
-            container.appendChild(toast);
-            
-            // Eliminar toast después de 3.5 segundos
-            setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(-20px)';
-                toast.style.transition = 'all 0.3s ease';
-                setTimeout(() => toast.remove(), 300);
-            }, 3500);
+<script>
+// ── CONFIG ─────────────────────────────────────────────
+const API = "https://hostal-pdf-extractor.onrender.com/mobile";
+const DAYS = ["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+const MONTHS_LONG = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+const MONTHS_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+
+// ── STATE ──────────────────────────────────────────────
+let PIN = "", ROOMS = [], ROOM = null;
+let ALL_BOOKINGS = [], ALL_PRICES = {};
+let SEL_DATE = null, AVAIL_STATE = 1;
+
+// ── HELPERS ────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+function todayStr() {
+  return new Date().toISOString().slice(0,10);
+}
+function dateLabel(ds, opts) {
+  const d = new Date(ds + "T12:00:00");
+  const s = d.toLocaleDateString("es-ES", opts || {weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function nightCount(a, b) {
+  const ms = new Date(b) - new Date(a);
+  return Math.round(ms / 86400000);
+}
+function toWALink(phone) {
+  const clean = phone.replace(/\D/g,"");
+  const num = (clean.startsWith("34") && clean.length > 9) ? clean : "34" + clean.replace(/^0/,"");
+  return "https://wa.me/" + num;
+}
+function setPill(t) { $("#sync-pill").textContent = t; }
+
+// ── LOGIN ──────────────────────────────────────────────
+function renderDots() {
+  const w = $("#pin-dots"); w.innerHTML = "";
+  for (let i = 0; i < 4; i++) {
+    const d = document.createElement("div");
+    d.className = "pin-dot" + (i < PIN.length ? " filled" : "");
+    w.appendChild(d);
+  }
+}
+function buildKeypad() {
+  const keys = ["1","2","3","4","5","6","7","8","9","⌫","0","OK"];
+  const w = $("#keypad"); w.innerHTML = "";
+  keys.forEach(k => {
+    const b = document.createElement("button");
+    b.className = "key" + (k === "⌫" || k === "OK" ? " sub" : "");
+    b.textContent = k;
+    b.addEventListener("click", () => handleKey(k));
+    w.appendChild(b);
+  });
+}
+async function handleKey(k) {
+  if (k === "⌫") PIN = PIN.slice(0,-1);
+  else if (k === "OK") { await doLogin(); return; }
+  else if (PIN.length < 4) PIN += k;
+  renderDots();
+  if (PIN.length === 4) await doLogin();
+}
+async function doLogin() {
+  $("#login-err").textContent = "";
+  try {
+    const r = await fetch(`${API}/login`, {
+      method: "POST",
+      headers: {"x-app-pin": PIN, "content-type": "application/json"},
+      body: JSON.stringify({pin: PIN})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      $("#login-screen").style.display = "none";
+      const ms = $("#main-screen");
+      ms.style.display = "flex";
+      await initApp();
+    } else {
+      $("#login-err").textContent = "PIN incorrecto";
+      PIN = ""; renderDots();
+    }
+  } catch {
+    $("#login-err").textContent = "Sin conexión";
+    PIN = ""; renderDots();
+  }
+}
+
+// ── INIT ───────────────────────────────────────────────
+async function initApp() {
+  try {
+    const r = await fetch(`${API}/rooms`, {headers: {"x-app-pin": PIN}});
+    const d = await r.json();
+    ROOMS = d.rooms || [];
+    ROOM = ROOMS[0];
+    renderTabs();
+    populateRoomSelects();
+    await loadData();
+  } catch(e) {
+    setPill("Error al iniciar");
+  }
+}
+function renderTabs() {
+  const w = $("#room-tabs"); w.innerHTML = "";
+  ROOMS.forEach(rm => {
+    const t = document.createElement("div");
+    t.className = "rtab" + (rm.id === ROOM.id ? " active" : "");
+    t.textContent = rm.name;
+    t.addEventListener("click", async () => {
+      ROOM = rm; renderTabs(); await loadData();
+    });
+    w.appendChild(t);
+  });
+}
+function populateRoomSelects() {
+  ["#nb-room","#bl-room"].forEach(sel => {
+    const s = $(sel); s.innerHTML = "";
+    ROOMS.forEach(r => {
+      const o = document.createElement("option");
+      o.value = r.id; o.textContent = r.name; s.appendChild(o);
+    });
+  });
+}
+
+// ── DATA LOADING ───────────────────────────────────────
+async function loadData() {
+  setPill("Cargando…");
+  const today = new Date();
+  const months = [];
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
+    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+  }
+  try {
+    const results = await Promise.all(months.map(m => fetchMonth(ROOM.id, m)));
+    ALL_BOOKINGS = [];
+    ALL_PRICES = {};
+    results.forEach(res => {
+      if (!res || !res.ok) return;
+      (res.bookings || []).forEach(b => {
+        // Dedup by arrival+guestName
+        if (!ALL_BOOKINGS.find(x => x.arrival === b.arrival && x.guestName === b.guestName)) {
+          ALL_BOOKINGS.push(b);
         }
+      });
+      Object.assign(ALL_PRICES, res.prices || {});
+    });
+    renderCalendar();
+    setPill(ROOM.name);
+  } catch(e) {
+    setPill("Error: " + e.message);
+  }
+}
+async function fetchMonth(roomId, month) {
+  const r = await fetch(`${API}/calendar?roomId=${roomId}&month=${month}&pin=${PIN}`, {
+    headers: {"x-app-pin": PIN}
+  });
+  return r.json();
+}
 
-        function switchTab(tabName, element) {
-            // Ocultar todas las pestañas
-            document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
-            // Quitar clase active a todos los botones
-            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-            
-            // Mostrar pestaña seleccionada
-            document.getElementById(`tab-${tabName}`).style.display = 'block';
-            element.classList.add('active');
-        }
+// ── CALENDAR RENDER ────────────────────────────────────
+function bookedOn(ds) {
+  return ALL_BOOKINGS.find(b => b.arrival <= ds && b.departure > ds);
+}
+function fmtPrice(v) {
+  return v != null ? "€" + Number(v).toFixed(0) : "—";
+}
 
-        function setLoading(buttonId, isLoading) {
-            const btn = document.getElementById(buttonId);
-            const text = btn.querySelector('.btn-text');
-            const loader = btn.querySelector('.loader');
-            
-            if (isLoading) {
-                btn.disabled = true;
-                text.style.display = 'none';
-                loader.style.display = 'block';
-            } else {
-                btn.disabled = false;
-                text.style.display = 'block';
-                loader.style.display = 'none';
-            }
-        }
+function renderCalendar() {
+  const today = new Date();
+  const todaySt = todayStr();
+  const tb = $("#cal-body"); tb.innerHTML = "";
 
-        /* ================= LOGICA LOGIN ================= */
-        let currentPin = "";
-        function addPin(num) {
-            if (currentPin.length < 4) {
-                currentPin += num;
-                updatePinDisplay();
-            }
-        }
+  // Build 90 days from today
+  const dates = [];
+  for (let i = 0; i < 90; i++) {
+    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+    const ds = d.toISOString().slice(0,10);
+    dates.push({ds, d, dow: d.getDay(), day: d.getDate(), month: d.getMonth(), year: d.getFullYear()});
+  }
 
-        function clearPin() {
-            currentPin = currentPin.slice(0, -1);
-            updatePinDisplay();
-        }
+  // ── Row 1: Day headers ──
+  const trH = document.createElement("tr");
+  // Month separator rows (span columns)
+  // We'll insert them as separate rows using a different approach
 
-        function updatePinDisplay() {
-            let display = "";
-            for (let i = 0; i < 4; i++) {
-                display += (i < currentPin.length) ? "●" : "○";
-            }
-            document.getElementById('pin-dots').innerText = display;
-        }
+  // Build date header row
+  dates.forEach(({ds, d, dow, day, month, year}) => {
+    const th = document.createElement("th");
+    const isToday = ds === todaySt;
+    const isWknd = dow === 0 || dow === 6;
+    th.className = "th-date" + (isToday ? " today" : "") + (isWknd ? " wknd" : "");
+    th.dataset.date = ds;
+    // Month label on 1st of month (except very first date if not 1st)
+    const showMonth = day === 1 && i > 0;
+    const monthLabel = showMonth ? `<div style="font-size:9px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${MONTHS_SHORT[month].toUpperCase()}</div>` : "";
+    const dnumStyle = isToday ? `<div class="dnum">${day}</div>` : `<div class="dnum">${day}</div>`;
+    th.innerHTML = monthLabel + `<div class="dname">${DAYS[dow]}</div>${dnumStyle}`;
+    th.addEventListener("click", () => openDaySheet(ds));
+    trH.appendChild(th);
+  });
+  tb.appendChild(trH);
 
-        function submitPin() {
-            if (currentPin.length === 4) {
-                appPin = currentPin;
-                localStorage.setItem('beds24_pin', appPin);
-                showToast("Sesión iniciada", "success");
-                
-                document.getElementById('screen-login').classList.remove('active');
-                document.getElementById('screen-app').classList.add('active');
-            } else {
-                showToast("Introduce 4 dígitos", "error");
-            }
-        }
+  // ── Row 2: Status ──
+  const trS = document.createElement("tr");
+  dates.forEach(({ds}) => {
+    const bk = bookedOn(ds);
+    const pr = ALL_PRICES[ds] || {};
+    const bl = pr.numAvail === 0;
+    const td = document.createElement("td");
+    td.dataset.date = ds;
+    td.addEventListener("click", () => openDaySheet(ds));
+    if (bk) {
+      td.className = "c-status bk";
+      td.textContent = "✖";
+    } else if (bl) {
+      td.className = "c-status bl";
+      td.textContent = "—";
+    } else {
+      td.className = "c-status av";
+      td.textContent = "✔";
+    }
+    trS.appendChild(td);
+  });
+  tb.appendChild(trS);
 
-        function logout() {
-            localStorage.removeItem('beds24_pin');
-            currentPin = "";
-            appPin = "";
-            updatePinDisplay();
-            document.getElementById('screen-app').classList.remove('active');
-            document.getElementById('screen-login').classList.add('active');
-        }
+  // ── Row 3: Guest / Price ──
+  const trG = document.createElement("tr");
+  dates.forEach(({ds}) => {
+    const bk = bookedOn(ds);
+    const td = document.createElement("td");
+    td.dataset.date = ds;
+    td.className = "c-guest";
+    td.addEventListener("click", () => openDaySheet(ds));
+    if (bk) {
+      const parts = (bk.guestName || "").split(" ");
+      td.textContent = parts[0] ? parts[0].substring(0,6) : "";
+    }
+    trG.appendChild(td);
+  });
+  tb.appendChild(trG);
 
-        /* ================= LLAMADAS A LA API ================= */
-        
-        // Petición genérica con Autenticación (Envía el PIN al Backend Flask)
-        async function fetchAPI(endpoint, method, data) {
-            const headers = {
-                'Content-Type': 'application/json',
-                'X-App-Pin': appPin // Tu Flask puede leer request.headers.get('X-App-Pin')
-            };
+  const trP = document.createElement("tr");
+  dates.forEach(({ds}) => {
+    const bk = bookedOn(ds);
+    const pr = ALL_PRICES[ds] || {};
+    const bl = pr.numAvail === 0;
+    const td = document.createElement("td");
+    td.dataset.date = ds;
+    td.addEventListener("click", () => openDaySheet(ds));
+    let cls = "c-price";
+    if (bk || bl) cls += " dim";
+    else if (pr.isOverride) cls += " ov";
+    else if (pr.price1 == null) cls += " na";
+    td.className = cls;
+    td.textContent = fmtPrice(pr.price1);
+    trP.appendChild(td);
+  });
+  tb.appendChild(trP);
+}
 
-            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-                method: method,
-                headers: headers,
-                body: JSON.stringify(data)
-            });
+// ── SHEET SYSTEM ───────────────────────────────────────
+function openSheet() {
+  $("#overlay").classList.add("open");
+  $("#sheet").classList.add("open");
+}
+function closeSheet() {
+  $("#overlay").classList.remove("open");
+  $("#sheet").classList.remove("open");
+}
+function showPanel(id) {
+  document.querySelectorAll(".sh-panel").forEach(p => p.classList.remove("active"));
+  $(`#${id}`).classList.add("active");
+}
 
-            if (!response.ok) {
-                const err = await response.text();
-                throw new Error(err || "Error en el servidor");
-            }
-            
-            return await response.json();
-        }
+// ── DAY SHEET ──────────────────────────────────────────
+function openDaySheet(ds) {
+  SEL_DATE = ds;
+  const bk = bookedOn(ds);
+  const pr = ALL_PRICES[ds] || {};
+  const bl = pr.numAvail === 0;
 
-        // GUARDAR CALENDARIO / INVENTARIO
-        async function saveInventory() {
-            const startDate = document.getElementById('inv-start').value;
-            const endDate = document.getElementById('inv-end').value;
-            const roomId = document.getElementById('inv-room').value;
-            const price = document.getElementById('inv-price').value;
-            const isBlocked = document.getElementById('inv-block').checked;
+  $("#sh-day-title").textContent = dateLabel(ds, {weekday:"long",day:"numeric",month:"long"});
+  $("#sh-day-sub").textContent = ROOM.name;
 
-            if(!startDate || !endDate) {
-                showToast("Selecciona las fechas", "error");
-                return;
-            }
+  const body = $("#sh-day-body");
+  body.innerHTML = "";
 
-            const payload = {
-                roomId: roomId,
-                startDate: startDate,
-                endDate: endDate,
-                price: price ? parseFloat(price) : null,
-                numAvail: isBlocked ? 0 : null // Si está bloqueado, enviamos 0.
-            };
+  if (bk) {
+    // ── BOOKED ──
+    const nights = nightCount(bk.arrival, bk.departure);
+    const arrLabel = dateLabel(bk.arrival, {day:"numeric",month:"short",year:"numeric"});
+    const depLabel = dateLabel(bk.departure, {day:"numeric",month:"short",year:"numeric"});
 
-            setLoading('btn-save-inv', true);
-            
-            try {
-                // Según tu código Flask: POST a /inventory/rooms/calendar
-                await fetchAPI('/inventory/rooms/calendar', 'POST', payload);
-                showToast("Inventario actualizado correctamente", "success");
-                
-                // Limpiar form
-                document.getElementById('inv-price').value = "";
-                document.getElementById('inv-block').checked = false;
-            } catch (error) {
-                showToast("Error: " + error.message, "error");
-            } finally {
-                setLoading('btn-save-inv', false);
-            }
-        }
+    let html = `<div class="day-badge bk">✖ Reservado</div>
+    <div class="bk-info">
+      <div class="bk-name">${bk.guestName || "Huésped"}</div>`;
 
-        // CREAR RESERVA
-        async function createBooking() {
-            const name = document.getElementById('book-name').value;
-            const phone = document.getElementById('book-phone').value;
-            const email = document.getElementById('book-email').value;
-            const roomId = document.getElementById('book-room').value;
-            const checkin = document.getElementById('book-checkin').value;
-            const checkout = document.getElementById('book-checkout').value;
+    // Check-in / Check-out
+    html += `<div class="bk-row">
+      <span class="bk-icon">📅</span>
+      <div>
+        <span class="bk-label">Check-in</span>
+        <span class="bk-val">${arrLabel}</span>
+      </div>
+    </div>
+    <div class="bk-row">
+      <span class="bk-icon">📅</span>
+      <div>
+        <span class="bk-label">Check-out</span>
+        <span class="bk-val">${depLabel} <span class="nights-badge">${nights} noche${nights!==1?"s":""}</span></span>
+      </div>
+    </div>`;
 
-            if(!name || !checkin || !checkout) {
-                showToast("Faltan datos obligatorios", "error");
-                return;
-            }
+    // Phone
+    if (bk.phone) {
+      html += `<div class="bk-row">
+        <span class="bk-icon">📞</span>
+        <div>
+          <span class="bk-label">Teléfono</span>
+          <a href="tel:${bk.phone}" class="bk-link">${bk.phone}</a>
+        </div>
+      </div>`;
+    }
+    // Email
+    if (bk.email) {
+      html += `<div class="bk-row">
+        <span class="bk-icon">✉️</span>
+        <div>
+          <span class="bk-label">Email</span>
+          <a href="mailto:${bk.email}" class="bk-link">${bk.email}</a>
+        </div>
+      </div>`;
+    }
+    html += `</div>`;
 
-            const payload = {
-                roomId: roomId,
-                checkin: checkin,
-                checkout: checkout,
-                guest: {
-                    name: name,
-                    phone: phone,
-                    email: email
-                }
-            };
+    // Call / WhatsApp buttons
+    if (bk.phone) {
+      html += `<div class="contact-btns">
+        <a href="tel:${bk.phone}" class="contact-btn call">📞 Llamar</a>
+        <a href="${toWALink(bk.phone)}" class="contact-btn wa" target="_blank">💬 WhatsApp</a>
+      </div>`;
+    }
 
-            setLoading('btn-save-book', true);
+    body.innerHTML = html;
 
-            try {
-                // Según tu código Flask: POST a /bookings
-                await fetchAPI('/bookings', 'POST', payload);
-                showToast("Reserva creada con éxito", "success");
-                
-                // Limpiar form
-                document.getElementById('book-name').value = "";
-                document.getElementById('book-phone').value = "";
-                document.getElementById('book-email').value = "";
-                switchTab('inventory', document.querySelector('.nav-item')); // Volver al inicio
-            } catch (error) {
-                showToast("Error: " + error.message, "error");
-            } finally {
-                setLoading('btn-save-book', false);
-            }
-        }
-    </script>
+  } else if (bl) {
+    // ── BLOCKED ──
+    body.innerHTML = `<div class="day-badge bl">— Bloqueado</div>
+    <p style="color:var(--muted);font-size:13px;margin-bottom:20px;line-height:1.5">
+      Esta fecha está bloqueada y no está disponible para reservas.
+    </p>
+    <button class="unblock-btn" id="unblock-btn">✔ Desbloquear esta fecha</button>`;
+
+    $("#unblock-btn").addEventListener("click", () => unblockDate(ds));
+
+  } else {
+    // ── AVAILABLE ──
+    const price = pr.price1;
+    const priceHtml = price != null
+      ? `<div class="price-display ${pr.isOverride ? "price-ov" : ""}">
+          ${fmtPrice(price)} <span>Standard Rate${pr.isOverride ? " · modificado" : ""}</span>
+        </div>`
+      : `<div class="price-display"><span>Sin precio asignado</span></div>`;
+
+    body.innerHTML = `<div class="day-badge av">✔ Disponible</div>
+    ${priceHtml}
+    <div class="day-actions">
+      <button class="day-action" id="act-price">
+        <span class="day-action-icon">💲</span>
+        <span class="day-action-text">
+          <span class="day-action-title">Editar precio</span>
+          <span class="day-action-sub">Modificar tarifa o disponibilidad</span>
+        </span>
+        <span class="day-action-arrow">›</span>
+      </button>
+      <button class="day-action" id="act-booking">
+        <span class="day-action-icon">➕</span>
+        <span class="day-action-text">
+          <span class="day-action-title">Nueva reserva</span>
+          <span class="day-action-sub">Registrar una reserva manual</span>
+        </span>
+        <span class="day-action-arrow">›</span>
+      </button>
+      <button class="day-action" id="act-block">
+        <span class="day-action-icon">🚫</span>
+        <span class="day-action-text">
+          <span class="day-action-title">Bloquear fecha</span>
+          <span class="day-action-sub">Reparación, mantenimiento o limpieza</span>
+        </span>
+        <span class="day-action-arrow">›</span>
+      </button>
+    </div>`;
+
+    // Pre-fill price panel when tapping "Editar precio"
+    $("#act-price").addEventListener("click", () => {
+      $("#price-subtitle").textContent = dateLabel(ds, {day:"numeric",month:"long"}) + " · " + ROOM.name;
+      $("#pr-from").value = ds;
+      $("#pr-to").value = ds;
+      $("#pr-price").value = price != null ? price : "";
+      AVAIL_STATE = 1;
+      updAvToggle();
+      clearAlert("#price-alert");
+      showPanel("panel-price");
+    });
+
+    // Pre-fill booking panel
+    $("#act-booking").addEventListener("click", () => {
+      const next = new Date(ds + "T12:00:00");
+      next.setDate(next.getDate() + 1);
+      const depDate = next.toISOString().slice(0,10);
+      $("#booking-subtitle").textContent = ROOM.name;
+      $("#nb-arrival").value = ds;
+      $("#nb-departure").value = depDate;
+      $("#nb-room").value = ROOM.id;
+      clearAlert("#booking-alert");
+      showPanel("panel-booking");
+    });
+
+    // Pre-fill block panel
+    $("#act-block").addEventListener("click", () => {
+      const next = new Date(ds + "T12:00:00");
+      next.setDate(next.getDate() + 1);
+      const toDate = next.toISOString().slice(0,10);
+      $("#block-subtitle").textContent = ROOM.name;
+      $("#bl-from").value = ds;
+      $("#bl-to").value = toDate;
+      $("#bl-room").value = ROOM.id;
+      clearAlert("#block-alert");
+      showPanel("panel-block");
+    });
+  }
+
+  showPanel("panel-day");
+  openSheet();
+}
+
+// ── UNBLOCK ────────────────────────────────────────────
+async function unblockDate(ds) {
+  const btn = $("#unblock-btn");
+  btn.textContent = "Desbloqueando…"; btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/update`, {
+      method: "POST",
+      headers: {"content-type":"application/json","x-app-pin":PIN},
+      body: JSON.stringify({pin: PIN, roomId: ROOM.id, from: ds, to: ds, numAvail: 1})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      closeSheet();
+      await loadData();
+    } else {
+      btn.textContent = "✗ Error al desbloquear"; btn.disabled = false;
+    }
+  } catch {
+    btn.textContent = "✗ Error de conexión"; btn.disabled = false;
+  }
+}
+
+// ── AVAILABILITY TOGGLE (price panel) ─────────────────
+function updAvToggle() {
+  $("#av-open").className = "av-tog" + (AVAIL_STATE === 1 ? " on" : "");
+  $("#av-close").className = "av-tog" + (AVAIL_STATE === 0 ? " off" : "");
+}
+$("#av-open").addEventListener("click", () => { AVAIL_STATE = 1; updAvToggle(); });
+$("#av-close").addEventListener("click", () => { AVAIL_STATE = 0; updAvToggle(); });
+
+// ── ALERT HELPERS ──────────────────────────────────────
+function showAlert(sel, type, msg) {
+  const el = $(sel);
+  el.className = "form-alert " + type;
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function clearAlert(sel) {
+  const el = $(sel);
+  el.className = "form-alert";
+  el.style.display = "none";
+  el.textContent = "";
+}
+
+// ── SAVE PRICE ─────────────────────────────────────────
+$("#pr-save").addEventListener("click", async () => {
+  clearAlert("#price-alert");
+  const from = $("#pr-from").value || SEL_DATE;
+  const to = $("#pr-to").value || SEL_DATE;
+  const body = {pin: PIN, roomId: ROOM.id, from, to, numAvail: AVAIL_STATE};
+  const v = $("#pr-price").value;
+  if (v !== "") body.price1 = Number(v);
+  const btn = $("#pr-save");
+  btn.textContent = "Guardando…"; btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/update`, {
+      method: "POST",
+      headers: {"content-type":"application/json","x-app-pin":PIN},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showAlert("#price-alert","ok","✓ Guardado correctamente");
+      setTimeout(async () => { closeSheet(); await loadData(); }, 1200);
+    } else {
+      showAlert("#price-alert","err","✗ Error: " + (d.error?.message || JSON.stringify(d.error)));
+    }
+  } catch {
+    showAlert("#price-alert","err","✗ Error de conexión");
+  } finally {
+    btn.textContent = "Guardar en Beds24"; btn.disabled = false;
+  }
+});
+
+// ── CREATE BOOKING ─────────────────────────────────────
+$("#nb-save").addEventListener("click", async () => {
+  clearAlert("#booking-alert");
+  const name = ($("#nb-name").value || "").trim();
+  const phone = ($("#nb-phone").value || "").trim();
+  const email = ($("#nb-email").value || "").trim();
+  const roomId = $("#nb-room").value;
+  const arrival = $("#nb-arrival").value;
+  const departure = $("#nb-departure").value;
+
+  if (!name || !phone || !email || !roomId || !arrival || !departure) {
+    showAlert("#booking-alert","err","✗ Completa todos los campos"); return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showAlert("#booking-alert","err","✗ Email inválido"); return;
+  }
+  if (arrival >= departure) {
+    showAlert("#booking-alert","err","✗ La salida debe ser posterior a la entrada"); return;
+  }
+
+  const btn = $("#nb-save");
+  btn.textContent = "Creando…"; btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/create-booking`, {
+      method: "POST",
+      headers: {"content-type":"application/json","x-app-pin":PIN},
+      body: JSON.stringify({name, phone, email, roomId: parseInt(roomId), arrival, departure})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showAlert("#booking-alert","ok","✓ Reserva creada en Beds24");
+      // Clear form
+      ["#nb-name","#nb-phone","#nb-email","#nb-arrival","#nb-departure"].forEach(s => $(s).value = "");
+      setTimeout(async () => { closeSheet(); await loadData(); }, 1400);
+    } else {
+      showAlert("#booking-alert","err","✗ Error: " + (d.error || JSON.stringify(d)));
+    }
+  } catch(e) {
+    showAlert("#booking-alert","err","✗ Error: " + e.message);
+  } finally {
+    btn.textContent = "Crear reserva"; btn.disabled = false;
+  }
+});
+
+// ── BLOCK DATES ────────────────────────────────────────
+$("#bl-save").addEventListener("click", async () => {
+  clearAlert("#block-alert");
+  const roomId = $("#bl-room").value;
+  const from = $("#bl-from").value;
+  const to = $("#bl-to").value;
+  const reason = $("#bl-reason").value;
+
+  if (!roomId || !from || !to) {
+    showAlert("#block-alert","err","✗ Completa todos los campos"); return;
+  }
+  if (from >= to) {
+    showAlert("#block-alert","err","✗ La fecha final debe ser posterior"); return;
+  }
+
+  const btn = $("#bl-save");
+  btn.textContent = "Bloqueando…"; btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/block-dates`, {
+      method: "POST",
+      headers: {"content-type":"application/json","x-app-pin":PIN},
+      body: JSON.stringify({roomId: parseInt(roomId), from, to, reason})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showAlert("#block-alert","ok","✓ Fechas bloqueadas");
+      setTimeout(async () => { closeSheet(); await loadData(); }, 1200);
+    } else {
+      showAlert("#block-alert","err","✗ Error: " + (d.error || JSON.stringify(d)));
+    }
+  } catch(e) {
+    showAlert("#block-alert","err","✗ Error: " + e.message);
+  } finally {
+    btn.textContent = "Bloquear fechas"; btn.disabled = false;
+  }
+});
+
+// ── NAVIGATION (back buttons, close) ───────────────────
+["price","booking","block"].forEach(name => {
+  $(`#back-${name}`).addEventListener("click", () => showPanel("panel-day"));
+  $(`#${name}-close`).addEventListener("click", closeSheet);
+});
+$("#sh-day-close").addEventListener("click", closeSheet);
+$("#overlay").addEventListener("click", closeSheet);
+
+// ── BOOT ───────────────────────────────────────────────
+buildKeypad();
+renderDots();
+</script>
 </body>
 </html>
