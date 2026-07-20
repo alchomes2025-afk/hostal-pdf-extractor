@@ -85,11 +85,27 @@ html,body{
 /* Calendar wrapper */
 #cal-wrap{
   flex:1;overflow-x:auto;overflow-y:hidden;background:#fff;
-  /* Smooth iOS scroll */
   -webkit-overflow-scrolling:touch;
 }
 #cal-wrap::-webkit-scrollbar{height:3px}
 #cal-wrap::-webkit-scrollbar-thumb{background:var(--acc);border-radius:2px}
+
+/* Barra de mes sticky */
+#month-bar{
+  background:var(--bk2);
+  padding:8px 14px;display:flex;align-items:center;
+  justify-content:space-between;flex-shrink:0;
+  border-bottom:2px solid rgba(0,0,0,.15);
+}
+#month-bar-text{
+  font-size:15px;font-weight:700;color:#fff;letter-spacing:.2px;
+}
+#month-bar-today{
+  font-size:11px;font-weight:700;color:var(--bk);
+  background:var(--yel);padding:4px 12px;border-radius:99px;
+  cursor:pointer;user-select:none;
+  border:none;
+}
 
 /* Calendar table */
 #cal{border-collapse:collapse;table-layout:fixed}
@@ -121,6 +137,21 @@ html,body{
   font-weight:600;font-size:15px;
 }
 .th-date.wknd{background:#f0f2f5}
+/* Celda con separador de mes */
+.th-date.new-month{
+  border-left:3px solid var(--yel);
+}
+.month-chip{
+  display:block;
+  background:var(--acc);color:#fff;
+  font-size:8px;font-weight:800;letter-spacing:.6px;
+  text-transform:uppercase;
+  padding:2px 0;border-radius:3px;
+  margin-bottom:3px;
+  /* Sin nowrap: ocupa el ancho de la celda */
+  white-space:normal;text-align:center;
+  line-height:1.2;
+}
 
 /* Status cell */
 .c-status{
@@ -339,6 +370,10 @@ html,body{
     <div id="sync-pill">Cargando…</div>
   </div>
   <div id="room-tabs"></div>
+  <div id="month-bar">
+    <span id="month-bar-text">Cargando…</span>
+    <span id="month-bar-today">Hoy</span>
+  </div>
   <div id="cal-wrap">
     <table id="cal"><tbody id="cal-body"></tbody></table>
   </div>
@@ -618,7 +653,12 @@ async function loadData() {
       Object.assign(ALL_PRICES, res.prices || {});
     });
     renderCalendar();
+    updateMonthBar();
     setPill(ROOM.name);
+    // Scroll listener: actualiza la barra de mes al desplazarse
+    const cw = $("#cal-wrap");
+    cw.removeEventListener("scroll", handleCalScroll);
+    cw.addEventListener("scroll", handleCalScroll);
   } catch(e) {
     setPill("Error: " + e.message);
   }
@@ -661,13 +701,18 @@ function renderCalendar() {
     const th = document.createElement("th");
     const isToday = ds === todaySt;
     const isWknd = dow === 0 || dow === 6;
-    th.className = "th-date" + (isToday ? " today" : "") + (isWknd ? " wknd" : "");
+    // Mostrar mes: siempre en el primer día visible Y en cada 1 de mes
+    const showMonth = i === 0 || day === 1;
+    const chipText = MONTHS_SHORT[month].toUpperCase();
+    const monthChip = showMonth
+      ? `<div class="month-chip">${chipText}</div>`
+      : "";
+    th.className = "th-date"
+      + (isToday ? " today" : "")
+      + (isWknd ? " wknd" : "")
+      + (showMonth && i > 0 ? " new-month" : "");
     th.dataset.date = ds;
-    // Month label on 1st of month (except very first date if not 1st)
-    const showMonth = day === 1 && i > 0;
-    const monthLabel = showMonth ? `<div style="font-size:9px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${MONTHS_SHORT[month].toUpperCase()}</div>` : "";
-    const dnumStyle = isToday ? `<div class="dnum">${day}</div>` : `<div class="dnum">${day}</div>`;
-    th.innerHTML = monthLabel + `<div class="dname">${DAYS[dow]}</div>${dnumStyle}`;
+    th.innerHTML = monthChip + `<div class="dname">${DAYS[dow]}</div><div class="dnum">${day}</div>`;
     th.addEventListener("click", () => openDaySheet(ds));
     trH.appendChild(th);
   });
@@ -1069,6 +1114,25 @@ $("#bl-save").addEventListener("click", async () => {
 });
 $("#sh-day-close").addEventListener("click", closeSheet);
 $("#overlay").addEventListener("click", closeSheet);
+
+// ── MONTH BAR ──────────────────────────────────────────
+function updateMonthBar() {
+  const cw = $("#cal-wrap");
+  const scrollLeft = cw.scrollLeft;
+  const cellWidth = 56; // valor de --cell en px
+  const dayIndex = Math.floor(scrollLeft / cellWidth);
+  const today = new Date();
+  const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + dayIndex);
+  $("#month-bar-text").textContent =
+    MONTHS_LONG[d.getMonth()] + " " + d.getFullYear();
+}
+function handleCalScroll() { updateMonthBar(); }
+
+// Botón "Hoy": vuelve al inicio del scroll
+$("#month-bar-today").addEventListener("click", () => {
+  $("#cal-wrap").scrollTo({left: 0, behavior: "smooth"});
+  updateMonthBar();
+});
 
 // ── BOOT ───────────────────────────────────────────────
 buildKeypad();
