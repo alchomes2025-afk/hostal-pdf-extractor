@@ -526,8 +526,13 @@ const ROOM_LABEL = {
 
 // ── HELPERS ────────────────────────────────────────────
 const $ = s => document.querySelector(s);
+
+// Formatea una fecha en hora LOCAL (evita bug UTC en España UTC+1/+2)
+function localDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
 function todayStr() {
-  return new Date().toISOString().slice(0,10);
+  return localDateStr(new Date());
 }
 function dateLabel(ds, opts) {
   const d = new Date(ds + "T12:00:00");
@@ -688,7 +693,7 @@ function renderCalendar() {
   const dates = [];
   for (let i = 0; i < 365; i++) {
     const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
-    const ds = d.toISOString().slice(0,10);
+    const ds = localDateStr(d);
     dates.push({ds, dow: d.getDay(), day: d.getDate(), month: d.getMonth(), year: d.getFullYear()});
   }
 
@@ -906,7 +911,7 @@ function openDaySheet(ds, room) {
     $("#act-booking").addEventListener("click", () => {
       const next = new Date(ds + "T12:00:00");
       next.setDate(next.getDate() + 1);
-      const depDate = next.toISOString().slice(0,10);
+      const depDate = localDateStr(next);
       $("#booking-subtitle").textContent = SEL_ROOM.name;
       $("#nb-arrival").value = ds;
       $("#nb-departure").value = depDate;
@@ -919,7 +924,7 @@ function openDaySheet(ds, room) {
     $("#act-block").addEventListener("click", () => {
       const next = new Date(ds + "T12:00:00");
       next.setDate(next.getDate() + 1);
-      const toDate = next.toISOString().slice(0,10);
+      const toDate = localDateStr(next);
       $("#block-subtitle").textContent = SEL_ROOM.name;
       $("#bl-from").value = ds;
       $("#bl-to").value = toDate;
@@ -945,8 +950,12 @@ async function unblockDate(ds) {
     });
     const d = await r.json();
     if (d.ok) {
+      // Actualizar local inmediatamente
+      const prices = DATA[SEL_ROOM.id].prices;
+      if (!prices[ds]) prices[ds] = {};
+      prices[ds].numAvail = 1;
       closeSheet();
-      await loadData();
+      renderCalendar();
     } else {
       btn.textContent = "✗ Error al desbloquear"; btn.disabled = false;
     }
@@ -995,8 +1004,22 @@ $("#pr-save").addEventListener("click", async () => {
     });
     const d = await r.json();
     if (d.ok) {
+      // Actualizar DATA local inmediatamente (sin esperar reload de API)
+      let cur = new Date(from + "T12:00:00");
+      const end = new Date(to + "T12:00:00");
+      const prices = DATA[SEL_ROOM.id].prices;
+      while (cur <= end) {
+        const dk = localDateStr(cur);
+        if (!prices[dk]) prices[dk] = {};
+        if (body.price1 !== undefined) {
+          prices[dk].price1 = body.price1;
+          prices[dk].isOverride = true;
+        }
+        prices[dk].numAvail = AVAIL_STATE;
+        cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+      }
       showAlert("#price-alert","ok","✓ Guardado correctamente");
-      setTimeout(async () => { closeSheet(); await loadData(); }, 1200);
+      setTimeout(() => { closeSheet(); renderCalendar(); }, 900);
     } else {
       showAlert("#price-alert","err","✗ Error: " + (d.error?.message || JSON.stringify(d.error)));
     }
@@ -1042,7 +1065,14 @@ $("#nb-save").addEventListener("click", async () => {
       ["#nb-name","#nb-phone","#nb-email","#nb-arrival","#nb-departure"].forEach(s => $(s).value = "");
       setTimeout(async () => { closeSheet(); await loadData(); }, 1400);
     } else {
-      showAlert("#booking-alert","err","✗ Error: " + (d.error || JSON.stringify(d)));
+      // d.error puede ser un objeto JSON de Beds24 — lo mostramos legible
+      let errMsg = d.error;
+      if (typeof errMsg === "object") {
+        // Intentar extraer mensaje legible de Beds24
+        const e0 = errMsg?.errors?.[0];
+        errMsg = e0?.message || e0?.type || JSON.stringify(errMsg);
+      }
+      showAlert("#booking-alert","err","✗ " + (errMsg || JSON.stringify(d)));
     }
   } catch(e) {
     showAlert("#booking-alert","err","✗ Error: " + e.message);
@@ -1079,7 +1109,7 @@ $("#bl-save").addEventListener("click", async () => {
       showAlert("#block-alert","ok","✓ Fechas bloqueadas");
       setTimeout(async () => { closeSheet(); await loadData(); }, 1200);
     } else {
-      showAlert("#block-alert","err","✗ Error: " + (d.error || JSON.stringify(d)));
+      showAlert("#block-alert","err","✗ " + (typeof d.error === "object" ? JSON.stringify(d.error) : (d.error || JSON.stringify(d))));
     }
   } catch(e) {
     showAlert("#block-alert","err","✗ Error: " + e.message);
