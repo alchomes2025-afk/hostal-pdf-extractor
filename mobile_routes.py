@@ -402,3 +402,30 @@ def debug_offers():
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@mobile_bp.route("/debug-offers2", methods=["GET"])
+def debug_offers2():
+    """Diagnóstico v2: GET /inventory/rooms/offers con ocupación."""
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    try:
+        token = get_access_token()
+        results = {}
+        # Probamos distintas combinaciones de parámetros
+        for params in [
+            {"roomId": 702395, "arrival": "2026-08-01", "departure": "2026-08-08", "numAdult": 1},
+            {"roomId": 702395, "arrival": "2026-08-01", "departure": "2026-08-08", "numAdult": 2},
+            {"roomId": 702395, "arrival": "2026-08-01", "departure": "2026-08-02", "numAdult": 1},
+        ]:
+            key = f"numAdult={params.get('numAdult')}_nights={params.get('departure')}"
+            resp = requests.get(
+                f"{BEDS24_API}/inventory/rooms/offers",
+                params=params,
+                headers={"accept": "application/json", "token": token},
+                timeout=20,
+            )
+            results[key] = {"status": resp.status_code, "raw": resp.json()}
+        return jsonify({"ok": True, "results": results})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
