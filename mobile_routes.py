@@ -353,3 +353,26 @@ def setup_token():
   <textarea name="code" rows="5" cols="60"></textarea><br><br>
   <button type="submit" style="padding:10px 20px">Canjear</button>
 </form></body></html>"""
+
+
+@mobile_bp.route("/debug-prices", methods=["GET"])
+def debug_prices():
+    """Diagnóstico: muestra la respuesta cruda de GET /properties con price rules."""
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    try:
+        token = get_access_token()
+        resp = requests.get(
+            f"{BEDS24_API}/properties",
+            params={
+                "propertyId": PROPERTY_ID,
+                "includeAllRooms": "true",
+                "includePriceRules": "true",
+            },
+            headers={"accept": "application/json", "token": token},
+            timeout=20,
+        )
+        return jsonify({"ok": True, "status": resp.status_code, "raw": resp.json()})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+  
