@@ -657,7 +657,7 @@ function renderCalendar() {
   // We'll insert them as separate rows using a different approach
 
   // Build date header row
-  dates.forEach(({ds, d, dow, day, month, year}) => {
+  dates.forEach(({ds, d, dow, day, month, year}, i) => {
     const th = document.createElement("th");
     const isToday = ds === todaySt;
     const isWknd = dow === 0 || dow === 6;
