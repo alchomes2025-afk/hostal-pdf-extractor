@@ -461,11 +461,15 @@ ROOMS = [
 _token_cache = {"token": None, "expires_at": 0}
 
 # ─── Caché de calendario ───────────────────────────────────────────────────────
+# TTL largo (30 min) para no agotar los créditos de Beds24.
+# Se invalida al escribir datos (update, create-booking, block-dates).
 _calendar_cache = {}
-CALENDAR_CACHE_TTL = 300  # 5 minutos
+CALENDAR_CACHE_TTL = 1800  # 30 minutos
+
 
 def _cache_key(room_id, month):
     return f"{room_id}:{month}"
+
 
 def _cache_get(room_id, month):
     entry = _calendar_cache.get(_cache_key(room_id, month))
@@ -473,11 +477,13 @@ def _cache_get(room_id, month):
         return entry["data"]
     return None
 
+
 def _cache_set(room_id, month, data):
     _calendar_cache[_cache_key(room_id, month)] = {
         "data": data,
         "exp": time.time() + CALENDAR_CACHE_TTL,
     }
+
 
 def _cache_invalidate(room_id=None):
     if room_id is None:
@@ -488,40 +494,17 @@ def _cache_invalidate(room_id=None):
             del _calendar_cache[k]
 
 
-# ─── Wrapper Beds24 con retry en 429 ──────────────────────────────────────────
-# Beds24 devuelve 429 "Credit limit exceeded" cuando se hacen demasiadas llamadas
-# seguidas. Este wrapper reintenta automáticamente hasta 3 veces con espera.
-
-BEDS24_MAX_RETRIES = 3
-BEDS24_RETRY_WAIT  = 3  # segundos entre reintentos
-
-
+# ─── Wrapper Beds24 (sin retry — el 429 es cuota diaria, no esperar) ──────────
 def b24_get(token, path, params=None, timeout=20):
-    """GET a Beds24 API con reintentos automáticos en 429."""
     url = f"{BEDS24_API}{path}"
     headers = {"accept": "application/json", "token": token}
-    for attempt in range(BEDS24_MAX_RETRIES):
-        resp = requests.get(url, headers=headers, params=params, timeout=timeout)
-        if resp.status_code != 429:
-            return resp
-        if attempt < BEDS24_MAX_RETRIES - 1:
-            wait = int(resp.headers.get("Retry-After", BEDS24_RETRY_WAIT))
-            time.sleep(min(wait, 10))
-    return resp  # devuelve el último 429 si todos los intentos fallan
+    return requests.get(url, headers=headers, params=params, timeout=timeout)
 
 
 def b24_post(token, path, json_body=None, timeout=20):
-    """POST a Beds24 API con reintentos automáticos en 429."""
     url = f"{BEDS24_API}{path}"
     headers = {"accept": "application/json", "content-type": "application/json", "token": token}
-    for attempt in range(BEDS24_MAX_RETRIES):
-        resp = requests.post(url, headers=headers, json=json_body, timeout=timeout)
-        if resp.status_code != 429:
-            return resp
-        if attempt < BEDS24_MAX_RETRIES - 1:
-            wait = int(resp.headers.get("Retry-After", BEDS24_RETRY_WAIT))
-            time.sleep(min(wait, 10))
-    return resp
+    return requests.post(url, headers=headers, json=json_body, timeout=timeout)
 
 
 def get_access_token():
@@ -737,8 +720,14 @@ def mobile_calendar():
 def mobile_calendar_all():
     """
     Devuelve reservas + precios de TODAS las habitaciones para un mes.
-    Sustituye a hacer N llamadas a /calendar (una por habitación).
-    El frontend pasa de 60 llamadas a 12 (una por mes).
+
+    Llamadas a Beds24:
+      ANTES:  5 habitaciones × 2 llamadas = 10 llamadas por mes
+      AHORA:  1 llamada /bookings (toda la propiedad)
+            + 1 llamada /inventory/rooms/calendar (toda la propiedad)
+            = 2 llamadas por mes  →  reducción del 80 %
+
+    Cache: 30 minutos. Se invalida al guardar precios, crear reserva o bloquear fechas.
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
@@ -747,105 +736,133 @@ def mobile_calendar_all():
     if not month:
         return jsonify({"ok": False, "error": "Falta month"}), 400
 
+    # ── Comprobar caché (todas las habitaciones deben estar cacheadas) ──
+    all_cached = {}
+    for room in ROOMS:
+        cached = _cache_get(str(room["id"]), month)
+        if cached is None:
+            all_cached = None
+            break
+        all_cached[str(room["id"])] = cached
+    if all_cached is not None:
+        # 0 llamadas a Beds24
+        return jsonify({"ok": True, "rooms": {rid: {"bookings": d.get("bookings",[]), "prices": d.get("prices",{})} for rid, d in all_cached.items()}})
+
     try:
         year, mon = int(month.split("-")[0]), int(month.split("-")[1])
     except Exception:
         return jsonify({"ok": False, "error": "month debe ser YYYY-MM"}), 400
 
-    month_start = date(year, mon, 1)
-    last_day = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-    date_from = month_start.strftime("%Y-%m-%d")
-    date_to   = last_day.strftime("%Y-%m-%d")
-    search_from = (month_start - timedelta(days=60)).strftime("%Y-%m-%d")
+    month_start  = date(year, mon, 1)
+    last_day     = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    date_from    = month_start.strftime("%Y-%m-%d")
+    date_to      = last_day.strftime("%Y-%m-%d")
+    search_from  = (month_start - timedelta(days=60)).strftime("%Y-%m-%d")
 
     try:
         token = get_access_token()
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+    # ── LLAMADA 1/2: reservas de TODA LA PROPIEDAD ──────────────────────
+    bk_resp = b24_get(
+        token,
+        "/bookings",
+        params={
+            "propertyId": PROPERTY_ID,
+            "arrivalFrom": search_from,
+            "arrivalTo":   date_to,
+            "includePersonalInfo": "true",
+        },
+    )
+
+    if not bk_resp.ok:
+        # 429 u otro error — devolver inmediatamente con mensaje claro
+        err = bk_resp.json() if bk_resp.text else {"code": bk_resp.status_code}
+        return jsonify({"ok": False, "error": err}), bk_resp.status_code
+
+    # Agrupar bookings por roomId
+    bookings_by_room = {str(r["id"]): [] for r in ROOMS}
+    for b in (bk_resp.json().get("data") or []):
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
+        arrival   = (b.get("arrival",   "") or "")[:10]
+        departure = (b.get("departure", "") or "")[:10]
+        if not arrival or not departure:
+            continue
+        if departure <= date_from or arrival > date_to:
+            continue
+        rid = str(b.get("roomId", ""))
+        if rid not in bookings_by_room:
+            continue
+        guest = b.get("guest") or {}
+        first = guest.get("firstName") or b.get("firstName") or ""
+        last  = guest.get("lastName")  or b.get("lastName")  or ""
+        phone = guest.get("phone") or guest.get("mobile") or b.get("phone") or ""
+        email = guest.get("email") or b.get("email") or ""
+        bookings_by_room[rid].append({
+            "arrival":   arrival,
+            "departure": departure,
+            "guestName": f"{first} {last}".strip() or "Huésped",
+            "phone":     phone,
+            "email":     email,
+            "status":    b.get("status"),
+        })
+
+    # ── LLAMADA 2/2: inventario de TODA LA PROPIEDAD ────────────────────
+    cal_resp = b24_get(
+        token,
+        "/inventory/rooms/calendar",
+        params={
+            "propertyId": PROPERTY_ID,
+            "startDate":  date_from,
+            "endDate":    date_to,
+        },
+    )
+
+    # Agrupar overrides por roomId
+    overrides_by_room = {str(r["id"]): {} for r in ROOMS}
+    if cal_resp.ok:
+        cal_data = cal_resp.json().get("data") or []
+        if isinstance(cal_data, dict):
+            cal_data = cal_data.get("data") or []
+        for room_entry in cal_data:
+            rid = str(room_entry.get("roomId", ""))
+            if rid not in overrides_by_room:
+                continue
+            for day in (room_entry.get("calendar") or []):
+                d = day.get("date")
+                if d:
+                    overrides_by_room[rid][d] = {
+                        "price1":   day.get("price1"),
+                        "numAvail": day.get("numAvail"),
+                    }
+    # Si cal_resp falla (429 u otro error), seguimos con overrides vacíos.
+    # Los precios base de BASE_PRICES se muestran igualmente.
+
+    # ── Construir respuesta por habitación y guardar en caché ────────────
     rooms_result = {}
-
     for room in ROOMS:
-        room_id = room["id"]
-        try:
-            # ── Reservas ──────────────────────────────────────────
-            b_resp = b24_get(
-                token,
-                "/bookings",
-                params={
-                    "propertyId": PROPERTY_ID,
-                    "roomId": room_id,
-                    "arrivalFrom": search_from,
-                    "arrivalTo": date_to,
-                    "includePersonalInfo": "true",
-                },
-            )
-            if b_resp.ok:
-                b_data = b_resp.json()
-                if "errors" in b_data and not b_data.get("data"):
-                    b_data = {"data": []}
-            else:
-                b_data = {"data": []}
+        rid = str(room["id"])
+        bookings  = bookings_by_room.get(rid, [])
+        overrides = overrides_by_room.get(rid, {})
+        room_base = BASE_PRICES.get(room["id"], {})
 
-            bookings = []
-            for b in (b_data.get("data") or []):
-                if str(b.get("status", "")).lower() == "cancelled":
-                    continue
-                arrival   = (b.get("arrival",   "") or "")[:10]
-                departure = (b.get("departure", "") or "")[:10]
-                if not arrival or not departure:
-                    continue
-                if departure <= date_from or arrival > date_to:
-                    continue
-                guest = b.get("guest") or {}
-                first = (guest.get("firstName") or b.get("guestFirstName") or b.get("firstName") or "")
-                last  = (guest.get("lastName")  or b.get("guestLastName")  or b.get("lastName")  or "")
-                name  = f"{first} {last}".strip() or "Huésped"
-                phone = (guest.get("phone") or guest.get("mobile") or b.get("guestPhone") or b.get("phone") or "")
-                email = (guest.get("email") or b.get("guestEmail") or b.get("email") or "")
-                bookings.append({
-                    "arrival": arrival, "departure": departure,
-                    "guestName": name, "phone": phone,
-                    "email": email, "status": b.get("status"),
-                })
+        prices = {}
+        cur = month_start
+        while cur <= last_day:
+            ds = cur.strftime("%Y-%m-%d")
+            ov = overrides.get(ds, {})
+            bp = room_base.get(ds)
+            prices[ds] = {
+                "price1":     ov.get("price1") if ov.get("price1") is not None else bp,
+                "numAvail":   ov.get("numAvail"),
+                "isOverride": ov.get("price1") is not None,
+            }
+            cur += timedelta(days=1)
 
-            # ── Overrides de inventario ────────────────────────────
-            c_resp = b24_get(
-                token,
-                "/inventory/rooms/calendar",
-                params={"roomId": room_id, "startDate": date_from, "endDate": date_to},
-            )
-            cal_rooms = (c_resp.json().get("data") or []) if c_resp.ok else []
-            if isinstance(cal_rooms, dict):
-                cal_rooms = cal_rooms.get("data") or []
-
-            overrides = {}
-            for re_ in cal_rooms:
-                for day in (re_.get("calendar") or []):
-                    d = day.get("date")
-                    if d:
-                        overrides[d] = {"price1": day.get("price1"), "numAvail": day.get("numAvail")}
-
-            # ── Precios diarios ────────────────────────────────────
-            room_base = BASE_PRICES.get(room_id, {})
-            prices = {}
-            cur = month_start
-            while cur <= last_day:
-                ds = cur.strftime("%Y-%m-%d")
-                ov = overrides.get(ds, {})
-                bp = room_base.get(ds)
-                prices[ds] = {
-                    "price1": ov.get("price1") if ov.get("price1") is not None else bp,
-                    "numAvail": ov.get("numAvail"),
-                    "isOverride": ov.get("price1") is not None,
-                }
-                cur += timedelta(days=1)
-
-            rooms_result[str(room_id)] = {"bookings": bookings, "prices": prices}
-
-        except Exception as e:
-            # Si falla una habitación, devolvemos vacío para ella (no rompe el resto)
-            rooms_result[str(room_id)] = {"bookings": [], "prices": {}, "error": str(e)}
+        rooms_result[rid] = {"bookings": bookings, "prices": prices}
+        _cache_set(rid, month, {"ok": True, "bookings": bookings, "prices": prices})
 
     return jsonify({"ok": True, "rooms": rooms_result})
 
