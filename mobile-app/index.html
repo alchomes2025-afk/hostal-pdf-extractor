@@ -120,6 +120,14 @@ html,body{
   cursor:pointer;user-select:none;
   border:none;
 }
+#btn-refresh{
+  font-size:16px;background:rgba(255,255,255,.15);border:none;
+  color:#fff;width:30px;height:30px;border-radius:8px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .15s;
+}
+#btn-refresh:active{background:rgba(255,255,255,.3)}
+#btn-refresh.spinning{display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 
 /* Calendar table */
 #cal{border-collapse:collapse;table-layout:fixed}
@@ -371,7 +379,10 @@ html,body{
   </div>
   <div id="month-bar">
     <span id="month-bar-text">Cargando…</span>
-    <span id="month-bar-today">Hoy</span>
+    <div style="display:flex;gap:6px;align-items:center">
+      <button id="btn-refresh" title="Actualizar datos">↺</button>
+      <span id="month-bar-today">Hoy</span>
+    </div>
   </div>
   <div id="cal-wrap">
     <table id="cal"><tbody id="cal-body"></tbody></table>
@@ -633,9 +644,11 @@ function populateRoomSelects() {
 // Carga inicial: solo 2 meses (10 llamadas a Beds24 en vez de 60).
 // Los meses siguientes se cargan cuando el usuario hace scroll hacia el futuro.
 
-let _allMonths   = [];   // Los 12 meses del año
-let _loadedIdx   = 0;    // Cuántos meses se han cargado ya
+let _allMonths   = [];
+let _loadedIdx   = 0;
 let _loadingMore = false;
+let _lastChecked = null;      // ISO timestamp de la última comprobación
+let _autoCheckTimer = null;   // timer de comprobación automática
 
 async function loadData() {
   setPill("Cargando…");
@@ -652,11 +665,16 @@ async function loadData() {
   await _loadBatch(3);
   renderCalendar();
   updateMonthBar();
+  _lastChecked = new Date().toISOString();
   setPill("✓");
 
   const cw = $("#cal-wrap");
   cw.removeEventListener("scroll", handleCalScroll);
   cw.addEventListener("scroll", handleCalScroll);
+
+  // Auto-check cada 5 minutos: 1 llamada a Beds24 para detectar cambios
+  if (_autoCheckTimer) clearInterval(_autoCheckTimer);
+  _autoCheckTimer = setInterval(checkChanges, 5 * 60 * 1000);
 }
 
 // 1 mes = 1 llamada a /calendar-all = 2 llamadas a Beds24
@@ -1166,6 +1184,58 @@ $("#bl-save").addEventListener("click", async () => {
 });
 $("#sh-day-close").addEventListener("click", closeSheet);
 $("#overlay").addEventListener("click", closeSheet);
+
+// ── DELTA SYNC ─────────────────────────────────────────
+// 1 llamada a Beds24 (GET /bookings?modifiedFrom=...) para detectar cambios.
+// Si hay cambios, recarga solo los meses/habitaciones afectados.
+// Si no hay cambios: 0 llamadas adicionales a Beds24.
+
+async function checkChanges() {
+  const since = _lastChecked
+    || new Date(Date.now() - 3600000).toISOString(); // última hora si no hay timestamp
+
+  try {
+    const r = await fetch(`${API}/check-changes?since=${encodeURIComponent(since)}&pin=${PIN}`, {
+      headers: {"x-app-pin": PIN}
+    });
+    const res = await r.json();
+    if (!res?.ok) return false;
+
+    _lastChecked = res.checked_at;
+
+    if (!res.changed) return false; // sin cambios — 0 llamadas adicionales
+
+    // Hay cambios: recargar solo los meses afectados
+    // El backend ya invalida la caché de las habitaciones afectadas,
+    // así que fetchAllForMonth solo llama a Beds24 para las habitaciones sin caché.
+    const months = res.affected_months || [];
+    for (const m of months) {
+      // Solo recargar si ese mes ya fue cargado anteriormente
+      const mIdx = _allMonths.indexOf(m);
+      if (mIdx >= 0 && mIdx < _loadedIdx) {
+        await fetchAllForMonth(m);
+      }
+    }
+    if (months.length > 0) renderCalendar();
+    return true;
+
+  } catch { return false; }
+}
+
+// Botón ↺: sync manual
+$("#btn-refresh").addEventListener("click", async () => {
+  const btn = $("#btn-refresh");
+  btn.classList.add("spinning");
+  setPill("Comprobando…");
+  const changed = await checkChanges();
+  btn.classList.remove("spinning");
+  if (changed) {
+    setPill("✓ Actualizado");
+  } else {
+    setPill("✓ Sin cambios");
+  }
+  setTimeout(() => setPill("✓"), 2500);
+});
 
 // ── MONTH BAR ──────────────────────────────────────────
 function updateMonthBar() {
