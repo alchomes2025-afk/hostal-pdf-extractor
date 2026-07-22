@@ -648,8 +648,8 @@ async function loadData() {
   ROOMS.forEach(r => { DATA[r.id] = {bookings:[], prices:{}}; });
   _loadedIdx = 0;
 
-  // Fase 1: solo el mes actual (2 llamadas a Beds24 en vez de 10)
-  await _loadBatch(1);
+  // Fase 1: primeros 3 meses (6 llamadas a Beds24 con el nuevo endpoint)
+  await _loadBatch(3);
   renderCalendar();
   updateMonthBar();
   setPill("✓");
