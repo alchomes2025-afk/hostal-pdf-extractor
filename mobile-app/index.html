@@ -21,7 +21,7 @@
   --blocked:#c0392b;--blocked-bg:#fde8e8;
   --booked:#0071c2;--booked-bg:#dce9ff;
   --muted:#6b7280;--border:#e5e7eb;--ink:#111827;
-  --cell:56px;--radius:16px;
+  --cell:62px;--radius:16px;
 }
 html,body{
   height:100%;background:#f5f5f7;
@@ -73,24 +73,24 @@ html,body{
 /* Columna sticky de nombre de habitación */
 .col-corner{
   position:sticky;left:0;top:0;z-index:30;
-  width:82px;min-width:82px;
+  width:90px;min-width:90px;
   background:var(--bk);
 }
 .room-lbl{
   position:sticky;left:0;z-index:10;
-  width:82px;min-width:82px;
+  width:90px;min-width:90px;
   background:#f0f4ff;
   border-right:3px solid var(--bk);
-  padding:0 8px;vertical-align:middle;
+  padding:0 10px;vertical-align:middle;
   cursor:default;
 }
 .room-name{
-  font-size:12px;font-weight:800;
+  font-size:14px;font-weight:800;
   color:var(--bk);line-height:1.2;
   text-transform:uppercase;letter-spacing:.3px;
 }
 .room-sub{
-  font-size:10px;color:var(--muted);font-weight:500;margin-top:1px;
+  font-size:12px;color:var(--muted);font-weight:500;margin-top:2px;
 }
 /* Separadores entre habitaciones */
 .room-row td,.room-row th{border-bottom:2px solid #e2e8f0}
@@ -135,7 +135,7 @@ html,body{
   cursor:default;position:sticky;top:0;z-index:20;
 }
 .th-date .dname{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
-.th-date .dnum{font-size:20px;font-weight:300;color:var(--ink);line-height:1.1;margin-top:2px}
+.th-date .dnum{font-size:22px;font-weight:300;color:var(--ink);line-height:1.1;margin-top:2px}
 .th-date.today{background:#e8f0fe}
 .th-date.today .dnum{
   background:var(--acc);color:#fff;width:32px;height:32px;border-radius:50%;
@@ -154,25 +154,30 @@ html,body{
 
 /* ── Celdas de día (una por habitación) ── */
 .day-cell{
-  text-align:center;padding:5px 2px;cursor:pointer;
-  vertical-align:middle;height:62px;
+  text-align:center;padding:6px 2px;cursor:pointer;
+  vertical-align:middle;
+  /* Altura dinámica: 5 filas llenan la pantalla exactamente */
+  /* 148px = topbar ~42 + month-bar ~42 + fila de fechas ~64 */
+  height: calc((100dvh - 148px) / 5);
+  height: calc((100vh  - 148px) / 5); /* fallback */
+  min-height:72px;
 }
 .day-cell:active{opacity:.65}
 .day-cell.av{background:var(--avail-bg)}
 .day-cell.bk{background:var(--booked-bg)}
 .day-cell.bl{background:var(--blocked-bg)}
 /* Icono de estado (✔ o —) */
-.dc-icon{font-size:15px;font-weight:700;line-height:1}
+.dc-icon{font-size:20px;font-weight:700;line-height:1}
 .dc-icon.av-c{color:var(--avail)}
 .dc-icon.bl-c{color:var(--blocked)}
 /* Nombre del huésped */
 .dc-name{
-  font-size:11px;font-weight:700;color:var(--booked);
+  font-size:13px;font-weight:700;color:var(--booked);
   line-height:1.2;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;max-width:52px;padding:0 2px;
+  text-overflow:ellipsis;max-width:60px;padding:0 2px;
 }
 /* Precio */
-.dc-price{font-size:11px;font-weight:600;color:var(--ink);margin-top:2px;line-height:1}
+.dc-price{font-size:13px;font-weight:600;color:var(--ink);margin-top:3px;line-height:1}
 .dc-price.dim{color:#bbb;text-decoration:line-through;font-weight:400}
 .dc-price.ov{color:#e65c00}
 .dc-price.na{color:#ccc;font-weight:400}
@@ -624,31 +629,29 @@ function populateRoomSelects() {
   });
 }
 
-// ── DATA LOADING ───────────────────────────────────────
+// ── DATA LOADING (lazy) ────────────────────────────────
+// Carga inicial: solo 2 meses (10 llamadas a Beds24 en vez de 60).
+// Los meses siguientes se cargan cuando el usuario hace scroll hacia el futuro.
+
+let _allMonths   = [];   // Los 12 meses del año
+let _loadedIdx   = 0;    // Cuántos meses se han cargado ya
+let _loadingMore = false;
+
 async function loadData() {
   setPill("Cargando…");
   const today = new Date();
-  const months = [];
+  _allMonths = [];
   for (let i = 0; i < 12; i++) {
     const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
-    months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
+    _allMonths.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
   }
-  // Reiniciar data
   ROOMS.forEach(r => { DATA[r.id] = {bookings:[], prices:{}}; });
+  _loadedIdx = 0;
 
-  // Fase 1: primeros 2 meses × 5 hab. en paralelo → render rápido
-  await Promise.allSettled(
-    months.slice(0,2).flatMap(m => ROOMS.map(r => fetchAndMerge(r.id, m)))
-  );
+  // Fase 1: solo el mes actual (2 llamadas a Beds24 en vez de 10)
+  await _loadBatch(1);
   renderCalendar();
   updateMonthBar();
-  setPill("● cargando…");
-
-  // Fase 2: meses restantes, de uno en uno (5 hab. en paralelo por mes)
-  for (const m of months.slice(2)) {
-    await Promise.allSettled(ROOMS.map(r => fetchAndMerge(r.id, m)));
-    renderCalendar();
-  }
   setPill("✓");
 
   const cw = $("#cal-wrap");
@@ -656,16 +659,52 @@ async function loadData() {
   cw.addEventListener("scroll", handleCalScroll);
 }
 
-async function fetchAndMerge(roomId, month) {
+// 1 mes = 1 llamada a /calendar-all = 2 llamadas a Beds24
+async function _loadBatch(n) {
+  const toLoad = _allMonths.slice(_loadedIdx, _loadedIdx + n);
+  for (const m of toLoad) {
+    await fetchAllForMonth(m);
+    _loadedIdx++;
+  }
+}
+
+// Lazy load: se dispara cuando el usuario se acerca al final del calendario
+async function maybeLoadMore() {
+  if (_loadingMore || _loadedIdx >= _allMonths.length) return;
+  const cw = $("#cal-wrap");
+  const remaining = cw.scrollWidth - cw.scrollLeft - cw.clientWidth;
+  const BUFFER_PX = 62 * 45; // cargar más cuando falten ~45 días de scroll
+  if (remaining > BUFFER_PX) return;
+
+  _loadingMore = true;
+  setPill("● cargando…");
+  await _loadBatch(1);
+  renderCalendar();
+  setPill(_loadedIdx >= _allMonths.length ? "✓" : "✓ (" + _loadedIdx + "/12)");
+  _loadingMore = false;
+}
+
+// /calendar-all devuelve las 5 habitaciones en una sola respuesta
+async function fetchAllForMonth(month) {
   try {
-    const res = await fetchMonth(roomId, month);
-    if (!res?.ok) return;
-    const d = DATA[roomId];
-    (res.bookings || []).forEach(b => {
-      if (!d.bookings.find(x => x.arrival === b.arrival && x.guestName === b.guestName))
-        d.bookings.push(b);
+    const r = await fetch(`${API}/calendar-all?month=${month}&pin=${PIN}`, {
+      headers: {"x-app-pin": PIN}
     });
-    Object.assign(d.prices, res.prices || {});
+    const res = await r.json();
+    if (!res?.ok) return;
+    ROOMS.forEach(room => {
+      const rd = res.rooms?.[String(room.id)];
+      if (!rd) return;
+      const d = DATA[room.id];
+      (rd.bookings || []).forEach(b => {
+        const arrival   = (b.arrival   || "").substring(0, 10);
+        const departure = (b.departure || "").substring(0, 10);
+        if (!arrival || !departure) return;
+        if (!d.bookings.find(x => x.arrival === arrival && x.guestName === b.guestName))
+          d.bookings.push({...b, arrival, departure});
+      });
+      Object.assign(d.prices, rd.prices || {});
+    });
   } catch {}
 }
 
@@ -678,6 +717,8 @@ async function fetchMonth(roomId, month) {
 
 // ── CALENDAR RENDER ────────────────────────────────────
 function roomBookedOn(roomId, ds) {
+  // ds ya viene normalizado de localDateStr (10 chars YYYY-MM-DD)
+  // bookings también tienen arrival/departure normalizados en fetchAndMerge
   return (DATA[roomId]?.bookings || []).find(b => b.arrival <= ds && b.departure > ds);
 }
 function fmtPrice(v) {
@@ -702,7 +743,7 @@ function renderCalendar() {
   // Celda esquina (sticky top+left)
   const corner = document.createElement("th");
   corner.className = "col-corner";
-  corner.style.cssText = "position:sticky;left:0;top:0;z-index:30;width:82px;min-width:82px;background:var(--bk);border-right:3px solid rgba(255,255,255,.2)";
+  corner.style.cssText = "position:sticky;left:0;top:0;z-index:30;width:90px;min-width:90px;background:var(--bk);border-right:3px solid rgba(255,255,255,.2)";
   trH.appendChild(corner);
 
   dates.forEach(({ds, dow, day, month, year}, i) => {
@@ -1130,14 +1171,17 @@ $("#overlay").addEventListener("click", closeSheet);
 function updateMonthBar() {
   const cw = $("#cal-wrap");
   const scrollLeft = cw.scrollLeft;
-  const cellWidth = 56; // valor de --cell en px
+  const cellWidth = 62; // valor de --cell en px
   const dayIndex = Math.floor(scrollLeft / cellWidth);
   const today = new Date();
   const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + dayIndex);
   $("#month-bar-text").textContent =
     MONTHS_LONG[d.getMonth()] + " " + d.getFullYear();
 }
-function handleCalScroll() { updateMonthBar(); }
+function handleCalScroll() {
+  updateMonthBar();
+  maybeLoadMore(); // carga siguiente mes si el usuario se acerca al final
+}
 
 // Botón "Hoy": vuelve al inicio del scroll
 $("#month-bar-today").addEventListener("click", () => {
