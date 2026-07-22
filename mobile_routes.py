@@ -764,7 +764,7 @@ def mobile_calendar_all():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-    # ── LLAMADA 1/2: reservas de TODA LA PROPIEDAD ──────────────────────
+    # ── LLAMADA 1: reservas de TODA LA PROPIEDAD (1 sola llamada) ──────
     bk_resp = b24_get(
         token,
         "/bookings",
@@ -777,7 +777,6 @@ def mobile_calendar_all():
     )
 
     if not bk_resp.ok:
-        # 429 u otro error — devolver inmediatamente con mensaje claro
         err = bk_resp.json() if bk_resp.text else {"code": bk_resp.status_code}
         return jsonify({"ok": False, "error": err}), bk_resp.status_code
 
@@ -809,36 +808,33 @@ def mobile_calendar_all():
             "status":    b.get("status"),
         })
 
-    # ── LLAMADA 2/2: inventario de TODA LA PROPIEDAD ────────────────────
-    cal_resp = b24_get(
-        token,
-        "/inventory/rooms/calendar",
-        params={
-            "propertyId": PROPERTY_ID,
-            "startDate":  date_from,
-            "endDate":    date_to,
-        },
-    )
-
-    # Agrupar overrides por roomId
+    # ── LLAMADAS 2-6: inventario por habitación (fiable y completo) ─────
+    # Usamos una llamada por habitación para garantizar datos completos.
+    # El endpoint a nivel propiedad puede truncar resultados.
     overrides_by_room = {str(r["id"]): {} for r in ROOMS}
-    if cal_resp.ok:
-        cal_data = cal_resp.json().get("data") or []
-        if isinstance(cal_data, dict):
-            cal_data = cal_data.get("data") or []
-        for room_entry in cal_data:
-            rid = str(room_entry.get("roomId", ""))
-            if rid not in overrides_by_room:
-                continue
-            for day in (room_entry.get("calendar") or []):
-                d = day.get("date")
-                if d:
-                    overrides_by_room[rid][d] = {
-                        "price1":   day.get("price1"),
-                        "numAvail": day.get("numAvail"),
-                    }
-    # Si cal_resp falla (429 u otro error), seguimos con overrides vacíos.
-    # Los precios base de BASE_PRICES se muestran igualmente.
+    for room in ROOMS:
+        rid = str(room["id"])
+        cal_resp = b24_get(
+            token,
+            "/inventory/rooms/calendar",
+            params={
+                "roomId":    room["id"],
+                "startDate": date_from,
+                "endDate":   date_to,
+            },
+        )
+        if cal_resp.ok:
+            cal_data = cal_resp.json().get("data") or []
+            if isinstance(cal_data, dict):
+                cal_data = cal_data.get("data") or []
+            for room_entry in cal_data:
+                for day in (room_entry.get("calendar") or []):
+                    d = day.get("date")
+                    if d:
+                        overrides_by_room[rid][d] = {
+                            "price1":   day.get("price1"),
+                            "numAvail": day.get("numAvail"),
+                        }
 
     # ── Construir respuesta por habitación y guardar en caché ────────────
     rooms_result = {}
