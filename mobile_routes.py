@@ -460,6 +460,42 @@ ROOMS = [
 # Caché del access token
 _token_cache = {"token": None, "expires_at": 0}
 
+# ─── Caché de calendario ───────────────────────────────────────────────────────
+# Almacena respuestas de /calendar para evitar 429 de Beds24 (credit limit).
+# Cada entrada dura 5 min. Se invalida automáticamente al escribir datos.
+_calendar_cache = {}          # { "roomId:YYYY-MM": {"data": {...}, "exp": float} }
+CALENDAR_CACHE_TTL = 300      # segundos (5 minutos)
+
+
+def _cache_key(room_id, month):
+    return f"{room_id}:{month}"
+
+
+def _cache_get(room_id, month):
+    """Devuelve datos cacheados o None si expirado/no existe."""
+    entry = _calendar_cache.get(_cache_key(room_id, month))
+    if entry and time.time() < entry["exp"]:
+        return entry["data"]
+    return None
+
+
+def _cache_set(room_id, month, data):
+    """Guarda respuesta en caché con TTL."""
+    _calendar_cache[_cache_key(room_id, month)] = {
+        "data": data,
+        "exp": time.time() + CALENDAR_CACHE_TTL,
+    }
+
+
+def _cache_invalidate(room_id=None):
+    """Invalida caché de una habitación concreta o todo el caché."""
+    if room_id is None:
+        _calendar_cache.clear()
+    else:
+        keys = [k for k in list(_calendar_cache) if k.startswith(f"{room_id}:")]
+        for k in keys:
+            del _calendar_cache[k]
+
 
 def get_access_token():
     now = time.time()
@@ -521,6 +557,11 @@ def mobile_calendar():
     month = request.args.get("month")
     if not room_id or not month:
         return jsonify({"ok": False, "error": "Faltan roomId o month"}), 400
+
+    # ── Caché: si tenemos datos frescos, no llamamos a Beds24 ──
+    cached = _cache_get(room_id, month)
+    if cached:
+        return jsonify(cached)
 
     try:
         year, mon = int(month.split("-")[0]), int(month.split("-")[1])
@@ -655,12 +696,14 @@ def mobile_calendar():
             }
             current += timedelta(days=1)
 
-        return jsonify({
+        result = {
             "ok": True,
             "bookings": bookings,
             "prices": prices,
-            "bookings_error": bookings_api_error,  # None si todo OK
-        })
+        }
+        # Guardar en caché para evitar repetir llamadas a Beds24
+        _cache_set(room_id, month, result)
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -822,6 +865,8 @@ def mobile_update():
         data = resp.json()
         if not resp.ok:
             return jsonify({"ok": False, "error": data}), resp.status_code
+        # Invalidar caché de esta habitación para que la próxima carga refleje cambios
+        _cache_invalidate(room_id)
         return jsonify({"ok": True, "data": data})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -905,6 +950,8 @@ def create_booking():
                     err_msg = str(data)
             return jsonify({"ok": False, "error": str(err_msg)}), resp.status_code
         
+        # Invalidar caché de esa habitación
+        _cache_invalidate(int(room_id))
         return jsonify({"ok": True, "data": data})
 
     except Exception as e:
@@ -960,6 +1007,8 @@ def block_dates():
         if not resp.ok:
             return jsonify({"ok": False, "error": data}), resp.status_code
         
+        # Invalidar caché de esa habitación
+        _cache_invalidate(int(room_id))
         return jsonify({"ok": True, "data": data, "reason": reason})
 
     except Exception as e:
