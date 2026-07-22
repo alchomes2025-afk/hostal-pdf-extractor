@@ -537,24 +537,56 @@ def mobile_calendar():
         token = get_access_token()
 
         # ── 1. Reservas ──
+        # Añadimos propertyId y usamos el token principal como fallback
+        # para asegurar que tenemos permiso de lectura de reservas.
+        bookings_token = token
+        # Si BEDS24_REFRESH_TOKEN está disponible como token independiente, usarlo
+        main_refresh = os.environ.get("BEDS24_REFRESH_TOKEN")
+        if main_refresh and main_refresh != BEDS24_REFRESH_TOKEN:
+            try:
+                r_main = requests.get(
+                    f"{BEDS24_API}/authentication/token",
+                    headers={"accept": "application/json", "refreshToken": main_refresh},
+                    timeout=10,
+                )
+                if r_main.ok:
+                    bookings_token = r_main.json().get("token", token)
+            except Exception:
+                pass  # usar el token mobile si falla
+
         bookings_resp = requests.get(
             f"{BEDS24_API}/bookings",
             params={
+                "propertyId": PROPERTY_ID,
                 "roomId": room_id,
                 "arrivalFrom": search_from,
                 "arrivalTo": date_to,
                 "includePersonalInfo": "true",
             },
-            headers={"accept": "application/json", "token": token},
+            headers={"accept": "application/json", "token": bookings_token},
             timeout=20,
         )
-        bookings_data = bookings_resp.json()
+
+        # Capturar error de Beds24 sin abortar el endpoint
+        bookings_api_error = None
+        if not bookings_resp.ok:
+            bookings_api_error = f"HTTP {bookings_resp.status_code}: {bookings_resp.text[:300]}"
+            bookings_data = {"data": []}
+        else:
+            bookings_data = bookings_resp.json()
+            # Beds24 a veces devuelve errores dentro de un 200 OK
+            if "errors" in bookings_data and not bookings_data.get("data"):
+                bookings_api_error = str(bookings_data["errors"])
+                bookings_data = {"data": []}
+
         bookings = []
         for b in (bookings_data.get("data") or []):
             if str(b.get("status", "")).lower() == "cancelled":
                 continue
-            arrival = b.get("arrival", "")
-            departure = b.get("departure", "")
+            # Beds24 a veces devuelve "2026-07-20T00:00:00" o "2026-07-20 14:00:00"
+            # Cortamos a 10 chars para quedarnos siempre con "YYYY-MM-DD"
+            arrival   = (b.get("arrival",   "") or "")[:10]
+            departure = (b.get("departure", "") or "")[:10]
             if not arrival or not departure:
                 continue
             if departure <= date_from or arrival > date_to:
@@ -623,10 +655,134 @@ def mobile_calendar():
             }
             current += timedelta(days=1)
 
-        return jsonify({"ok": True, "bookings": bookings, "prices": prices})
+        return jsonify({
+            "ok": True,
+            "bookings": bookings,
+            "prices": prices,
+            "bookings_error": bookings_api_error,  # None si todo OK
+        })
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@mobile_bp.route("/calendar-all", methods=["GET"])
+def mobile_calendar_all():
+    """
+    Devuelve reservas + precios de TODAS las habitaciones para un mes.
+    Sustituye a hacer N llamadas a /calendar (una por habitación).
+    El frontend pasa de 60 llamadas a 12 (una por mes).
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+
+    month = request.args.get("month")
+    if not month:
+        return jsonify({"ok": False, "error": "Falta month"}), 400
+
+    try:
+        year, mon = int(month.split("-")[0]), int(month.split("-")[1])
+    except Exception:
+        return jsonify({"ok": False, "error": "month debe ser YYYY-MM"}), 400
+
+    month_start = date(year, mon, 1)
+    last_day = (month_start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    date_from = month_start.strftime("%Y-%m-%d")
+    date_to   = last_day.strftime("%Y-%m-%d")
+    search_from = (month_start - timedelta(days=60)).strftime("%Y-%m-%d")
+
+    try:
+        token = get_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+    rooms_result = {}
+
+    for room in ROOMS:
+        room_id = room["id"]
+        try:
+            # ── Reservas ──────────────────────────────────────────
+            b_resp = requests.get(
+                f"{BEDS24_API}/bookings",
+                params={
+                    "propertyId": PROPERTY_ID,
+                    "roomId": room_id,
+                    "arrivalFrom": search_from,
+                    "arrivalTo": date_to,
+                    "includePersonalInfo": "true",
+                },
+                headers={"accept": "application/json", "token": token},
+                timeout=20,
+            )
+            if b_resp.ok:
+                b_data = b_resp.json()
+                if "errors" in b_data and not b_data.get("data"):
+                    b_data = {"data": []}
+            else:
+                b_data = {"data": []}
+
+            bookings = []
+            for b in (b_data.get("data") or []):
+                if str(b.get("status", "")).lower() == "cancelled":
+                    continue
+                arrival   = (b.get("arrival",   "") or "")[:10]
+                departure = (b.get("departure", "") or "")[:10]
+                if not arrival or not departure:
+                    continue
+                if departure <= date_from or arrival > date_to:
+                    continue
+                guest = b.get("guest") or {}
+                first = (guest.get("firstName") or b.get("guestFirstName") or b.get("firstName") or "")
+                last  = (guest.get("lastName")  or b.get("guestLastName")  or b.get("lastName")  or "")
+                name  = f"{first} {last}".strip() or "Huésped"
+                phone = (guest.get("phone") or guest.get("mobile") or b.get("guestPhone") or b.get("phone") or "")
+                email = (guest.get("email") or b.get("guestEmail") or b.get("email") or "")
+                bookings.append({
+                    "arrival": arrival, "departure": departure,
+                    "guestName": name, "phone": phone,
+                    "email": email, "status": b.get("status"),
+                })
+
+            # ── Overrides de inventario ────────────────────────────
+            c_resp = requests.get(
+                f"{BEDS24_API}/inventory/rooms/calendar",
+                params={"roomId": room_id, "startDate": date_from, "endDate": date_to},
+                headers={"accept": "application/json", "token": token},
+                timeout=20,
+            )
+            cal_rooms = (c_resp.json().get("data") or []) if c_resp.ok else []
+            if isinstance(cal_rooms, dict):
+                cal_rooms = cal_rooms.get("data") or []
+
+            overrides = {}
+            for re_ in cal_rooms:
+                for day in (re_.get("calendar") or []):
+                    d = day.get("date")
+                    if d:
+                        overrides[d] = {"price1": day.get("price1"), "numAvail": day.get("numAvail")}
+
+            # ── Precios diarios ────────────────────────────────────
+            room_base = BASE_PRICES.get(room_id, {})
+            prices = {}
+            cur = month_start
+            while cur <= last_day:
+                ds = cur.strftime("%Y-%m-%d")
+                ov = overrides.get(ds, {})
+                bp = room_base.get(ds)
+                prices[ds] = {
+                    "price1": ov.get("price1") if ov.get("price1") is not None else bp,
+                    "numAvail": ov.get("numAvail"),
+                    "isOverride": ov.get("price1") is not None,
+                }
+                cur += timedelta(days=1)
+
+            rooms_result[str(room_id)] = {"bookings": bookings, "prices": prices}
+
+        except Exception as e:
+            # Si falla una habitación, devolvemos vacío para ella (no rompe el resto)
+            rooms_result[str(room_id)] = {"bookings": [], "prices": {}, "error": str(e)}
+
+    return jsonify({"ok": True, "rooms": rooms_result})
 
 
 @mobile_bp.route("/update", methods=["POST"])
@@ -726,7 +882,7 @@ def create_booking():
 
         resp = requests.post(
             f"{BEDS24_API}/bookings",
-            json=booking_data,
+            json=[booking_data],  # Beds24 API v2 requiere array, no objeto suelto
             headers={
                 "content-type": "application/json",
                 "accept": "application/json",
@@ -806,5 +962,92 @@ def block_dates():
         
         return jsonify({"ok": True, "data": data, "reason": reason})
 
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@mobile_bp.route("/debug-bookings", methods=["GET"])
+def debug_bookings():
+    """
+    Diagnóstico: llama a GET /bookings de Beds24 y devuelve la respuesta cruda.
+    Útil para comprobar si el token tiene permiso de lectura de reservas.
+
+    Uso: GET /mobile/debug-bookings?pin=1234
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    try:
+        token = get_access_token()
+        today = date.today()
+        results = {}
+
+        # Test 1: sin filtro de habitación (todas las reservas, próximos 60 días)
+        r1 = requests.get(
+            f"{BEDS24_API}/bookings",
+            params={
+                "propertyId": PROPERTY_ID,
+                "arrivalFrom": today.strftime("%Y-%m-%d"),
+                "arrivalTo": (today + timedelta(days=60)).strftime("%Y-%m-%d"),
+                "includePersonalInfo": "true",
+            },
+            headers={"accept": "application/json", "token": token},
+            timeout=20,
+        )
+        results["sin_filtro_habitacion"] = {
+            "status": r1.status_code,
+            "data_count": len((r1.json().get("data") or [])) if r1.ok else 0,
+            "raw": r1.json() if r1.ok else r1.text[:500],
+        }
+
+        # Test 2: con roomId de Deluxe
+        r2 = requests.get(
+            f"{BEDS24_API}/bookings",
+            params={
+                "propertyId": PROPERTY_ID,
+                "roomId": 702395,
+                "arrivalFrom": today.strftime("%Y-%m-%d"),
+                "arrivalTo": (today + timedelta(days=60)).strftime("%Y-%m-%d"),
+            },
+            headers={"accept": "application/json", "token": token},
+            timeout=20,
+        )
+        results["deluxe_702395"] = {
+            "status": r2.status_code,
+            "data_count": len((r2.json().get("data") or [])) if r2.ok else 0,
+            "raw": r2.json() if r2.ok else r2.text[:500],
+        }
+
+        # Test 3: usar token principal si es diferente al mobile
+        main_refresh = os.environ.get("BEDS24_REFRESH_TOKEN")
+        if main_refresh and main_refresh != BEDS24_REFRESH_TOKEN:
+            r_auth = requests.get(
+                f"{BEDS24_API}/authentication/token",
+                headers={"accept": "application/json", "refreshToken": main_refresh},
+                timeout=10,
+            )
+            if r_auth.ok:
+                main_token = r_auth.json().get("token")
+                r3 = requests.get(
+                    f"{BEDS24_API}/bookings",
+                    params={
+                        "propertyId": PROPERTY_ID,
+                        "arrivalFrom": today.strftime("%Y-%m-%d"),
+                        "arrivalTo": (today + timedelta(days=60)).strftime("%Y-%m-%d"),
+                    },
+                    headers={"accept": "application/json", "token": main_token},
+                    timeout=20,
+                )
+                results["con_token_principal"] = {
+                    "status": r3.status_code,
+                    "data_count": len((r3.json().get("data") or [])) if r3.ok else 0,
+                    "raw": r3.json() if r3.ok else r3.text[:500],
+                }
+
+        return jsonify({
+            "ok": True,
+            "property_id": PROPERTY_ID,
+            "token_prefix": (BEDS24_REFRESH_TOKEN or "")[:12] + "…",
+            "results": results,
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
