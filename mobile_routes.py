@@ -504,20 +504,46 @@ def _parse_bookings_list(raw):
 
 def _load_bookings():
     """
-    Carga TODOS los bookings de la propiedad en 1 sola llamada a Beds24.
-    Cubre 90 días atrás (estancias en curso) + 365 días adelante.
+    Carga TODOS los bookings de la propiedad.
+
+    Estrategia de llamadas a Beds24:
+    · limit=500 (máximo permitido) → para un hostal de 5 hab. cabe todo en 1 llamada.
+    · Si hay exactamente 500 resultados (hostal muy ocupado), pagina automáticamente.
+    · Esta función solo se ejecuta una vez al arrancar el servidor.
+      Con UptimeRobot manteniendo Render despierto, ocurre 1 vez al día máximo.
     """
     token = get_access_token()
     today = date.today()
-    resp = b24_get(token, "/bookings", params={
+    params_base = {
         "propertyId":          PROPERTY_ID,
-        "arrivalFrom":         (today - timedelta(days=90)).strftime("%Y-%m-%d"),
+        "arrivalFrom":         (today - timedelta(days=180)).strftime("%Y-%m-%d"),
         "arrivalTo":           (today + timedelta(days=365)).strftime("%Y-%m-%d"),
         "includePersonalInfo": "true",
-    })
-    if not resp.ok:
-        raise Exception(f"Beds24 {resp.status_code}: {resp.text[:200]}")
-    _state["bookings"]   = _parse_bookings_list(resp.json().get("data") or [])
+        "limit":               500,   # máximo de Beds24 → 1 llamada para hostales pequeños
+    }
+
+    all_raw = []
+    page    = 1
+
+    while True:
+        resp = b24_get(token, "/bookings", params={**params_base, "page": page})
+        if not resp.ok:
+            if page == 1:
+                raise Exception(f"Beds24 {resp.status_code}: {resp.text[:200]}")
+            break  # datos parciales son mejor que nada
+
+        data = resp.json().get("data") or []
+        all_raw.extend(data)
+
+        # Si devuelve menos de 500, ya tenemos todo (caso normal para un hostal de 5 hab.)
+        if len(data) < 500:
+            break
+        # Si devuelve exactamente 500, podría haber más → paginar (caso muy raro)
+        page += 1
+        if page > 10:  # límite de seguridad: 5000 reservas máximo
+            break
+
+    _state["bookings"]   = _parse_bookings_list(all_raw)
     _state["loaded_at"]  = datetime.utcnow().isoformat()
     _state["checked_at"] = datetime.utcnow().isoformat()
     _state["loaded"]     = True
@@ -600,6 +626,17 @@ def is_valid_phone(phone):
     return len(re.sub(r"\D", "", phone)) >= 7
 
 
+@mobile_bp.route("/health", methods=["GET"])
+def health():
+    """Endpoint para UptimeRobot. Mantiene Render despierto sin llamar a Beds24."""
+    return jsonify({
+        "ok":      True,
+        "loaded":  _state["loaded"],
+        "bookings": len(_state["bookings"]),
+        "loaded_at": _state["loaded_at"],
+    })
+
+
 @mobile_bp.route("/login", methods=["POST", "GET"])
 def mobile_login():
     if check_pin():
@@ -643,13 +680,14 @@ def all_data():
     prices_str = {str(rid): prices for rid, prices in BASE_PRICES.items()}
 
     return jsonify({
-        "ok":        True,
-        "rooms":     ROOMS,
-        "bookings":  _state["bookings"],
-        "overrides": _state["overrides"],
-        "prices":    prices_str,
-        "loaded_at": _state["loaded_at"],
-        "checked_at":_state["checked_at"],
+        "ok":           True,
+        "rooms":        ROOMS,
+        "bookings":     _state["bookings"],
+        "overrides":    _state["overrides"],
+        "prices":       prices_str,
+        "loaded_at":    _state["loaded_at"],
+        "checked_at":   _state["checked_at"],
+        "booking_count": len(_state["bookings"]),   # para diagnóstico
     })
 
 
@@ -692,6 +730,7 @@ def check_changes():
             "propertyId":          PROPERTY_ID,
             "modifiedFrom":        since[:19],
             "includePersonalInfo": "true",
+            "limit":               100,   # evitar truncado si hay muchos cambios
         })
 
         if not resp.ok:
