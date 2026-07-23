@@ -665,11 +665,13 @@ async function loadAllData() {
     populateRoomSelects();
     renderCalendar();
     updateMonthBar();
-    setPill("✓");
+    const bkCount = d.booking_count ?? ALL_BOOKINGS.length;
+    setPill(`✓ ${bkCount} reservas`);
 
-    // Auto-check cada 5 min: 1 llamada a Beds24 para detectar nuevas reservas de Booking.com
+    // Auto-check cada 30 min (1 llamada a Beds24 para detectar reservas de Booking.com)
+    // El botón ↺ permite forzar un check inmediato en cualquier momento.
     if (_autoCheckTimer) clearInterval(_autoCheckTimer);
-    _autoCheckTimer = setInterval(checkChanges, 5 * 60 * 1000);
+    _autoCheckTimer = setInterval(checkChanges, 30 * 60 * 1000);
 
     // Scroll para actualizar la barra de mes
     const cw = $("#cal-wrap");
