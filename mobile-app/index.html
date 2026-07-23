@@ -926,7 +926,7 @@ function openDaySheet(ds, room) {
       $("#price-subtitle").textContent = dateLabel(ds, {day:"numeric",month:"long"}) + " · " + SEL_ROOM.name;
       $("#pr-from").value = ds;
       $("#pr-to").value = ds;
-      $("#pr-price").value = price != null ? price : "";
+      $("#pr-price").value = price1 != null ? price1 : "";
       AVAIL_STATE = 1;
       updAvToggle();
       clearAlert("#price-alert");
@@ -1219,13 +1219,20 @@ async function checkChanges() {
     if (!res?.ok) return false;
     _lastChecked = res.checked_at;
     if (!res.changed) return false;
-    // Fusionar nuevos/modificados bookings en ALL_BOOKINGS
+    // Fusionar nuevos/modificados bookings en ALL_BOOKINGS.
+    // Clave primaria: id de Beds24 (único). Fallback: (roomId, arrival).
+    // Antes se usaba siempre (roomId, arrival) y se borraban reservas
+    // equivocadas cuando un huésped cambiaba de fechas.
     (res.new_bookings || []).forEach(nb => {
-      const rid = String(nb.roomId);
-      ALL_BOOKINGS = ALL_BOOKINGS.filter(b =>
-        !(String(b.roomId) === rid && b.arrival === nb.arrival)
-      );
-      if (nb.status !== "cancelled") ALL_BOOKINGS.push(nb);
+      if (nb.id != null) {
+        ALL_BOOKINGS = ALL_BOOKINGS.filter(b => String(b.id) !== String(nb.id));
+      } else {
+        const rid = String(nb.roomId);
+        ALL_BOOKINGS = ALL_BOOKINGS.filter(b =>
+          !(String(b.roomId) === rid && b.arrival === nb.arrival)
+        );
+      }
+      if (String(nb.status||"").toLowerCase() !== "cancelled") ALL_BOOKINGS.push(nb);
     });
     renderCalendar();
     return true;
