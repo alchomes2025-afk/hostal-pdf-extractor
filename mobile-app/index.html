@@ -280,6 +280,13 @@ html,body{
 .contact-btn.call{background:#e8f7ea;color:var(--avail)}
 .contact-btn.wa{background:#dcf8c6;color:#1a7832}
 .contact-btn:active{opacity:.8}
+/* Botón cancelar reserva */
+.cancel-booking-btn{
+  width:100%;margin-top:12px;padding:12px;border-radius:12px;
+  border:1.5px solid var(--blocked);background:var(--blocked-bg);
+  color:var(--blocked);font-size:13px;font-weight:700;cursor:pointer;
+}
+.cancel-booking-btn:active{opacity:.75}
 
 /* Available day action buttons */
 .day-actions{display:flex;flex-direction:column;gap:8px}
@@ -512,6 +519,10 @@ html,body{
         <option value="Limpieza">🧼 Limpieza</option>
         <option value="Otro">📌 Otro</option>
       </select>
+    </div>
+    <div id="bl-reason-other-wrap" class="form-grp" style="display:none">
+      <label class="form-lbl">Descripción (opcional)</label>
+      <input type="text" id="bl-reason-other" class="form-inp" placeholder="Ej: Visita de inspección"/>
     </div>
     <button class="sh-submit" id="bl-save">Bloquear fechas</button>
   </div>
@@ -850,7 +861,16 @@ function openDaySheet(ds, room) {
       </div>`;
     }
 
+    // Cancelar reserva
+    if (bk.id) {
+      html += `<button class="cancel-booking-btn" id="cancel-bk-btn">✗ Cancelar reserva</button>`;
+    }
+
     body.innerHTML = html;
+
+    if (bk.id) {
+      $("#cancel-bk-btn").addEventListener("click", () => cancelBooking(bk));
+    }
 
   } else if (bl) {
     // ── BLOCKED ──
@@ -940,6 +960,35 @@ function openDaySheet(ds, room) {
 
   showPanel("panel-day");
   openSheet();
+}
+
+// ── CANCEL BOOKING ─────────────────────────────────────
+async function cancelBooking(bk) {
+  const msg = `¿Cancelar la reserva de ${bk.guestName}?\n${dateLabel(bk.arrival,{day:"numeric",month:"short"})} → ${dateLabel(bk.departure,{day:"numeric",month:"short"})}`;
+  if (!confirm(msg)) return;
+
+  const btn = $("#cancel-bk-btn");
+  if (btn) { btn.textContent = "Cancelando…"; btn.disabled = true; }
+
+  try {
+    const r = await fetch(`${API}/cancel-booking`, {
+      method: "POST",
+      headers: {"content-type":"application/json","x-app-pin":PIN},
+      body: JSON.stringify({pin: PIN, bookingId: bk.id})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      // Eliminar de ALL_BOOKINGS local
+      ALL_BOOKINGS = ALL_BOOKINGS.filter(b => String(b.id) !== String(bk.id));
+      closeSheet();
+      renderCalendar();
+    } else {
+      if (btn) { btn.textContent = "✗ Error al cancelar"; btn.disabled = false; }
+      alert("Error: " + (d.error || JSON.stringify(d)));
+    }
+  } catch(e) {
+    if (btn) { btn.textContent = "✗ Error de conexión"; btn.disabled = false; }
+  }
 }
 
 // ── UNBLOCK ────────────────────────────────────────────
@@ -1098,7 +1147,9 @@ $("#bl-save").addEventListener("click", async () => {
   const roomId = $("#bl-room").value;
   const from = $("#bl-from").value;
   const to = $("#bl-to").value;
-  const reason = $("#bl-reason").value;
+  const reason = $("#bl-reason").value === "Otro" && $("#bl-reason-other").value.trim()
+    ? "Otro: " + $("#bl-reason-other").value.trim()
+    : $("#bl-reason").value;
 
   if (!roomId || !from || !to) {
     showAlert("#block-alert","err","✗ Completa todos los campos"); return;
@@ -1129,7 +1180,14 @@ $("#bl-save").addEventListener("click", async () => {
         OVERRIDES[rid][dk].numAvail = 0;
         cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
       }
-      setTimeout(() => { closeSheet(); renderCalendar(); }, 900);
+      setTimeout(() => {
+        closeSheet();
+        renderCalendar();
+        // Resetear formulario de bloqueo
+        $("#bl-reason").value = "Reparación";
+        $("#bl-reason-other").value = "";
+        $("#bl-reason-other-wrap").style.display = "none";
+      }, 900);
     } else {
       showAlert("#block-alert","err","✗ " + (typeof d.error === "object" ? JSON.stringify(d.error) : (d.error || JSON.stringify(d))));
     }
@@ -1187,6 +1245,13 @@ $("#btn-refresh").addEventListener("click", async () => {
 document.addEventListener("visibilitychange", async () => {
   if (document.visibilityState !== "visible" || !ROOMS.length) return;
   await checkChanges();
+});
+
+// "Otro" motivo → campo de texto opcional
+$("#bl-reason").addEventListener("change", () => {
+  const isOtro = $("#bl-reason").value === "Otro";
+  $("#bl-reason-other-wrap").style.display = isOtro ? "block" : "none";
+  if (!isOtro) $("#bl-reason-other").value = "";
 });
 
 // ── MONTH BAR ──────────────────────────────────────────
