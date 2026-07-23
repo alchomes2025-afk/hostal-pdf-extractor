@@ -23,7 +23,7 @@ import os
 import time
 import requests
 from datetime import datetime, date, timedelta
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, Response
 import re
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
@@ -474,11 +474,18 @@ _state = {
 }
 
 
-def _parse_bookings_list(raw):
-    """Convierte lista cruda de Beds24 al formato de la app."""
+def _parse_bookings_list(raw, include_cancelled=False):
+    """
+    Convierte lista cruda de Beds24 al formato de la app.
+
+    include_cancelled=True → conserva las reservas canceladas en el resultado
+    (necesario en /check-changes para poder ELIMINARLAS del estado; si se
+    filtran aquí, la cancelación nunca llega a la lógica de fusión — ese era
+    el bug por el que reservas canceladas seguían apareciendo en la app).
+    """
     result = []
     for b in (raw or []):
-        if str(b.get("status", "")).lower() == "cancelled":
+        if not include_cancelled and str(b.get("status", "")).lower() == "cancelled":
             continue
         arrival   = (b.get("arrival",   "") or "")[:10]
         departure = (b.get("departure", "") or "")[:10]
@@ -738,20 +745,33 @@ def check_changes():
             return jsonify({"ok": True, "changed": False, "checked_at": checked_at,
                             "warning": f"Beds24 {resp.status_code}"})
 
-        new_bookings = _parse_bookings_list(resp.json().get("data") or [])
+        # include_cancelled=True → las cancelaciones LLEGAN a la fusión
+        # y se eliminan del estado (antes se filtraban y nunca desaparecían de la app)
+        new_bookings = _parse_bookings_list(resp.json().get("data") or [], include_cancelled=True)
         _state["checked_at"] = checked_at
 
         if not new_bookings:
             return jsonify({"ok": True, "changed": False, "checked_at": checked_at})
 
-        # Fusionar en el estado: eliminar versión antigua, añadir nueva
+        # Fusionar en el estado: eliminar versión antigua, añadir nueva.
+        # Clave primaria: id de Beds24 (único por reserva). Solo si no hay id
+        # se usa (roomId, arrival) como fallback — antes se usaba siempre
+        # (roomId, arrival), lo que borraba reservas equivocadas cuando un
+        # huésped cambiaba de fechas o dos reservas compartían día de entrada.
         for nb in new_bookings:
+            nb_id  = nb.get("id")
             rid_nb = str(nb.get("roomId", ""))
             arr_nb = nb.get("arrival", "")
-            _state["bookings"] = [
-                b for b in _state["bookings"]
-                if not (str(b.get("roomId","")) == rid_nb and b.get("arrival","") == arr_nb)
-            ]
+            if nb_id is not None:
+                _state["bookings"] = [
+                    b for b in _state["bookings"]
+                    if str(b.get("id", "")) != str(nb_id)
+                ]
+            else:
+                _state["bookings"] = [
+                    b for b in _state["bookings"]
+                    if not (str(b.get("roomId","")) == rid_nb and b.get("arrival","") == arr_nb)
+                ]
             if str(nb.get("status","")).lower() != "cancelled":
                 _state["bookings"].append(nb)
 
@@ -1001,6 +1021,7 @@ def cancel_booking():
 
 
 
+@mobile_bp.route("/debug-bookings", methods=["GET"])
 def debug_bookings():
     """
     Diagnóstico: llama a GET /bookings de Beds24 y devuelve la respuesta cruda.
@@ -1085,3 +1106,182 @@ def debug_bookings():
         })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@mobile_bp.route("/test-sync", methods=["GET"])
+def test_sync():
+    """
+    Página HTML de diagnóstico visual.
+    Compara:
+      A) Lo que el servidor tiene en memoria (_state) — lo que ve la app
+      B) Lo que Beds24 devuelve AHORA en tiempo real
+
+    Acceso desde el móvil:
+      https://hostal-pdf-extractor.onrender.com/mobile/test-sync?pin=XXXX
+    """
+    if not check_pin():
+        return "<h2>PIN incorrecto</h2>", 401
+
+    try:
+        # ── A) Estado en memoria del servidor ──────────────────────────────
+        _ensure_loaded()
+        mem_bookings   = _state.get("bookings", [])
+        mem_loaded_at  = _state.get("loaded_at") or "—"
+        mem_checked_at = _state.get("checked_at") or "—"
+
+        # ── B) Llamada fresca a Beds24 (mismo rango que _load_bookings) ────
+        token = get_access_token()
+        today = date.today()
+        rango_from = (today - timedelta(days=180)).strftime("%Y-%m-%d")
+        rango_to   = (today + timedelta(days=365)).strftime("%Y-%m-%d")
+
+        all_raw = []
+        page = 1
+        beds24_error = None
+        while True:
+            resp = b24_get(token, "/bookings", params={
+                "propertyId":          PROPERTY_ID,
+                "arrivalFrom":         rango_from,
+                "arrivalTo":           rango_to,
+                "includePersonalInfo": "true",
+                "limit":               500,
+                "page":                page,
+            })
+            if not resp.ok:
+                if page == 1:
+                    beds24_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
+                break
+            data = resp.json().get("data") or []
+            all_raw.extend(data)
+            if len(data) < 500:
+                break
+            page += 1
+            if page > 10:
+                break
+
+        beds24_bookings = _parse_bookings_list(all_raw)  # sin canceladas (igual que la app)
+
+        # ── C) Comparar por id (clave única de Beds24) ─────────────────────
+        def key(b):
+            bid = b.get("id")
+            if bid is not None:
+                return ("id", str(bid))
+            return ("ra", str(b.get("roomId", "")), b.get("arrival", ""))
+
+        mem_map = {key(b): b for b in mem_bookings}
+        b24_map = {key(b): b for b in beds24_bookings}
+
+        only_in_mem    = [b for k, b in mem_map.items() if k not in b24_map]
+        only_in_beds24 = [b for k, b in b24_map.items() if k not in mem_map]
+        in_both        = [b for k, b in b24_map.items() if k in mem_map]
+
+        # Discrepancias de datos en reservas presentes en ambos
+        mismatches = []
+        for k, b24 in b24_map.items():
+            if k in mem_map:
+                m = mem_map[k]
+                diffs = []
+                for field in ("arrival", "departure", "roomId", "guestName"):
+                    if str(m.get(field, "")) != str(b24.get(field, "")):
+                        diffs.append(f'{field}: app="{m.get(field)}" beds24="{b24.get(field)}"')
+                if diffs:
+                    mismatches.append({**b24, "_diffs": "; ".join(diffs)})
+
+        now_local = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+        # ── D) HTML ────────────────────────────────────────────────────────
+        def room_name(rid):
+            return next((r["name"] for r in ROOMS if str(r["id"]) == str(rid)), str(rid))
+
+        def bk_row(b, cls=""):
+            extra = f'<div style="font-size:10px;color:#c0392b;margin-top:2px">{b["_diffs"]}</div>' if b.get("_diffs") else ""
+            return (f'<tr class="{cls}"><td>{b.get("arrival","—")}</td>'
+                    f'<td>{b.get("departure","—")}</td>'
+                    f'<td>{room_name(b.get("roomId",""))}</td>'
+                    f'<td>{b.get("guestName","—")}{extra}</td>'
+                    f'<td style="font-size:11px;color:#888">{b.get("id","—")}</td></tr>')
+
+        def section(title, items, cls, empty_msg):
+            badge = {"ok": "#1e7e34", "warn": "#e65c00", "err": "#c0392b"}.get(cls, "#333")
+            rows = "".join(bk_row(b, cls) for b in sorted(items, key=lambda x: x.get("arrival", "")))
+            if not items:
+                rows = f'<tr><td colspan="5" style="color:#aaa;text-align:center;padding:12px">{empty_msg}</td></tr>'
+            return (f'<h2 style="margin:26px 0 8px;font-size:16px">{title} '
+                    f'<span style="background:{badge};color:#fff;padding:2px 10px;'
+                    f'border-radius:99px;font-size:13px">{len(items)}</span></h2>'
+                    f'<table><thead><tr><th>Entrada</th><th>Salida</th><th>Hab.</th>'
+                    f'<th>Huésped</th><th>ID</th></tr></thead><tbody>{rows}</tbody></table>')
+
+        problems = len(only_in_beds24) + len(only_in_mem) + len(mismatches)
+        status_color = "#1e7e34" if problems == 0 else "#c0392b"
+        status_text = ("✓ App 100% sincronizada con Beds24"
+                       if problems == 0
+                       else f"⚠️ {problems} discrepancia(s) detectada(s)")
+
+        err_html = (f'<div style="background:#ffebee;color:#c0392b;padding:12px;'
+                    f'border-radius:8px;margin-bottom:16px">Error Beds24: {beds24_error}</div>'
+                    if beds24_error else "")
+
+        pin_param = request.args.get("pin", "")
+
+        html = f"""<!DOCTYPE html>
+<html lang="es"><head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Test Sync · Alchomes</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f5f7;color:#111;padding:16px;max-width:640px;margin:0 auto}}
+h1{{font-size:20px;color:#003580;margin-bottom:4px}}
+.sub{{font-size:12px;color:#888;margin-bottom:18px}}
+.status{{background:{status_color};color:#fff;padding:14px 16px;border-radius:12px;font-size:15px;font-weight:700;margin-bottom:18px}}
+.meta{{background:#fff;border-radius:12px;padding:14px;margin-bottom:6px;font-size:13px;line-height:1.8;box-shadow:0 1px 4px rgba(0,0,0,.08)}}
+.meta b{{color:#003580}}
+table{{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);font-size:13px}}
+th{{background:#003580;color:#fff;padding:8px 10px;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.4px}}
+td{{padding:9px 10px;border-bottom:1px solid #f0f0f0}}
+tr.ok td{{background:#f0fff4}} tr.warn td{{background:#fff8f0}} tr.err td{{background:#fff0f0}}
+.btn{{display:block;width:100%;padding:14px;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;margin-top:14px;text-align:center;text-decoration:none;color:#fff}}
+</style></head>
+<body>
+<h1>🔍 Test Sync · Alchomes</h1>
+<div class="sub">Generado: {now_local}</div>
+<div class="status">{status_text}</div>
+{err_html}
+<div class="meta">
+  <b>Servidor (lo que ve la app)</b><br>
+  Reservas en memoria: <b>{len(mem_bookings)}</b><br>
+  Cargado: {mem_loaded_at}<br>
+  Último delta check: {mem_checked_at}
+</div>
+<div class="meta">
+  <b>Beds24 (tiempo real, ahora mismo)</b><br>
+  Reservas activas: <b>{len(beds24_bookings)}</b><br>
+  Rango: {rango_from} → {rango_to}
+</div>
+{section("🔴 Faltan en la app (están en Beds24)", only_in_beds24, "err", "✓ Ninguna — la app tiene todas las reservas de Beds24")}
+{section("🟡 Sobran en la app (no están en Beds24)", only_in_mem, "warn", "✓ Ninguna — sin reservas fantasma")}
+{section("🟠 Datos diferentes (fechas/habitación/nombre)", mismatches, "warn", "✓ Ninguna — datos idénticos")}
+{section("🟢 Sincronizadas correctamente", in_both, "ok", "— Sin reservas en el periodo")}
+<a class="btn" style="background:#003580" href="test-sync?pin={pin_param}">↺ Volver a comprobar</a>
+<button class="btn" style="background:#e65c00" onclick="forceReload()">⚡ Forzar recarga completa del servidor</button>
+<div id="reload-result" style="margin-top:10px;font-size:13px;text-align:center;color:#555"></div>
+<script>
+async function forceReload() {{
+  if (!confirm('¿Recargar todos los datos desde Beds24? La app usará datos frescos.')) return;
+  const el = document.getElementById('reload-result');
+  el.textContent = 'Recargando…';
+  try {{
+    const r = await fetch('reload?pin={pin_param}', {{method: 'POST', headers: {{'x-app-pin': '{pin_param}'}}}});
+    const d = await r.json();
+    el.textContent = d.ok ? ('✓ Recargado: ' + d.bookings + ' reservas') : ('✗ ' + (d.error || 'error'));
+    if (d.ok) setTimeout(() => location.reload(), 1200);
+  }} catch(e) {{ el.textContent = '✗ Error de conexión'; }}
+}}
+</script>
+</body></html>"""
+
+        return Response(html, mimetype="text/html")
+
+    except Exception as e:
+        import traceback
+        return f"<pre>Error: {e}\n\n{traceback.format_exc()}</pre>", 500
