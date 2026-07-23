@@ -513,42 +513,55 @@ def _load_bookings():
     """
     Carga TODOS los bookings de la propiedad.
 
-    Estrategia de llamadas a Beds24:
-    · limit=500 (máximo permitido) → para un hostal de 5 hab. cabe todo en 1 llamada.
-    · Si hay exactamente 500 resultados (hostal muy ocupado), pagina automáticamente.
-    · Esta función solo se ejecuta una vez al arrancar el servidor.
-      Con UptimeRobot manteniendo Render despierto, ocurre 1 vez al día máximo.
+    Estrategia de llamadas a Beds24 (v9 — corregido):
+    · Beds24 devuelve resultados INCOMPLETOS cuando el rango arrivalFrom→arrivalTo
+      es muy amplio (545 días: 180 atrás + 365 adelante) en una sola llamada —
+      confirmado comparando contra una consulta de 60 días, que sí trae todo.
+      No es un error HTTP, simplemente omite reservas silenciosamente.
+    · Fix: se pide en trozos de ~60 días (igual que /debug-bookings, que es fiable)
+      y se combinan los resultados, sin pasarnos nunca de un rango ancho por llamada.
+    · Esta función solo se ejecuta al arrancar el servidor o en /reload.
     """
     token = get_access_token()
     today = date.today()
-    params_base = {
-        "propertyId":          PROPERTY_ID,
-        "arrivalFrom":         (today - timedelta(days=180)).strftime("%Y-%m-%d"),
-        "arrivalTo":           (today + timedelta(days=365)).strftime("%Y-%m-%d"),
-        "includePersonalInfo": "true",
-        "limit":               500,   # máximo de Beds24 → 1 llamada para hostales pequeños
-    }
+    window_from = today - timedelta(days=180)
+    window_to   = today + timedelta(days=365)
 
+    CHUNK_DAYS = 60
     all_raw = []
-    page    = 1
+    seen_ids = set()
 
-    while True:
-        resp = b24_get(token, "/bookings", params={**params_base, "page": page})
-        if not resp.ok:
-            if page == 1:
-                raise Exception(f"Beds24 {resp.status_code}: {resp.text[:200]}")
-            break  # datos parciales son mejor que nada
+    chunk_start = window_from
+    while chunk_start <= window_to:
+        chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), window_to)
+        params_base = {
+            "propertyId":          PROPERTY_ID,
+            "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
+            "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
+            "includePersonalInfo": "true",
+            "limit":               500,
+        }
 
-        data = resp.json().get("data") or []
-        all_raw.extend(data)
+        page = 1
+        while True:
+            resp = b24_get(token, "/bookings", params={**params_base, "page": page})
+            if not resp.ok:
+                break  # este trozo falló; seguimos con el resto en vez de abortar todo
+            data = resp.json().get("data") or []
+            for b in data:
+                bid = b.get("id")
+                if bid is not None and bid in seen_ids:
+                    continue  # evitar duplicados en los bordes de cada trozo
+                if bid is not None:
+                    seen_ids.add(bid)
+                all_raw.append(b)
+            if len(data) < 500:
+                break
+            page += 1
+            if page > 10:
+                break
 
-        # Si devuelve menos de 500, ya tenemos todo (caso normal para un hostal de 5 hab.)
-        if len(data) < 500:
-            break
-        # Si devuelve exactamente 500, podría haber más → paginar (caso muy raro)
-        page += 1
-        if page > 10:  # límite de seguridad: 5000 reservas máximo
-            break
+        chunk_start = chunk_end + timedelta(days=1)
 
     _state["bookings"]   = _parse_bookings_list(all_raw)
     _state["loaded_at"]  = datetime.utcnow().isoformat()
@@ -1133,35 +1146,49 @@ def test_sync():
         mem_loaded_at  = _state.get("loaded_at") or "—"
         mem_checked_at = _state.get("checked_at") or "—"
 
-        # ── B) Llamada fresca a Beds24 (mismo rango que _load_bookings) ────
+        # ── B) Llamada fresca a Beds24 en trozos de 60 días (mismo fix que _load_bookings:
+        #      una consulta de rango completo -180/+365 pierde reservas silenciosamente) ──
         token = get_access_token()
         today = date.today()
-        rango_from = (today - timedelta(days=180)).strftime("%Y-%m-%d")
-        rango_to   = (today + timedelta(days=365)).strftime("%Y-%m-%d")
+        window_from = today - timedelta(days=180)
+        window_to   = today + timedelta(days=365)
+        rango_from = window_from.strftime("%Y-%m-%d")
+        rango_to   = window_to.strftime("%Y-%m-%d")
 
+        CHUNK_DAYS = 60
         all_raw = []
-        page = 1
+        seen_ids = set()
         beds24_error = None
-        while True:
-            resp = b24_get(token, "/bookings", params={
-                "propertyId":          PROPERTY_ID,
-                "arrivalFrom":         rango_from,
-                "arrivalTo":           rango_to,
-                "includePersonalInfo": "true",
-                "limit":               500,
-                "page":                page,
-            })
-            if not resp.ok:
-                if page == 1:
+        chunk_start = window_from
+        while chunk_start <= window_to:
+            chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), window_to)
+            page = 1
+            while True:
+                resp = b24_get(token, "/bookings", params={
+                    "propertyId":          PROPERTY_ID,
+                    "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
+                    "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
+                    "includePersonalInfo": "true",
+                    "limit":               500,
+                    "page":                page,
+                })
+                if not resp.ok:
                     beds24_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
-                break
-            data = resp.json().get("data") or []
-            all_raw.extend(data)
-            if len(data) < 500:
-                break
-            page += 1
-            if page > 10:
-                break
+                    break
+                data = resp.json().get("data") or []
+                for b in data:
+                    bid = b.get("id")
+                    if bid is not None and bid in seen_ids:
+                        continue
+                    if bid is not None:
+                        seen_ids.add(bid)
+                    all_raw.append(b)
+                if len(data) < 500:
+                    break
+                page += 1
+                if page > 10:
+                    break
+            chunk_start = chunk_end + timedelta(days=1)
 
         beds24_bookings = _parse_bookings_list(all_raw)  # sin canceladas (igual que la app)
 
