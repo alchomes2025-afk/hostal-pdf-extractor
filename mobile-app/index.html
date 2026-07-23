@@ -528,8 +528,12 @@ const MONTHS_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct
 
 // ── STATE ──────────────────────────────────────────────
 let PIN = "", ROOMS = [];
-let DATA = {};        // { roomId: { bookings:[], prices:{} } }
+let ALL_BOOKINGS = [];   // [{roomId, arrival, departure, guestName, phone, email}]
+let PRICES = {};         // {room_id_str: {date: price}} — viene de BASE_PRICES en backend
+let OVERRIDES = {};      // {room_id_str: {date: {price1?, numAvail?}}} — cambios manuales
 let SEL_DATE = null, SEL_ROOM = null, AVAIL_STATE = 1;
+let _lastChecked = null;
+let _autoCheckTimer = null;
 
 // Nombres cortos para la columna lateral
 const ROOM_LABEL = {
@@ -619,16 +623,7 @@ async function doLogin() {
 
 // ── INIT ───────────────────────────────────────────────
 async function initApp() {
-  try {
-    const r = await fetch(`${API}/rooms`, {headers: {"x-app-pin": PIN}});
-    const d = await r.json();
-    ROOMS = d.rooms || [];
-    ROOMS.forEach(r => { DATA[r.id] = {bookings: [], prices: {}}; });
-    populateRoomSelects();
-    await loadData();
-  } catch(e) {
-    setPill("Error al iniciar");
-  }
+  await loadAllData();
 }
 function populateRoomSelects() {
   ["#nb-room","#bl-room"].forEach(sel => {
@@ -640,104 +635,57 @@ function populateRoomSelects() {
   });
 }
 
-// ── DATA LOADING (lazy) ────────────────────────────────
-// Carga inicial: solo 2 meses (10 llamadas a Beds24 en vez de 60).
-// Los meses siguientes se cargan cuando el usuario hace scroll hacia el futuro.
+// ── DATA LOADING ───────────────────────────────────────
+// 1 sola llamada al backend → 0 o 1 llamadas a Beds24 → todo el año disponible.
 
-let _allMonths   = [];
-let _loadedIdx   = 0;
-let _loadingMore = false;
-let _lastChecked = null;      // ISO timestamp de la última comprobación
-let _autoCheckTimer = null;   // timer de comprobación automática
-
-async function loadData() {
+async function loadAllData() {
   setPill("Cargando…");
-  const today = new Date();
-  _allMonths = [];
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(today.getFullYear(), today.getMonth() + i, 1);
-    _allMonths.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`);
-  }
-  ROOMS.forEach(r => { DATA[r.id] = {bookings:[], prices:{}}; });
-  _loadedIdx = 0;
-
-  // Fase 1: primeros 3 meses (6 llamadas a Beds24 con el nuevo endpoint)
-  await _loadBatch(3);
-  renderCalendar();
-  updateMonthBar();
-  _lastChecked = new Date().toISOString();
-  setPill("✓");
-
-  const cw = $("#cal-wrap");
-  cw.removeEventListener("scroll", handleCalScroll);
-  cw.addEventListener("scroll", handleCalScroll);
-
-  // Auto-check cada 5 minutos: 1 llamada a Beds24 para detectar cambios
-  if (_autoCheckTimer) clearInterval(_autoCheckTimer);
-  _autoCheckTimer = setInterval(checkChanges, 5 * 60 * 1000);
-}
-
-// 1 mes = 1 llamada a /calendar-all = 2 llamadas a Beds24
-async function _loadBatch(n) {
-  const toLoad = _allMonths.slice(_loadedIdx, _loadedIdx + n);
-  for (const m of toLoad) {
-    await fetchAllForMonth(m);
-    _loadedIdx++;
-  }
-}
-
-// Lazy load: se dispara cuando el usuario se acerca al final del calendario
-async function maybeLoadMore() {
-  if (_loadingMore || _loadedIdx >= _allMonths.length) return;
-  const cw = $("#cal-wrap");
-  const remaining = cw.scrollWidth - cw.scrollLeft - cw.clientWidth;
-  const BUFFER_PX = 62 * 45; // cargar más cuando falten ~45 días de scroll
-  if (remaining > BUFFER_PX) return;
-
-  _loadingMore = true;
-  setPill("● cargando…");
-  await _loadBatch(1);
-  renderCalendar();
-  setPill(_loadedIdx >= _allMonths.length ? "✓" : "✓ (" + _loadedIdx + "/12)");
-  _loadingMore = false;
-}
-
-// /calendar-all devuelve las 5 habitaciones en una sola respuesta
-async function fetchAllForMonth(month) {
   try {
-    const r = await fetch(`${API}/calendar-all?month=${month}&pin=${PIN}`, {
-      headers: {"x-app-pin": PIN}
-    });
-    const res = await r.json();
-    if (!res?.ok) return;
-    ROOMS.forEach(room => {
-      const rd = res.rooms?.[String(room.id)];
-      if (!rd) return;
-      const d = DATA[room.id];
-      (rd.bookings || []).forEach(b => {
-        const arrival   = (b.arrival   || "").substring(0, 10);
-        const departure = (b.departure || "").substring(0, 10);
-        if (!arrival || !departure) return;
-        if (!d.bookings.find(x => x.arrival === arrival && x.guestName === b.guestName))
-          d.bookings.push({...b, arrival, departure});
-      });
-      Object.assign(d.prices, rd.prices || {});
-    });
-  } catch {}
-}
+    const r = await fetch(`${API}/all-data?pin=${PIN}`, {headers: {"x-app-pin": PIN}});
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error);
 
-async function fetchMonth(roomId, month) {
-  const r = await fetch(`${API}/calendar?roomId=${roomId}&month=${month}&pin=${PIN}`, {
-    headers: {"x-app-pin": PIN}
-  });
-  return r.json();
+    ROOMS        = d.rooms     || [];
+    ALL_BOOKINGS = d.bookings  || [];
+    PRICES       = d.prices    || {};  // BASE_PRICES desde el backend
+    OVERRIDES    = d.overrides || {};  // cambios manuales del usuario
+    _lastChecked = d.checked_at;
+
+    populateRoomSelects();
+    renderCalendar();
+    updateMonthBar();
+    setPill("✓");
+
+    // Auto-check cada 5 min: 1 llamada a Beds24 para detectar nuevas reservas de Booking.com
+    if (_autoCheckTimer) clearInterval(_autoCheckTimer);
+    _autoCheckTimer = setInterval(checkChanges, 5 * 60 * 1000);
+
+    // Scroll para actualizar la barra de mes
+    const cw = $("#cal-wrap");
+    cw.removeEventListener("scroll", handleCalScroll);
+    cw.addEventListener("scroll", handleCalScroll);
+
+  } catch(e) {
+    setPill("✗ Error: " + e.message);
+  }
 }
 
 // ── CALENDAR RENDER ────────────────────────────────────
+function getDateInfo(roomId, ds) {
+  const ov   = OVERRIDES[String(roomId)]?.[ds] || {};
+  const base = PRICES[String(roomId)]?.[ds];
+  return {
+    price1:     ov.price1   !== undefined ? ov.price1   : base ?? null,
+    numAvail:   ov.numAvail !== undefined ? ov.numAvail : null,
+    isOverride: ov.price1   !== undefined,
+  };
+}
+
 function roomBookedOn(roomId, ds) {
-  // ds ya viene normalizado de localDateStr (10 chars YYYY-MM-DD)
-  // bookings también tienen arrival/departure normalizados en fetchAndMerge
-  return (DATA[roomId]?.bookings || []).find(b => b.arrival <= ds && b.departure > ds);
+  return ALL_BOOKINGS.find(b =>
+    String(b.roomId) === String(roomId) &&
+    b.arrival <= ds && b.departure > ds
+  );
 }
 function fmtPrice(v) {
   return v != null ? "€" + Number(v).toFixed(0) : "—";
@@ -758,7 +706,6 @@ function renderCalendar() {
 
   // ── Fila de cabecera: esquina + fechas ──
   const trH = document.createElement("tr");
-  // Celda esquina (sticky top+left)
   const corner = document.createElement("th");
   corner.className = "col-corner";
   corner.style.cssText = "position:sticky;left:0;top:0;z-index:30;width:90px;min-width:90px;background:var(--bk);border-right:3px solid rgba(255,255,255,.2)";
@@ -780,11 +727,10 @@ function renderCalendar() {
   tb.appendChild(trH);
 
   // ── Una fila por habitación ──
-  ROOMS.forEach((room, ri) => {
+  ROOMS.forEach((room) => {
     const tr = document.createElement("tr");
     tr.className = "room-row";
 
-    // Celda nombre (sticky left)
     const lbl = document.createElement("td");
     lbl.className = "room-lbl";
     const rl = ROOM_LABEL[room.id] || {name: room.name, sub: ""};
@@ -794,20 +740,20 @@ function renderCalendar() {
     // Celdas de días
     dates.forEach(({ds}) => {
       const bk = roomBookedOn(room.id, ds);
-      const pr = (DATA[room.id]?.prices || {})[ds] || {};
-      const bl = pr.numAvail === 0;
+      const {price1, numAvail, isOverride} = getDateInfo(room.id, ds);
+      const bl = numAvail === 0;
 
       const td = document.createElement("td");
       td.className = "day-cell" + (bk ? " bk" : bl ? " bl" : " av");
 
       if (bk) {
         const first = (bk.guestName || "Hués.").split(" ")[0].substring(0, 7);
-        td.innerHTML = `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(pr.price1)}</div>`;
+        td.innerHTML = `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(price1)}</div>`;
       } else if (bl) {
         td.innerHTML = `<div class="dc-icon bl-c">—</div>`;
       } else {
-        const pCls = pr.price1 == null ? " na" : pr.isOverride ? " ov" : "";
-        td.innerHTML = `<div class="dc-icon av-c">✔</div><div class="dc-price${pCls}">${fmtPrice(pr.price1)}</div>`;
+        const pCls = price1 == null ? " na" : isOverride ? " ov" : "";
+        td.innerHTML = `<div class="dc-icon av-c">✔</div><div class="dc-price${pCls}">${fmtPrice(price1)}</div>`;
       }
 
       td.addEventListener("click", () => openDaySheet(ds, room));
@@ -838,8 +784,8 @@ function openDaySheet(ds, room) {
   SEL_DATE = ds;
   SEL_ROOM = room;
   const bk = roomBookedOn(room.id, ds);
-  const pr = (DATA[room.id]?.prices || {})[ds] || {};
-  const bl = pr.numAvail === 0;
+  const {price1, numAvail, isOverride} = getDateInfo(room.id, ds);
+  const bl = numAvail === 0;
 
   const rl = ROOM_LABEL[room.id] || {name: room.name};
   $("#sh-day-title").textContent = dateLabel(ds, {weekday:"long",day:"numeric",month:"long"});
@@ -918,10 +864,9 @@ function openDaySheet(ds, room) {
 
   } else {
     // ── AVAILABLE ──
-    const price = pr.price1;
-    const priceHtml = price != null
-      ? `<div class="price-display ${pr.isOverride ? "price-ov" : ""}">
-          ${fmtPrice(price)} <span>Standard Rate${pr.isOverride ? " · modificado" : ""}</span>
+    const priceHtml = price1 != null
+      ? `<div class="price-display ${isOverride ? "price-ov" : ""}">
+          ${fmtPrice(price1)} <span>Standard Rate${isOverride ? " · modificado" : ""}</span>
         </div>`
       : `<div class="price-display"><span>Sin precio asignado</span></div>`;
 
@@ -1009,10 +954,10 @@ async function unblockDate(ds) {
     });
     const d = await r.json();
     if (d.ok) {
-      // Actualizar local inmediatamente
-      const prices = DATA[SEL_ROOM.id].prices;
-      if (!prices[ds]) prices[ds] = {};
-      prices[ds].numAvail = 1;
+      // Actualizar OVERRIDES local
+      if (!OVERRIDES[String(SEL_ROOM.id)]) OVERRIDES[String(SEL_ROOM.id)] = {};
+      if (!OVERRIDES[String(SEL_ROOM.id)][ds]) OVERRIDES[String(SEL_ROOM.id)][ds] = {};
+      OVERRIDES[String(SEL_ROOM.id)][ds].numAvail = 1;
       closeSheet();
       renderCalendar();
     } else {
@@ -1063,18 +1008,16 @@ $("#pr-save").addEventListener("click", async () => {
     });
     const d = await r.json();
     if (d.ok) {
-      // Actualizar DATA local inmediatamente (sin esperar reload de API)
+      // Actualizar OVERRIDES local inmediatamente
+      const rid = String(SEL_ROOM.id);
+      if (!OVERRIDES[rid]) OVERRIDES[rid] = {};
       let cur = new Date(from + "T12:00:00");
       const end = new Date(to + "T12:00:00");
-      const prices = DATA[SEL_ROOM.id].prices;
       while (cur <= end) {
         const dk = localDateStr(cur);
-        if (!prices[dk]) prices[dk] = {};
-        if (body.price1 !== undefined) {
-          prices[dk].price1 = body.price1;
-          prices[dk].isOverride = true;
-        }
-        prices[dk].numAvail = AVAIL_STATE;
+        if (!OVERRIDES[rid][dk]) OVERRIDES[rid][dk] = {};
+        if (body.price1 !== undefined) OVERRIDES[rid][dk].price1 = body.price1;
+        OVERRIDES[rid][dk].numAvail = AVAIL_STATE;
         cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
       }
       showAlert("#price-alert","ok","✓ Guardado correctamente");
@@ -1120,9 +1063,18 @@ $("#nb-save").addEventListener("click", async () => {
     const d = await r.json();
     if (d.ok) {
       showAlert("#booking-alert","ok","✓ Reserva creada en Beds24");
-      // Clear form
+      // Añadir a ALL_BOOKINGS local inmediatamente
+      ALL_BOOKINGS.push({
+        roomId:    parseInt(roomId),
+        arrival:   arrival,
+        departure: departure,
+        guestName: name,
+        phone:     phone,
+        email:     email,
+        status:    "new",
+      });
       ["#nb-name","#nb-phone","#nb-email","#nb-arrival","#nb-departure"].forEach(s => $(s).value = "");
-      setTimeout(async () => { closeSheet(); await loadData(); }, 1400);
+      setTimeout(() => { closeSheet(); renderCalendar(); }, 1000);
     } else {
       // d.error puede ser un objeto JSON de Beds24 — lo mostramos legible
       let errMsg = d.error;
@@ -1166,7 +1118,18 @@ $("#bl-save").addEventListener("click", async () => {
     const d = await r.json();
     if (d.ok) {
       showAlert("#block-alert","ok","✓ Fechas bloqueadas");
-      setTimeout(async () => { closeSheet(); await loadData(); }, 1200);
+      // Actualizar OVERRIDES local: marcar cada día como bloqueado
+      const rid = String(roomId);
+      if (!OVERRIDES[rid]) OVERRIDES[rid] = {};
+      let cur = new Date(from + "T12:00:00");
+      const end = new Date(to + "T12:00:00");
+      while (cur < end) { // fin exclusivo (igual que Beds24)
+        const dk = localDateStr(cur);
+        if (!OVERRIDES[rid][dk]) OVERRIDES[rid][dk] = {};
+        OVERRIDES[rid][dk].numAvail = 0;
+        cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
+      }
+      setTimeout(() => { closeSheet(); renderCalendar(); }, 900);
     } else {
       showAlert("#block-alert","err","✗ " + (typeof d.error === "object" ? JSON.stringify(d.error) : (d.error || JSON.stringify(d))));
     }
@@ -1186,55 +1149,44 @@ $("#sh-day-close").addEventListener("click", closeSheet);
 $("#overlay").addEventListener("click", closeSheet);
 
 // ── DELTA SYNC ─────────────────────────────────────────
-// 1 llamada a Beds24 (GET /bookings?modifiedFrom=...) para detectar cambios.
-// Si hay cambios, recarga solo los meses/habitaciones afectados.
-// Si no hay cambios: 0 llamadas adicionales a Beds24.
-
 async function checkChanges() {
-  const since = _lastChecked
-    || new Date(Date.now() - 3600000).toISOString(); // última hora si no hay timestamp
-
+  const since = _lastChecked || new Date(Date.now() - 3600000).toISOString();
   try {
     const r = await fetch(`${API}/check-changes?since=${encodeURIComponent(since)}&pin=${PIN}`, {
       headers: {"x-app-pin": PIN}
     });
     const res = await r.json();
     if (!res?.ok) return false;
-
     _lastChecked = res.checked_at;
-
-    if (!res.changed) return false; // sin cambios — 0 llamadas adicionales
-
-    // Hay cambios: recargar solo los meses afectados
-    // El backend ya invalida la caché de las habitaciones afectadas,
-    // así que fetchAllForMonth solo llama a Beds24 para las habitaciones sin caché.
-    const months = res.affected_months || [];
-    for (const m of months) {
-      // Solo recargar si ese mes ya fue cargado anteriormente
-      const mIdx = _allMonths.indexOf(m);
-      if (mIdx >= 0 && mIdx < _loadedIdx) {
-        await fetchAllForMonth(m);
-      }
-    }
-    if (months.length > 0) renderCalendar();
+    if (!res.changed) return false;
+    // Fusionar nuevos/modificados bookings en ALL_BOOKINGS
+    (res.new_bookings || []).forEach(nb => {
+      const rid = String(nb.roomId);
+      ALL_BOOKINGS = ALL_BOOKINGS.filter(b =>
+        !(String(b.roomId) === rid && b.arrival === nb.arrival)
+      );
+      if (nb.status !== "cancelled") ALL_BOOKINGS.push(nb);
+    });
+    renderCalendar();
     return true;
-
   } catch { return false; }
 }
 
-// Botón ↺: sync manual
+// Botón ↺: delta sync manual
 $("#btn-refresh").addEventListener("click", async () => {
   const btn = $("#btn-refresh");
   btn.classList.add("spinning");
   setPill("Comprobando…");
   const changed = await checkChanges();
   btn.classList.remove("spinning");
-  if (changed) {
-    setPill("✓ Actualizado");
-  } else {
-    setPill("✓ Sin cambios");
-  }
+  setPill(changed ? "✓ Actualizado" : "✓ Sin cambios");
   setTimeout(() => setPill("✓"), 2500);
+});
+
+// Auto-refresh al volver a la app: el momento exacto en que el manager la mira
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || !ROOMS.length) return;
+  await checkChanges();
 });
 
 // ── MONTH BAR ──────────────────────────────────────────
