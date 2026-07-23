@@ -868,25 +868,19 @@ def create_booking():
         first = name.split()[0]
         last  = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
 
-        # Beds24 API v2: enviar datos del huésped en AMBOS formatos para máxima compatibilidad
+        # Beds24 API v2: los campos de huésped van en la RAÍZ del objeto booking.
+        # Confirmado con debug-bookings: todas las reservas reales devuelven
+        # firstName/lastName en la raíz, NO en sub-objeto "guest" ni como "guestFirstName".
         booking_data = {
-            "roomId":        int(room_id),
-            "arrival":       arrival,
-            "departure":     departure,
-            "numAdult":      1,
-            "status":        "new",
-            # Formato objeto (Beds24 API v2 oficial)
-            "guest": {
-                "firstName": first,
-                "lastName":  last,
-                "email":     email,
-                "phone":     phone,
-            },
-            # Formato plano (compatibilidad con algunas versiones de Beds24)
-            "guestFirstName": first,
-            "guestLastName":  last,
-            "guestEmail":     email,
-            "guestPhone":     phone,
+            "roomId":    int(room_id),
+            "arrival":   arrival,
+            "departure": departure,
+            "numAdult":  1,
+            "status":    "new",
+            "firstName": first,
+            "lastName":  last,
+            "email":     email,
+            "phone":     phone,
         }
 
         resp = b24_post(
@@ -909,8 +903,18 @@ def create_booking():
                     err_msg = str(data)
             return jsonify({"ok": False, "error": str(err_msg)}), resp.status_code
         
-        # Invalidar caché de esa habitación
+        # Guardar en estado local con el id real de Beds24
+        # (sin id, el botón cancelar no funciona y el merge-by-id tampoco)
+        new_id = None
+        try:
+            data_list = data.get("data") if isinstance(data, dict) else data
+            if isinstance(data_list, list) and data_list:
+                new_id = data_list[0].get("id")
+        except Exception:
+            pass
+
         _state["bookings"].append({
+            "id":        new_id,     # id real de Beds24 — necesario para cancelar
             "roomId":    int(room_id),
             "arrival":   arrival,
             "departure": departure,
@@ -919,7 +923,7 @@ def create_booking():
             "email":     email,
             "status":    "new",
         })
-        return jsonify({"ok": True, "data": data})
+        return jsonify({"ok": True, "data": data, "bookingId": new_id})
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
