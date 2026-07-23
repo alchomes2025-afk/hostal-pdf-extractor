@@ -485,11 +485,12 @@ def _parse_bookings_list(raw):
         if not arrival or not departure:
             continue
         guest = b.get("guest") or {}
-        first = guest.get("firstName") or b.get("firstName") or ""
-        last  = guest.get("lastName")  or b.get("lastName")  or ""
-        phone = guest.get("phone") or guest.get("mobile") or b.get("phone") or ""
-        email = guest.get("email") or b.get("email") or ""
+        first = guest.get("firstName") or b.get("guestFirstName") or b.get("firstName") or ""
+        last  = guest.get("lastName")  or b.get("guestLastName")  or b.get("lastName")  or ""
+        phone = guest.get("phone") or guest.get("mobile") or b.get("guestPhone") or b.get("phone") or ""
+        email = guest.get("email") or b.get("guestEmail") or b.get("email") or ""
         result.append({
+            "id":        b.get("id"),          # ID de Beds24 (necesario para cancelar)
             "roomId":    b.get("roomId"),
             "arrival":   arrival,
             "departure": departure,
@@ -805,21 +806,28 @@ def create_booking():
     try:
         token = get_access_token()
         
-        # POST a /bookings de Beds24
-        # Nota: Beds24 API v2 exige status "new" para reservas nuevas.
-        # "confirmed" es válido solo para actualizaciones posteriores.
+        first = name.split()[0]
+        last  = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
+
+        # Beds24 API v2: enviar datos del huésped en AMBOS formatos para máxima compatibilidad
         booking_data = {
-            "roomId": int(room_id),
-            "arrival": arrival,
-            "departure": departure,
-            "numAdult": 1,
+            "roomId":        int(room_id),
+            "arrival":       arrival,
+            "departure":     departure,
+            "numAdult":      1,
+            "status":        "new",
+            # Formato objeto (Beds24 API v2 oficial)
             "guest": {
-                "firstName": name.split()[0],
-                "lastName": " ".join(name.split()[1:]) if len(name.split()) > 1 else "",
-                "email": email,
-                "phone": phone,
+                "firstName": first,
+                "lastName":  last,
+                "email":     email,
+                "phone":     phone,
             },
-            "status": "new",
+            # Formato plano (compatibilidad con algunas versiones de Beds24)
+            "guestFirstName": first,
+            "guestLastName":  last,
+            "guestEmail":     email,
+            "guestPhone":     phone,
         }
 
         resp = b24_post(
@@ -884,12 +892,21 @@ def block_dates():
 
     try:
         token = get_access_token()
-        
-        # Bloquea con numAvail=0 (sin disponibilidad)
+
+        # El "hasta" del formulario es como un check-out: exclusivo.
+        # Beds24 /inventory/rooms/calendar usa "to" INCLUSIVO, así que
+        # restamos 1 día para que coincida con la convención del formulario.
+        d_from = date.fromisoformat(date_from)
+        d_to   = date.fromisoformat(date_to) - timedelta(days=1)  # exclusivo → inclusivo
+        if d_to < d_from:
+            return jsonify({"ok": False, "error": "El rango debe cubrir al menos 1 día"}), 400
+
+        beds24_to = d_to.strftime("%Y-%m-%d")
+
         entry = {
-            "from": date_from,
-            "to": date_to,
-            "numAvail": 0,  # Bloqueado
+            "from":     date_from,
+            "to":       beds24_to,  # inclusivo en Beds24
+            "numAvail": 0,
         }
 
         resp = b24_post(
@@ -910,7 +927,41 @@ def block_dates():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-@mobile_bp.route("/debug-bookings", methods=["GET"])
+@mobile_bp.route("/cancel-booking", methods=["POST"])
+def cancel_booking():
+    """Cancela una reserva en Beds24 y la elimina del estado local."""
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+
+    body       = request.get_json(force=True, silent=True) or {}
+    booking_id = body.get("bookingId")
+    if not booking_id:
+        return jsonify({"ok": False, "error": "Falta bookingId"}), 400
+
+    try:
+        token = get_access_token()
+        # Beds24 API v2: actualizar status a "cancelled" en el mismo endpoint POST /bookings
+        resp = b24_post(
+            token,
+            "/bookings",
+            json_body=[{"id": int(booking_id), "status": "cancelled"}],
+        )
+        data = resp.json()
+        if not resp.ok:
+            return jsonify({"ok": False, "error": data}), resp.status_code
+
+        # Eliminar del estado local
+        _state["bookings"] = [
+            b for b in _state["bookings"]
+            if str(b.get("id", "")) != str(booking_id)
+        ]
+        return jsonify({"ok": True})
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+
 def debug_bookings():
     """
     Diagnóstico: llama a GET /bookings de Beds24 y devuelve la respuesta cruda.
