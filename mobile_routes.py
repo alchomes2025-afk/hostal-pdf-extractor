@@ -698,7 +698,7 @@ def all_data():
     })
 
 
-@mobile_bp.route("/reload", methods=["POST"])
+@mobile_bp.route("/reload", methods=["POST", "GET"])
 def reload_data():
     """
     Fuerza recarga completa desde Beds24 (1 llamada).
