@@ -486,6 +486,46 @@ html,body{
     <button class="sh-submit" id="nb-save">Crear reserva</button>
   </div>
 
+  <!-- Panel: editar reserva existente -->
+  <div id="panel-edit-booking" class="sh-panel">
+    <div class="sh-head">
+      <button class="sh-back" id="back-edit-booking">‹</button>
+      <div>
+        <div class="sh-title">Editar reserva</div>
+        <div class="sh-subtitle" id="edit-booking-subtitle"></div>
+      </div>
+      <button class="sh-close" id="edit-booking-close">✕</button>
+    </div>
+    <div id="edit-booking-alert" class="form-alert"></div>
+    <div class="form-grp">
+      <label class="form-lbl">Nombre completo</label>
+      <input type="text" id="eb-name" class="form-inp" placeholder="Ej: María García"/>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Teléfono</label>
+      <input type="tel" id="eb-phone" class="form-inp" placeholder="+34 623 456 789"/>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Email</label>
+      <input type="email" id="eb-email" class="form-inp" placeholder="Ej: maria@email.com"/>
+    </div>
+    <div class="form-grp">
+      <label class="form-lbl">Habitación</label>
+      <select id="eb-room" class="form-sel"></select>
+    </div>
+    <div class="form-row">
+      <div class="form-grp">
+        <label class="form-lbl">Check-in</label>
+        <input type="date" id="eb-arrival" class="form-inp"/>
+      </div>
+      <div class="form-grp">
+        <label class="form-lbl">Check-out</label>
+        <input type="date" id="eb-departure" class="form-inp"/>
+      </div>
+    </div>
+    <button class="sh-submit" id="eb-save">Guardar cambios</button>
+  </div>
+
   <!-- Panel: bloquear fechas -->
   <div id="panel-block" class="sh-panel">
     <div class="sh-head">
@@ -637,7 +677,7 @@ async function initApp() {
   await loadAllData();
 }
 function populateRoomSelects() {
-  ["#nb-room","#bl-room"].forEach(sel => {
+  ["#nb-room","#bl-room","#eb-room"].forEach(sel => {
     const s = $(sel); s.innerHTML = "";
     ROOMS.forEach(r => {
       const o = document.createElement("option");
@@ -863,15 +903,24 @@ function openDaySheet(ds, room) {
       </div>`;
     }
 
-    // Cancelar reserva
+    // Editar / Cancelar reserva
     if (bk.id) {
-      html += `<button class="cancel-booking-btn" id="cancel-bk-btn">✗ Cancelar reserva</button>`;
+      html += `<button class="day-action" id="edit-bk-btn" style="margin-top:4px">
+        <span class="day-action-icon">✏️</span>
+        <span class="day-action-text">
+          <span class="day-action-title">Editar reserva</span>
+          <span class="day-action-sub">Cambiar fechas, habitación o datos</span>
+        </span>
+        <span class="day-action-arrow">›</span>
+      </button>
+      <button class="cancel-booking-btn" id="cancel-bk-btn">✗ Cancelar reserva</button>`;
     }
 
     body.innerHTML = html;
 
     if (bk.id) {
       $("#cancel-bk-btn").addEventListener("click", () => cancelBooking(bk));
+      $("#edit-bk-btn").addEventListener("click", () => openEditBookingPanel(bk));
     }
 
   } else if (bl) {
@@ -992,6 +1041,78 @@ async function cancelBooking(bk) {
     if (btn) { btn.textContent = "✗ Error de conexión"; btn.disabled = false; }
   }
 }
+
+// ── EDITAR RESERVA ──────────────────────────────────────
+let EDIT_BOOKING_TARGET = null;
+
+function openEditBookingPanel(bk) {
+  EDIT_BOOKING_TARGET = bk;
+  $("#edit-booking-subtitle").textContent = bk.guestName || "Huésped";
+  $("#eb-name").value = bk.guestName || "";
+  $("#eb-phone").value = bk.phone || "";
+  $("#eb-email").value = bk.email || "";
+  $("#eb-room").value = bk.roomId;
+  $("#eb-arrival").value = bk.arrival;
+  $("#eb-departure").value = bk.departure;
+  clearAlert("#edit-booking-alert");
+  showPanel("panel-edit-booking");
+}
+
+$("#eb-save").addEventListener("click", async () => {
+  if (!EDIT_BOOKING_TARGET) return;
+  clearAlert("#edit-booking-alert");
+
+  const name      = ($("#eb-name").value || "").trim();
+  const phone     = ($("#eb-phone").value || "").trim();
+  const email     = ($("#eb-email").value || "").trim();
+  const roomId    = $("#eb-room").value;
+  const arrival   = $("#eb-arrival").value;
+  const departure = $("#eb-departure").value;
+
+  if (arrival && departure && arrival >= departure) {
+    showAlert("#edit-booking-alert","err","✗ La salida debe ser posterior a la entrada"); return;
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showAlert("#edit-booking-alert","err","✗ Email inválido"); return;
+  }
+
+  const btn = $("#eb-save");
+  btn.textContent = "Guardando…"; btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/edit-booking`, {
+      method: "POST",
+      headers: {"content-type":"application/json","x-app-pin":PIN},
+      body: JSON.stringify({
+        pin: PIN,
+        bookingId: EDIT_BOOKING_TARGET.id,
+        name, phone, email,
+        roomId: parseInt(roomId),
+        arrival, departure
+      })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      showAlert("#edit-booking-alert","ok","✓ Reserva actualizada");
+      // Actualizar ALL_BOOKINGS local
+      ALL_BOOKINGS = ALL_BOOKINGS.map(b => {
+        if (String(b.id) !== String(EDIT_BOOKING_TARGET.id)) return b;
+        return {...b, guestName: name, phone, email, roomId: parseInt(roomId), arrival, departure};
+      });
+      setTimeout(() => { closeSheet(); renderCalendar(); }, 900);
+    } else {
+      let errMsg = d.error;
+      if (typeof errMsg === "object") {
+        const e0 = errMsg?.errors?.[0];
+        errMsg = e0?.message || e0?.type || JSON.stringify(errMsg);
+      }
+      showAlert("#edit-booking-alert","err","✗ " + (errMsg || JSON.stringify(d)));
+    }
+  } catch(e) {
+    showAlert("#edit-booking-alert","err","✗ Error: " + e.message);
+  } finally {
+    btn.textContent = "Guardar cambios"; btn.disabled = false;
+  }
+});
 
 // ── UNBLOCK ────────────────────────────────────────────
 async function unblockDate(ds) {
@@ -1201,7 +1322,7 @@ $("#bl-save").addEventListener("click", async () => {
 });
 
 // ── NAVIGATION (back buttons, close) ───────────────────
-["price","booking","block"].forEach(name => {
+["price","booking","block","edit-booking"].forEach(name => {
   $(`#back-${name}`).addEventListener("click", () => showPanel("panel-day"));
   $(`#${name}-close`).addEventListener("click", closeSheet);
 });
