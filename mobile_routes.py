@@ -990,11 +990,30 @@ def block_dates():
             "/inventory/rooms/calendar",
             json_body=[{"roomId": int(room_id), "calendar": [entry]}],
         )
-        
-        data = resp.json()
+
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw": resp.text[:300]}
+
         if not resp.ok:
             return jsonify({"ok": False, "error": data}), resp.status_code
-        
+
+        # Beds24 puede devolver HTTP 200 con un error incrustado por elemento
+        # (p.ej. {"success": false, "errors": [...]} dentro de data[0]).
+        # Sin esta comprobación el bloqueo parecía "guardado" en la app aunque
+        # Beds24 lo hubiera rechazado silenciosamente.
+        embedded_error = None
+        if isinstance(data, list) and data:
+            first = data[0]
+            if isinstance(first, dict) and first.get("success") is False:
+                embedded_error = first.get("errors") or first.get("error") or first
+        elif isinstance(data, dict) and data.get("success") is False:
+            embedded_error = data.get("errors") or data.get("error") or data
+
+        if embedded_error:
+            return jsonify({"ok": False, "error": embedded_error, "raw": data}), 400
+
         # Actualizar overrides en memoria (numAvail=0 para cada día del rango)
         _set_override(room_id, date_from, date_to, num_avail=0, exclusive_end=True)
         return jsonify({"ok": True, "data": data, "reason": reason})
@@ -1035,6 +1054,95 @@ def cancel_booking():
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@mobile_bp.route("/edit-booking", methods=["POST"])
+def edit_booking():
+    """
+    Edita una reserva existente en Beds24 (fechas, habitación y/o datos del huésped).
+    Solo envía a Beds24 los campos que realmente cambian.
+
+    Body esperado:
+      { pin, bookingId, arrival?, departure?, roomId?, name?, phone?, email? }
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+
+    body       = request.get_json(force=True, silent=True) or {}
+    booking_id = body.get("bookingId")
+    if not booking_id:
+        return jsonify({"ok": False, "error": "Falta bookingId"}), 400
+
+    arrival   = body.get("arrival")
+    departure = body.get("departure")
+    room_id   = body.get("roomId")
+    name      = (body.get("name") or "").strip()
+    phone     = (body.get("phone") or "").strip()
+    email     = (body.get("email") or "").strip()
+
+    if arrival and departure:
+        try:
+            a = datetime.strptime(arrival, "%Y-%m-%d").date()
+            d = datetime.strptime(departure, "%Y-%m-%d").date()
+            if a >= d:
+                return jsonify({"ok": False, "error": "La salida debe ser posterior a la entrada"}), 400
+        except Exception:
+            return jsonify({"ok": False, "error": "Formato de fecha inválido (YYYY-MM-DD)"}), 400
+
+    if email and not is_valid_email(email):
+        return jsonify({"ok": False, "error": "Email inválido"}), 400
+    if phone and not is_valid_phone(phone):
+        return jsonify({"ok": False, "error": "Teléfono inválido"}), 400
+
+    payload = {"id": int(booking_id)}
+    if arrival:
+        payload["arrival"] = arrival
+    if departure:
+        payload["departure"] = departure
+    if room_id:
+        payload["roomId"] = int(room_id)
+    if name:
+        first = name.split()[0]
+        last  = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
+        payload["firstName"] = first
+        payload["lastName"]  = last
+    if email:
+        payload["email"] = email
+    if phone:
+        payload["phone"] = phone
+
+    if len(payload) == 1:
+        return jsonify({"ok": False, "error": "No hay ningún cambio que guardar"}), 400
+
+    try:
+        token = get_access_token()
+        resp = b24_post(token, "/bookings", json_body=[payload])
+        data = resp.json()
+        if not resp.ok:
+            return jsonify({"ok": False, "error": data}), resp.status_code
+
+        # Actualizar el estado local con los nuevos datos
+        for b in _state["bookings"]:
+            if str(b.get("id", "")) == str(booking_id):
+                if arrival:
+                    b["arrival"] = arrival
+                if departure:
+                    b["departure"] = departure
+                if room_id:
+                    b["roomId"] = int(room_id)
+                if name:
+                    b["guestName"] = name
+                if email:
+                    b["email"] = email
+                if phone:
+                    b["phone"] = phone
+                break
+
+        return jsonify({"ok": True, "data": data})
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 
 
