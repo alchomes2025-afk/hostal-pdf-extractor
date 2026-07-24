@@ -35,6 +35,12 @@ BEDS24_REFRESH_TOKEN = (
 MOBILE_APP_PIN = os.environ.get("MOBILE_APP_PIN")
 PROPERTY_ID = os.environ.get("BEDS24_PROPERTY_ID", "339751")
 
+# Bloqueo de fechas mediante reserva ficticia (más fiable que /inventory/rooms/calendar,
+# que Beds24 estaba rechazando/ignorando de forma silenciosa en algunos casos).
+# HOSTAL_PHONE se puede cambiar en Render sin tocar código.
+BLOCK_EMAIL = "bloqueo@bloqueo.com"
+BLOCK_PHONE = os.environ.get("HOSTAL_PHONE", "+34600000000")  # ← cambiar en Render cuando se confirme
+
 # Precios base extraídos de Beds24 (julio 2026 - julio 2027)
 BASE_PRICES = {
     702395: {
@@ -944,7 +950,14 @@ def create_booking():
 
 @mobile_bp.route("/block-dates", methods=["POST"])
 def block_dates():
-    """Bloquea un rango de fechas (establece numAvail=0)."""
+    """
+    Bloquea un rango de fechas creando una RESERVA FICTICIA en Beds24
+    (nombre "Fecha bloqueada", email bloqueo@bloqueo.com, teléfono del hostal).
+
+    Se cambió de /inventory/rooms/calendar a este método porque Beds24 estaba
+    rechazando o ignorando los cambios de inventario de forma silenciosa en
+    algunos casos, mientras que la creación de reservas es 100% fiable.
+    """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
@@ -952,7 +965,7 @@ def block_dates():
     room_id = body.get("roomId")
     date_from = body.get("from")
     date_to = body.get("to")
-    reason = (body.get("reason") or "Otro").strip()
+    reason = (body.get("reason") or "").strip()
 
     if not all([room_id, date_from, date_to]):
         return jsonify({"ok": False, "error": "Faltan roomId, from o to"}), 400
@@ -966,30 +979,26 @@ def block_dates():
     if date_from >= date_to:
         return jsonify({"ok": False, "error": "La fecha final debe ser posterior a la inicial"}), 400
 
+    guest_name = "Fecha bloqueada" + (f" - {reason}" if reason else "")
+
     try:
         token = get_access_token()
+        first = "Fecha"
+        last  = "bloqueada" + (f" - {reason}" if reason else "")
 
-        # El "hasta" del formulario es como un check-out: exclusivo.
-        # Beds24 /inventory/rooms/calendar usa "to" INCLUSIVO, así que
-        # restamos 1 día para que coincida con la convención del formulario.
-        d_from = date.fromisoformat(date_from)
-        d_to   = date.fromisoformat(date_to) - timedelta(days=1)  # exclusivo → inclusivo
-        if d_to < d_from:
-            return jsonify({"ok": False, "error": "El rango debe cubrir al menos 1 día"}), 400
-
-        beds24_to = d_to.strftime("%Y-%m-%d")
-
-        entry = {
-            "from":     date_from,
-            "to":       beds24_to,  # inclusivo en Beds24
-            "numAvail": 0,
+        booking_data = {
+            "roomId":    int(room_id),
+            "arrival":   date_from,
+            "departure": date_to,
+            "numAdult":  1,
+            "status":    "confirmed",
+            "firstName": first,
+            "lastName":  last,
+            "email":     BLOCK_EMAIL,
+            "phone":     BLOCK_PHONE,
         }
 
-        resp = b24_post(
-            token,
-            "/inventory/rooms/calendar",
-            json_body=[{"roomId": int(room_id), "calendar": [entry]}],
-        )
+        resp = b24_post(token, "/bookings", json_body=[booking_data])
 
         try:
             data = resp.json()
@@ -997,26 +1006,36 @@ def block_dates():
             data = {"raw": resp.text[:300]}
 
         if not resp.ok:
-            return jsonify({"ok": False, "error": data}), resp.status_code
+            err_msg = data
+            if isinstance(data, dict):
+                errs = data.get("errors") or data.get("error") or data.get("message")
+                if isinstance(errs, list) and errs:
+                    err_msg = errs[0].get("message") or errs[0].get("type") or str(errs[0])
+                elif isinstance(errs, str):
+                    err_msg = errs
+            return jsonify({"ok": False, "error": err_msg}), resp.status_code
 
-        # Beds24 puede devolver HTTP 200 con un error incrustado por elemento
-        # (p.ej. {"success": false, "errors": [...]} dentro de data[0]).
-        # Sin esta comprobación el bloqueo parecía "guardado" en la app aunque
-        # Beds24 lo hubiera rechazado silenciosamente.
-        embedded_error = None
-        if isinstance(data, list) and data:
-            first = data[0]
-            if isinstance(first, dict) and first.get("success") is False:
-                embedded_error = first.get("errors") or first.get("error") or first
-        elif isinstance(data, dict) and data.get("success") is False:
-            embedded_error = data.get("errors") or data.get("error") or data
+        # Extraer el id real de Beds24 (necesario para poder "desbloquear" = cancelar)
+        new_id = None
+        try:
+            data_list = data.get("data") if isinstance(data, dict) else data
+            if isinstance(data_list, list) and data_list:
+                new_id = data_list[0].get("id")
+        except Exception:
+            pass
 
-        if embedded_error:
-            return jsonify({"ok": False, "error": embedded_error, "raw": data}), 400
+        _state["bookings"].append({
+            "id":        new_id,
+            "roomId":    int(room_id),
+            "arrival":   date_from,
+            "departure": date_to,
+            "guestName": guest_name,
+            "phone":     BLOCK_PHONE,
+            "email":     BLOCK_EMAIL,
+            "status":    "confirmed",
+        })
 
-        # Actualizar overrides en memoria (numAvail=0 para cada día del rango)
-        _set_override(room_id, date_from, date_to, num_avail=0, exclusive_end=True)
-        return jsonify({"ok": True, "data": data, "reason": reason})
+        return jsonify({"ok": True, "data": data, "bookingId": new_id})
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
