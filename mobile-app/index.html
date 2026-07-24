@@ -740,6 +740,13 @@ function roomBookedOn(roomId, ds) {
     b.arrival <= ds && b.departure > ds
   );
 }
+// Una reserva ficticia de bloqueo se identifica por su email/nombre fijos.
+function isBlockBooking(bk) {
+  return !!bk && (
+    bk.email === "bloqueo@bloqueo.com" ||
+    (bk.guestName || "").startsWith("Fecha bloqueada")
+  );
+}
 function fmtPrice(v) {
   return v != null ? "€" + Number(v).toFixed(0) : "—";
 }
@@ -792,9 +799,11 @@ function renderCalendar() {
 
     // Celdas de días
     dates.forEach(({ds}) => {
-      const bk = roomBookedOn(room.id, ds);
+      const bkRaw = roomBookedOn(room.id, ds);
+      const isBlock = isBlockBooking(bkRaw);
+      const bk = isBlock ? null : bkRaw;  // un bloqueo no cuenta como reserva real
       const {price1, numAvail, isOverride} = getDateInfo(room.id, ds);
-      const bl = numAvail === 0;
+      const bl = isBlock || numAvail === 0;
 
       const td = document.createElement("td");
       td.className = "day-cell" + (bk ? " bk" : bl ? " bl" : " av");
@@ -836,9 +845,11 @@ function showPanel(id) {
 function openDaySheet(ds, room) {
   SEL_DATE = ds;
   SEL_ROOM = room;
-  const bk = roomBookedOn(room.id, ds);
+  const bkRaw = roomBookedOn(room.id, ds);
+  const blockBooking = isBlockBooking(bkRaw) ? bkRaw : null;
+  const bk = blockBooking ? null : bkRaw;
   const {price1, numAvail, isOverride} = getDateInfo(room.id, ds);
-  const bl = numAvail === 0;
+  const bl = !!blockBooking || numAvail === 0;
 
   const rl = ROOM_LABEL[room.id] || {name: room.name};
   $("#sh-day-title").textContent = dateLabel(ds, {weekday:"long",day:"numeric",month:"long"});
@@ -925,13 +936,22 @@ function openDaySheet(ds, room) {
 
   } else if (bl) {
     // ── BLOCKED ──
+    const reasonText = blockBooking
+      ? (blockBooking.guestName || "Fecha bloqueada").replace(/^Fecha bloqueada( - )?/, "") || null
+      : null;
     body.innerHTML = `<div class="day-badge bl">— Bloqueado</div>
     <p style="color:var(--muted);font-size:13px;margin-bottom:20px;line-height:1.5">
-      Esta fecha está bloqueada y no está disponible para reservas.
+      Esta fecha está bloqueada y no está disponible para reservas.${reasonText ? `<br><b>Motivo:</b> ${reasonText}` : ""}
     </p>
     <button class="unblock-btn" id="unblock-btn">✔ Desbloquear esta fecha</button>`;
 
-    $("#unblock-btn").addEventListener("click", () => unblockDate(ds));
+    $("#unblock-btn").addEventListener("click", () => {
+      if (blockBooking && blockBooking.id) {
+        cancelBooking(blockBooking); // el botón cancelar reutiliza la misma lógica
+      } else {
+        unblockDate(ds); // fallback: bloqueos antiguos hechos por inventario
+      }
+    });
 
   } else {
     // ── AVAILABLE ──
@@ -1292,17 +1312,17 @@ $("#bl-save").addEventListener("click", async () => {
     const d = await r.json();
     if (d.ok) {
       showAlert("#block-alert","ok","✓ Fechas bloqueadas");
-      // Actualizar OVERRIDES local: marcar cada día como bloqueado
-      const rid = String(roomId);
-      if (!OVERRIDES[rid]) OVERRIDES[rid] = {};
-      let cur = new Date(from + "T12:00:00");
-      const end = new Date(to + "T12:00:00");
-      while (cur < end) { // fin exclusivo (igual que Beds24)
-        const dk = localDateStr(cur);
-        if (!OVERRIDES[rid][dk]) OVERRIDES[rid][dk] = {};
-        OVERRIDES[rid][dk].numAvail = 0;
-        cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
-      }
+      // Añadir la reserva ficticia a ALL_BOOKINGS (igual que una reserva normal)
+      ALL_BOOKINGS.push({
+        id:        d.bookingId,
+        roomId:    parseInt(roomId),
+        arrival:   from,
+        departure: to,
+        guestName: "Fecha bloqueada" + (reason ? " - " + reason : ""),
+        phone:     "",
+        email:     "bloqueo@bloqueo.com",
+        status:    "confirmed",
+      });
       setTimeout(() => {
         closeSheet();
         renderCalendar();
