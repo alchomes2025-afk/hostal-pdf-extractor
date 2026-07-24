@@ -848,6 +848,63 @@ def mobile_update():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _extract_new_booking_id(data):
+    """
+    Extrae el id de una reserva recién creada de la respuesta de POST /bookings.
+    Beds24 API v2 no siempre devuelve el mismo formato — se han visto variantes:
+      [{"id": 123, ...}]
+      [{"success": true, "new": {"id": 123, ...}}]
+      [{"success": true, "modified": {"id": 123, ...}}]
+      {"data": [{"id": 123, ...}]}
+    Sin esto, el id quedaba en None y el botón Cancelar/Desbloquear no funcionaba
+    hasta que un delta-sync posterior lo reparaba por casualidad (roomId+arrival).
+    """
+    try:
+        items = data.get("data") if isinstance(data, dict) else data
+        if not isinstance(items, list) or not items:
+            return None
+        first = items[0]
+        if not isinstance(first, dict):
+            return None
+        if first.get("id") is not None:
+            return first["id"]
+        for key in ("new", "modified", "booking"):
+            nested = first.get(key)
+            if isinstance(nested, dict) and nested.get("id") is not None:
+                return nested["id"]
+    except Exception:
+        pass
+    return None
+
+
+def _lookup_booking_id(token, room_id, arrival, email=None):
+    """
+    Red de seguridad: si _extract_new_booking_id() no encontró el id (formato de
+    respuesta inesperado de Beds24), se hace una consulta GET inmediata para
+    localizar la reserva recién creada por habitación + fecha (+ email si se pasa).
+    """
+    try:
+        resp = b24_get(token, "/bookings", params={
+            "propertyId":          PROPERTY_ID,
+            "roomId":              int(room_id),
+            "arrivalFrom":         arrival,
+            "arrivalTo":           arrival,
+            "includePersonalInfo": "true",
+        })
+        if not resp.ok:
+            return None
+        candidates = resp.json().get("data") or []
+        if email:
+            candidates = [c for c in candidates if c.get("email") == email] or candidates
+        if not candidates:
+            return None
+        # La más reciente por bookingTime, por si hay varias coincidencias
+        candidates.sort(key=lambda c: c.get("bookingTime") or "", reverse=True)
+        return candidates[0].get("id")
+    except Exception:
+        return None
+
+
 @mobile_bp.route("/create-booking", methods=["POST"])
 def create_booking():
     """Crea una nueva reserva en Beds24."""
@@ -924,13 +981,9 @@ def create_booking():
         
         # Guardar en estado local con el id real de Beds24
         # (sin id, el botón cancelar no funciona y el merge-by-id tampoco)
-        new_id = None
-        try:
-            data_list = data.get("data") if isinstance(data, dict) else data
-            if isinstance(data_list, list) and data_list:
-                new_id = data_list[0].get("id")
-        except Exception:
-            pass
+        new_id = _extract_new_booking_id(data)
+        if new_id is None:
+            new_id = _lookup_booking_id(token, room_id, arrival, email=email)
 
         _state["bookings"].append({
             "id":        new_id,     # id real de Beds24 — necesario para cancelar
@@ -1016,13 +1069,9 @@ def block_dates():
             return jsonify({"ok": False, "error": err_msg}), resp.status_code
 
         # Extraer el id real de Beds24 (necesario para poder "desbloquear" = cancelar)
-        new_id = None
-        try:
-            data_list = data.get("data") if isinstance(data, dict) else data
-            if isinstance(data_list, list) and data_list:
-                new_id = data_list[0].get("id")
-        except Exception:
-            pass
+        new_id = _extract_new_booking_id(data)
+        if new_id is None:
+            new_id = _lookup_booking_id(token, room_id, date_from, email=BLOCK_EMAIL)
 
         _state["bookings"].append({
             "id":        new_id,
