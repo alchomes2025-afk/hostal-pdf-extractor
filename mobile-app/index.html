@@ -948,6 +948,8 @@ function openDaySheet(ds, room) {
     $("#unblock-btn").addEventListener("click", () => {
       if (blockBooking && blockBooking.id) {
         cancelBooking(blockBooking); // el botón cancelar reutiliza la misma lógica
+      } else if (blockBooking) {
+        alert("Esta fecha se acaba de bloquear y aún no tiene ID confirmado por Beds24. Pulsa ↺ arriba para actualizar y vuelve a intentarlo.");
       } else {
         unblockDate(ds); // fallback: bloqueos antiguos hechos por inventario
       }
