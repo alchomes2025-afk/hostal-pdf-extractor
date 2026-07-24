@@ -160,14 +160,22 @@ html,body{
   margin-bottom:3px;text-align:center;line-height:1.2;
 }
 
+/* ── Banner de advertencia ─────────────────────────── */
+#warn-banner{
+  background:#fff3cd;color:#664d03;border-bottom:2px solid #ffc107;
+  padding:7px 12px;font-size:11.5px;font-weight:700;line-height:1.35;
+  text-align:center;flex-shrink:0;
+}
+#warn-banner b{color:#b02a1f}
+
 /* ── Celdas de día (una por habitación) ── */
 .day-cell{
   text-align:center;padding:6px 2px;cursor:pointer;
   vertical-align:middle;
   /* Altura dinámica: 5 filas llenan la pantalla exactamente */
-  /* 148px = topbar ~42 + month-bar ~42 + fila de fechas ~64 */
-  height: calc((100dvh - 148px) / 5);
-  height: calc((100vh  - 148px) / 5); /* fallback */
+  /* 184px = topbar ~42 + banner ~36 + month-bar ~42 + fila de fechas ~64 */
+  height: calc((100dvh - 184px) / 5);
+  height: calc((100vh  - 184px) / 5); /* fallback */
   min-height:72px;
 }
 .day-cell:active{opacity:.65}
@@ -383,6 +391,10 @@ html,body{
   <div id="topbar">
     <div class="logo" style="font-size:17px">alc<em>homes</em></div>
     <div id="sync-pill">Cargando…</div>
+  </div>
+  <div id="warn-banner">
+    MUY IMPORTANTE: Verificar todos los cambios en Beds24. Beds24 prevalece sobre todo lo demás.
+    <b>No tocar nada en Booking.</b>
   </div>
   <div id="month-bar">
     <span id="month-bar-text">Cargando…</span>
