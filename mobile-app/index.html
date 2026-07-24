@@ -218,6 +218,9 @@ html,body{
   transform:translateY(110%);
   transition:transform .28s cubic-bezier(.32,.72,0,1);
   max-height:88vh;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  touch-action:pan-y;
   /* iOS safe area */
   padding-bottom:env(safe-area-inset-bottom,0px);
 }
