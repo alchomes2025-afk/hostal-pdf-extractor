@@ -1523,6 +1523,25 @@ function formatHistoryTimestamp(iso) {
     return d.toLocaleString("es-ES", {day:"2-digit",month:"2-digit",year:"2-digit",hour:"2-digit",minute:"2-digit"});
   } catch { return iso || ""; }
 }
+function historyTimeOnly(iso) {
+  try {
+    const d = new Date(iso + (iso.endsWith("Z") ? "" : "Z"));
+    return d.toLocaleTimeString("es-ES", {hour:"2-digit",minute:"2-digit"});
+  } catch { return ""; }
+}
+function historyDateKey(iso) {
+  try {
+    const d = new Date(iso + (iso.endsWith("Z") ? "" : "Z"));
+    return d.toISOString().slice(0, 10); // YYYY-MM-DD en base a fecha local implícita en el ISO
+  } catch { return iso || ""; }
+}
+function historyDateHeader(iso) {
+  try {
+    const d = new Date(iso + (iso.endsWith("Z") ? "" : "Z"));
+    const s = d.toLocaleDateString("es-ES", {weekday:"long", day:"numeric", month:"long", year:"numeric"});
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  } catch { return iso || ""; }
+}
 
 async function openHistoryPanel() {
   showPanel("panel-history");
@@ -1541,11 +1560,25 @@ async function openHistoryPanel() {
       body.innerHTML = `<p style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0">Aún no hay cambios registrados.</p>`;
       return;
     }
-    body.innerHTML = d.entries.map(e => `
+    // El backend devuelve más reciente primero; para mostrar en orden
+    // cronológico (más antiguo → más reciente) se invierte aquí.
+    const entriesAsc = d.entries.slice().reverse();
+
+    let html = "";
+    let lastDateKey = null;
+    for (const e of entriesAsc) {
+      const dk = historyDateKey(e.timestamp);
+      if (dk !== lastDateKey) {
+        html += `<div style="position:sticky;top:0;background:#fff;padding:10px 0 6px;font-size:12px;font-weight:800;color:var(--acc);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border)">
+          ${historyDateHeader(e.timestamp)}
+        </div>`;
+        lastDateKey = dk;
+      }
+      html += `
       <div style="padding:10px 0;border-bottom:1px solid #f3f4f6">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px">
           <span style="font-weight:700;font-size:13px;color:var(--ink)">${historyActionLabel(e.action)}</span>
-          <span style="font-size:11px;color:var(--muted);white-space:nowrap">${formatHistoryTimestamp(e.timestamp)}</span>
+          <span style="font-size:11px;color:var(--muted);white-space:nowrap">${historyTimeOnly(e.timestamp)}</span>
         </div>
         <div style="font-size:12px;color:var(--muted);margin-top:2px">
           ${historyDetailLine(e.action, e.details)}
@@ -1553,8 +1586,9 @@ async function openHistoryPanel() {
         <div style="font-size:11px;color:var(--acc);margin-top:3px;font-weight:600">
           👤 ${e.userName || "Desconocido"}
         </div>
-      </div>
-    `).join("");
+      </div>`;
+    }
+    body.innerHTML = html;
   } catch (err) {
     body.innerHTML = `<p style="color:var(--blocked);font-size:13px;padding:10px 0">✗ Error de conexión</p>`;
   }
