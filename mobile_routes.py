@@ -1675,20 +1675,51 @@ def edit_booking():
 @mobile_bp.route("/debug-overrides", methods=["GET"])
 def debug_overrides():
     """
-    Diagnóstico: muestra la respuesta CRUDA de Beds24 para GET /inventory/rooms/calendar
-    de LAS 5 HABITACIONES (rango: hoy -30 días a hoy +180 días), más el resultado ya
-    interpretado por _load_overrides(). Sirve para confirmar que el formato de
-    fecha/precio que asumimos es el correcto, y para ver si hay overrides en
-    alguna habitación aunque en otra no los haya.
+    Diagnóstico de GET /inventory/rooms/calendar.
 
-    Uso: GET /mobile/debug-overrides?pin=1234
-    Opcional: &roomId=702395 para acotar a una sola habitación con rango amplio (-30/+365)
+    Modo normal: GET /mobile/debug-overrides?pin=1234
+    Modo prueba de parámetros: GET /mobile/debug-overrides?pin=1234&probe=1
+      Prueba varias combinaciones de nombres de parámetro de fecha contra
+      la habitación Deluxe, para descubrir cuál es el que realmente entiende
+      Beds24 (la documentación pública no confirma el nombre exacto).
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
     try:
         token = get_access_token()
         today = date.today()
+
+        if request.args.get("probe"):
+            room_id = int(request.args.get("roomId", 702395))
+            wf = (today - timedelta(days=10)).strftime("%Y-%m-%d")
+            wt = (today + timedelta(days=120)).strftime("%Y-%m-%d")
+
+            variants = {
+                "startDate/endDate": {"startDate": wf, "endDate": wt},
+                "from/to":           {"from": wf, "to": wt},
+                "dateFrom/dateTo":   {"dateFrom": wf, "dateTo": wt},
+                "sin_fechas":        {},
+            }
+            results = {}
+            for label, extra_params in variants.items():
+                params = {"roomId": room_id, **extra_params}
+                resp = b24_get(token, "/inventory/rooms/calendar", params=params)
+                if resp.ok:
+                    data = resp.json().get("data") or []
+                    cal_count = sum(len((e.get("calendar") or [])) for e in data if isinstance(e, dict))
+                    results[label] = {
+                        "params_enviados": params,
+                        "http_status": resp.status_code,
+                        "entradas_calendar": cal_count,
+                        "raw": data,
+                    }
+                else:
+                    results[label] = {
+                        "params_enviados": params,
+                        "http_status": resp.status_code,
+                        "error": resp.text[:300],
+                    }
+            return jsonify({"ok": True, "modo": "probe", "variantes": results})
 
         only_room = request.args.get("roomId")
         if only_room:
