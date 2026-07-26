@@ -1676,34 +1676,67 @@ def edit_booking():
 def debug_overrides():
     """
     Diagnóstico: muestra la respuesta CRUDA de Beds24 para GET /inventory/rooms/calendar
-    de la habitación Deluxe, más el resultado ya interpretado por _load_overrides().
-    Sirve para confirmar que el formato de fecha/precio que asumimos es el correcto.
+    de LAS 5 HABITACIONES (rango: hoy -30 días a hoy +180 días), más el resultado ya
+    interpretado por _load_overrides(). Sirve para confirmar que el formato de
+    fecha/precio que asumimos es el correcto, y para ver si hay overrides en
+    alguna habitación aunque en otra no los haya.
 
     Uso: GET /mobile/debug-overrides?pin=1234
+    Opcional: &roomId=702395 para acotar a una sola habitación con rango amplio (-30/+365)
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
     try:
         token = get_access_token()
         today = date.today()
-        window_from = today.strftime("%Y-%m-%d")
-        window_to = (today + timedelta(days=30)).strftime("%Y-%m-%d")
 
-        resp = b24_get(token, "/inventory/rooms/calendar", params={
-            "roomId": 702395,  # Deluxe
-            "startDate": window_from,
-            "endDate": window_to,
-        })
+        only_room = request.args.get("roomId")
+        if only_room:
+            window_from = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+            window_to = (today + timedelta(days=365)).strftime("%Y-%m-%d")
+            resp = b24_get(token, "/inventory/rooms/calendar", params={
+                "roomId": int(only_room),
+                "startDate": window_from,
+                "endDate": window_to,
+            })
+            raw = resp.json() if resp.ok else {"status": resp.status_code, "text": resp.text[:1000]}
+            return jsonify({
+                "ok": True, "roomId": only_room,
+                "range": f"{window_from} -> {window_to}",
+                "http_status": resp.status_code,
+                "raw_response": raw,
+            })
 
-        raw = resp.json() if resp.ok else {"status": resp.status_code, "text": resp.text[:1000]}
+        window_from = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+        window_to = (today + timedelta(days=180)).strftime("%Y-%m-%d")
+
+        results = {}
+        for room in ROOMS:
+            rid = room["id"]
+            resp = b24_get(token, "/inventory/rooms/calendar", params={
+                "roomId": rid,
+                "startDate": window_from,
+                "endDate": window_to,
+            })
+            if resp.ok:
+                data = resp.json().get("data") or []
+                cal_count = sum(len((e.get("calendar") or [])) for e in data if isinstance(e, dict))
+                results[room["name"]] = {
+                    "http_status": resp.status_code,
+                    "entradas_calendar": cal_count,
+                    "raw_sample": data,
+                }
+            else:
+                results[room["name"]] = {"http_status": resp.status_code, "error": resp.text[:300]}
+
         parsed = _load_overrides(token)
 
         return jsonify({
             "ok": True,
-            "http_status": resp.status_code,
-            "raw_response": raw,
-            "parsed_overrides_sample": parsed.get("702395", {}),
-            "total_rooms_con_overrides": len(parsed),
+            "range": f"{window_from} -> {window_to}",
+            "por_habitacion": results,
+            "parsed_overrides_total_habitaciones": len(parsed),
+            "parsed_overrides": parsed,
         })
     except Exception as e:
         import traceback
