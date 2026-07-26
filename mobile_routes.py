@@ -828,7 +828,7 @@ def _load_bookings():
         chunk_start = chunk_end + timedelta(days=1)
 
     _state["bookings"]   = _parse_bookings_list(all_raw)
-    _state["overrides"]  = _load_overrides(token)  # precios/disponibilidad reales desde Beds24
+    _state["overrides"]  = _load_overrides_from_firestore()  # precios editados manualmente, guardados por nosotros
     _state["loaded_at"]  = datetime.utcnow().isoformat()
     _state["checked_at"] = datetime.utcnow().isoformat()
     _state["loaded"]     = True
@@ -836,16 +836,15 @@ def _load_bookings():
 
 def _load_overrides(token=None):
     """
-    Carga desde Beds24 (no de memoria) los precios y disponibilidad concretos
-    día a día que se han fijado manualmente (a través de la app o de Beds24 web).
+    [SOLO DIAGNÓSTICO — ya no se usa para el funcionamiento real de la app]
 
-    FIX CRÍTICO: antes, cada cambio de precio hecho desde la app solo se
-    guardaba en la memoria RAM del servidor (_state["overrides"]). Beds24 y
-    Booking.com sí recibían el precio nuevo correctamente, pero en cuanto
-    Render reiniciaba (cada despliegue de código, o tras inactividad), esa
-    memoria se perdía — y la app volvía a mostrar el precio antiguo aunque
-    Beds24 tuviera el correcto. Ahora se recupera siempre desde Beds24 vía
-    GET /inventory/rooms/calendar, así que sobrevive a cualquier reinicio.
+    Intento de cargar overrides desde Beds24 vía GET /inventory/rooms/calendar.
+    Probado en vivo (ver /debug-overrides?probe=1) con varias combinaciones de
+    parámetros de fecha, y siempre devuelve el calendario vacío para esta
+    cuenta, aunque existan overrides reales guardados momentos antes. Por eso
+    la app usa _load_overrides_from_firestore() como fuente real. Esta función
+    se conserva solo para que /debug-overrides pueda seguir comparando ambas
+    fuentes, por si Beds24 cambia el comportamiento de este endpoint más adelante.
     """
     if token is None:
         token = get_access_token()
@@ -904,7 +903,16 @@ def _ensure_loaded():
 
 
 def _set_override(room_id, from_str, to_str, price1=None, num_avail=None, exclusive_end=False):
-    """Actualiza _state['overrides'] para un rango de fechas."""
+    """
+    Actualiza _state['overrides'] para un rango de fechas y lo persiste en
+    Firestore inmediatamente (colección 'price_overrides', un documento por
+    habitación). Esto es lo que hace que un precio editado desde la app
+    sobreviva a un reinicio del servidor: antes solo vivía en memoria RAM
+    y se perdía en cada redeploy de Render. Se descartó recuperar los
+    overrides desde Beds24 (GET /inventory/rooms/calendar) porque, probado
+    en vivo con varias combinaciones de parámetros, esa consulta siempre
+    devuelve el calendario vacío para esta cuenta — no es fiable.
+    """
     rid = str(room_id)
     if rid not in _state["overrides"]:
         _state["overrides"][rid] = {}
@@ -919,6 +927,44 @@ def _set_override(room_id, from_str, to_str, price1=None, num_avail=None, exclus
         if num_avail is not None:
             _state["overrides"][rid][ds]["numAvail"] = num_avail
         cur += timedelta(days=1)
+
+    _save_overrides_to_firestore(rid)
+
+
+def _save_overrides_to_firestore(room_id_str):
+    """Guarda el diccionario de overrides de una habitación en Firestore."""
+    try:
+        db = _get_firestore_client()
+        if db is None:
+            return
+        db.collection("price_overrides").document(room_id_str).set({
+            "days": _state["overrides"].get(room_id_str, {}),
+            "updated_at": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        print(f"[overrides] error guardando en Firestore (habitación {room_id_str}): {e}")
+
+
+def _load_overrides_from_firestore():
+    """
+    Carga todos los overrides de precio/disponibilidad guardados en Firestore
+    (colección 'price_overrides'). Esta es la fuente de verdad para lo que el
+    usuario ha editado manualmente desde la app — no depende de que Beds24
+    exponga bien esos datos por su API de lectura.
+    """
+    overrides = {}
+    try:
+        db = _get_firestore_client()
+        if db is None:
+            return overrides
+        for doc in db.collection("price_overrides").stream():
+            data = doc.to_dict() or {}
+            days = data.get("days") or {}
+            if days:
+                overrides[doc.id] = days
+    except Exception as e:
+        print(f"[overrides] error cargando desde Firestore: {e}")
+    return overrides
 
 
 # ─── Wrappers Beds24 ──────────────────────────────────────────────────────────
