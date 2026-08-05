@@ -1200,9 +1200,17 @@ def reload_data():
 @mobile_bp.route("/check-changes", methods=["GET"])
 def check_changes():
     """
-    Delta sync: 1 llamada a Beds24 para detectar reservas nuevas/modificadas.
-    Si no hay cambios: 0 llamadas adicionales.
-    Si hay cambios: actualiza _state["bookings"] y devuelve los nuevos bookings.
+    Delta sync: detecta reservas nuevas/modificadas Y cancelaciones desde Beds24.
+
+    FIX CRÍTICO: Beds24 NO incluye reservas canceladas en GET /bookings por
+    defecto (confirmado: existe un parámetro "status" para filtrar, lo que
+    implica que sin él la consulta ya viene pre-filtrada a activas). Antes
+    solo se hacía la consulta normal (sin status), así que una cancelación
+    de Booking.com nunca llegaba a la respuesta en absoluto — no es que la
+    filtráramos nosotros después, es que Beds24 nunca la enviaba. Por eso
+    las reservas nuevas siempre se detectaban bien pero ninguna cancelación
+    lo hacía, siempre, de forma sistemática. Ahora se hacen dos consultas:
+    una normal (activas) y otra explícita con status=cancelled.
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
@@ -1215,11 +1223,13 @@ def check_changes():
 
     try:
         token = get_access_token()
+
+        # 1) Reservas activas nuevas o modificadas (como antes)
         resp = b24_get(token, "/bookings", params={
             "propertyId":          PROPERTY_ID,
             "modifiedFrom":        since[:19],
             "includePersonalInfo": "true",
-            "limit":               100,   # evitar truncado si hay muchos cambios
+            "limit":               100,
         })
 
         if not resp.ok:
@@ -1227,9 +1237,30 @@ def check_changes():
             return jsonify({"ok": True, "changed": False, "checked_at": checked_at,
                             "warning": f"Beds24 {resp.status_code}"})
 
-        # include_cancelled=True → las cancelaciones LLEGAN a la fusión
-        # y se eliminan del estado (antes se filtraban y nunca desaparecían de la app)
-        new_bookings = _parse_bookings_list(resp.json().get("data") or [], include_cancelled=True)
+        active_raw = resp.json().get("data") or []
+
+        # 2) Cancelaciones recientes — consulta EXPLÍCITA, porque Beds24 no
+        #    las incluye en la consulta normal aunque estén dentro del rango
+        #    de modifiedFrom. Si esta consulta falla, no abortamos: mejor
+        #    detectar las nuevas/modificadas igualmente que no detectar nada.
+        cancelled_raw = []
+        try:
+            resp_cancel = b24_get(token, "/bookings", params={
+                "propertyId":          PROPERTY_ID,
+                "modifiedFrom":        since[:19],
+                "status":              "cancelled",
+                "includePersonalInfo": "true",
+                "limit":               100,
+            })
+            if resp_cancel.ok:
+                cancelled_raw = resp_cancel.json().get("data") or []
+            else:
+                print(f"[check-changes] consulta de canceladas falló: {resp_cancel.status_code} {resp_cancel.text[:200]}")
+        except Exception as e:
+            print(f"[check-changes] error consultando canceladas: {e}")
+
+        new_bookings = _parse_bookings_list(active_raw, include_cancelled=True) + \
+                       _parse_bookings_list(cancelled_raw, include_cancelled=True)
         _state["checked_at"] = checked_at
 
         if not new_bookings:
@@ -1261,6 +1292,7 @@ def check_changes():
             "ok":           True,
             "changed":      True,
             "new_bookings": new_bookings,
+            "cancelled_count": len(cancelled_raw),
             "checked_at":   checked_at,
         })
 
@@ -2002,6 +2034,16 @@ def test_sync():
 
         now_local = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
+        # Reservas cuya habitación NO es ninguna de las 5 que la app conoce.
+        # Estas reservas pueden llegar bien al servidor y aun así no verse
+        # NUNCA en el calendario, sin ningún error — por ejemplo, si se crean
+        # directamente en Beds24 sin asignarlas a una habitación concreta.
+        known_room_ids = {str(r["id"]) for r in ROOMS}
+        unknown_room_bookings = [
+            b for b in beds24_bookings
+            if str(b.get("roomId", "")) not in known_room_ids
+        ]
+
         # ── D) HTML ────────────────────────────────────────────────────────
         def room_name(rid):
             return next((r["name"] for r in ROOMS if str(r["id"]) == str(rid)), str(rid))
@@ -2025,7 +2067,7 @@ def test_sync():
                     f'<table><thead><tr><th>Entrada</th><th>Salida</th><th>Hab.</th>'
                     f'<th>Huésped</th><th>ID</th></tr></thead><tbody>{rows}</tbody></table>')
 
-        problems = len(only_in_beds24) + len(only_in_mem) + len(mismatches)
+        problems = len(only_in_beds24) + len(only_in_mem) + len(mismatches) + len(unknown_room_bookings)
         status_color = "#1e7e34" if problems == 0 else "#c0392b"
         status_text = ("✓ App 100% sincronizada con Beds24"
                        if problems == 0
@@ -2072,6 +2114,7 @@ tr.ok td{{background:#f0fff4}} tr.warn td{{background:#fff8f0}} tr.err td{{backg
   Rango: {rango_from} → {rango_to}
 </div>
 {section("🔴 Faltan en la app (están en Beds24)", only_in_beds24, "err", "✓ Ninguna — la app tiene todas las reservas de Beds24")}
+{section("🟣 Habitación no reconocida (invisible en el calendario)", unknown_room_bookings, "err", "✓ Ninguna — todas las reservas están en una de las 5 habitaciones conocidas")}
 {section("🟡 Sobran en la app (no están en Beds24)", only_in_mem, "warn", "✓ Ninguna — sin reservas fantasma")}
 {section("🟠 Datos diferentes (fechas/habitación/nombre)", mismatches, "warn", "✓ Ninguna — datos idénticos")}
 {section("🟢 Sincronizadas correctamente", in_both, "ok", "— Sin reservas en el periodo")}
