@@ -294,8 +294,8 @@ def parte_recibido_para(room_id, fecha_entrada_iso):
 
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
 GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL_PRI  = "llama-3.3-70b-versatile"
-GROQ_MODEL_FALL = "llama-3.1-8b-instant"
+GROQ_MODEL_PRI  = "openai/gpt-oss-120b"
+GROQ_MODEL_FALL = "openai/gpt-oss-20b"
 
 
 @app.route("/chat", methods=["POST"])
