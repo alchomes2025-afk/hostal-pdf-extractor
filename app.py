@@ -2629,7 +2629,7 @@ def watchdog():
             nivel="critico" if n_criticos > 0 else "warning"
         )
     else:
-        alerta("Watchdog — ✅ Todos los sistemas operativos", "", nivel="info")
+        logger.info("[watchdog] ✅ Todos los sistemas operativos — sin aviso WhatsApp (solo se avisa si hay problemas)")
 
     return jsonify({
         "ok":          todo_ok,
