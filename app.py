@@ -455,6 +455,7 @@ def check_in_status():
     base = {
         "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
         "guest_name": guest_name, "arrival": arrival, "departure": departure,
+        "book_id": booking.get("id"),
     }
 
     # ── 1. Estancia finalizada (después de las 11:00 del día de salida) ──
