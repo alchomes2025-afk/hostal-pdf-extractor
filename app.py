@@ -2149,6 +2149,72 @@ def ver_mensajes_beds24():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/ver-booking-completo", methods=["GET"])
+def ver_booking_completo():
+    """
+    Diagnóstico: devuelve el JSON crudo COMPLETO de una reserva concreta
+    (por su id de Beds24), tal cual lo entrega la API, sin resumir ni
+    procesar ningún campo. Útil para ver exactamente qué contiene cada
+    campo (apiReference, comments, etc.) carácter a carácter.
+
+    Además, si se pasa el parámetro test_ref, ejecuta contra esa reserva
+    la MISMA función de búsqueda recursiva que usa /check-in
+    (_ref_en_booking) y dice en qué campo encontró coincidencia, o si no
+    encontró ninguna — para depurar por qué un ref concreto falla o
+    funciona sin tener que pasar por Make ni por la web.
+
+    Uso:
+        /ver-booking-completo?token=Alchomes2025&id=91615325
+        /ver-booking-completo?token=Alchomes2025&id=91615325&test_ref=6166763556
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    booking_id = request.args.get("id", "")
+    if not booking_id:
+        return jsonify({"ok": False, "error": "Falta el parámetro id"}), 400
+
+    try:
+        access_token = get_beds24_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Beds24 auth: {e}"}), 500
+
+    hoy = date.today()
+    desde = (hoy - timedelta(days=5)).isoformat()
+    hasta = (hoy + timedelta(days=180)).isoformat()
+
+    try:
+        resp = requests.get(
+            f"{BEDS24_API_BASE}/bookings",
+            headers={"token": access_token, "accept": "application/json"},
+            params={"propertyId": BEDS24_PROPERTY_ID,
+                    "arrivalFrom": desde, "arrivalTo": hasta},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        bookings = resp.json().get("data", [])
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error consultando Beds24: {e}"}), 500
+
+    booking = next((b for b in bookings if str(b.get("id")) == str(booking_id)), None)
+    if not booking:
+        return jsonify({"ok": False, "error": f"No se encontró ninguna reserva con id={booking_id} en el rango {desde}→{hasta}"}), 404
+
+    resultado = {"ok": True, "booking_completo": booking}
+
+    test_ref = request.args.get("test_ref", "")
+    if test_ref:
+        ref_norm = test_ref.strip().lower()
+        campo = _ref_en_booking(booking, ref_norm)
+        resultado["test_ref"] = test_ref
+        resultado["encontrado_en_campo"] = campo
+        resultado["match"] = campo is not None
+
+    return jsonify(resultado), 200
+
+
 @app.route("/ver-reservas-dia-beds24", methods=["GET"])
 def ver_reservas_dia_beds24():
     """
