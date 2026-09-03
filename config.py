@@ -79,15 +79,13 @@ ROOM_CONFIG = {
 }
 
 # ── Links de registroparteviajeros.com por room_id de Beds24 ─────────────
-# "720841" (La Casa de la Primavera) pendiente: falta el enlace público de esa
-# cuenta de RPV separada — mientras no se añada, esos huéspedes en estado
-# pre_checkin/checkin_pending no verán el botón de "completar registro".
 RPV_LINKS = {
     "702397": "https://app.registroparteviajeros.com/propiedad/hliPDoDTb9",  # Hab 1 · Playa Lanuza
     "702398": "https://app.registroparteviajeros.com/propiedad/CgbPrarDLi",  # Hab 2 · Playa del Albir
     "702399": "https://app.registroparteviajeros.com/propiedad/d1ydBdUSOr",  # Hab 3 · Cala del Moraig
     "702396": "https://app.registroparteviajeros.com/propiedad/MRgkbMeAt7",  # Hab 4 · Playa de la Fossá
     "702395": "https://app.registroparteviajeros.com/propiedad/YQGCsngJaN",  # Hab 5 · Cala Coveta Fumá
+    "720841": "https://app.registroparteviajeros.com/propiedad/pLXSG3umvq",  # La Casa de la Primavera
 }
 
 # ── Configuración: API de registroparteviajeros ───────────────────────
