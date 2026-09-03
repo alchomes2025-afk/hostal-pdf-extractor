@@ -19,7 +19,14 @@ Backend del sistema de self check-in automatizado para **dos propiedades**: el h
 - **La Casa de la Primavera** (Gran Alacant, Santa Pola): `BEDS24_PROPERTY_ID_CASA_PRIMAVERA=349341`, 1 unidad (`room_id 720841`), vivienda completa. Acceso: código fijo de la urbanización (2308, no secreto) + cajetín de llaves físico (código dinámico, `PIN_CASA_PRIMAVERA`) — NO es una cerradura electrónica como en el hostal.
 - `BEDS24_PROPERTY_IDS` (config.py) recorre ambas propiedades donde hace falta buscar/sincronizar reservas de cualquiera de las dos (`buscar_booking_por_ref`, `obtener_bookings_dia_beds24`, `mobile_routes.py`).
 - RPV (registroparteviajeros.com): **dos cuentas separadas**, `RPV_API_KEY` (hostal) y `RPV_API_KEY_CASA_PRIMAVERA`, resueltas por habitación vía `RPV_API_KEY_MAP`.
-- Falta `RPV_LINKS["720841"]` (enlace público de esa cuenta de RPV) — pendiente de añadir cuando se obtenga del panel de RPV.
+- `RPV_LINKS["720841"]` ya configurado (septiembre 2026).
+
+## Identificación de reserva sin número fiable (La Casa de la Primavera)
+La Casa de la Primavera recibe reservas de Booking, Airbnb y Holidu — cada plataforma da su propio número al huésped, y no hay un campo único en Beds24 donde buscarlo de forma fiable (a diferencia del hostal, solo Booking.com).
+
+- **`GET /check-in?ref=...`** (routes/checkin.py) prueba primero `buscar_booking_por_ref()` (número/referencia, cualquier campo de Beds24, recursivo). Si no encuentra nada, reintenta automáticamente `buscar_booking_por_nombre()` (services/beds24.py) interpretando `ref` como el nombre del huésped — normaliza mayúsculas/acentos/orden de palabras y restringe la búsqueda a una ventana estrecha de días de llegada (hoy-2 a hoy+4) para evitar falsos positivos entre huéspedes con nombres parecidos. Si hay más de una coincidencia en esa ventana, responde `409 {"error": "nombre_ambiguo"}` en vez de adivinar.
+- Esto NO usa Groq ni tolera erratas de escritura — es solo normalización determinista. La tolerancia a erratas vive en el pipeline de email (siguiente punto), que si hace falta puede evolucionar a llamar también a Groq para esto en el futuro.
+- **Pipeline externo por email** (fuera de este repo, vive en Google Apps Script + Make.com): cuenta `alchomes2025guest@gmail.com` recibe correos de huéspedes que no pueden usar el enlace directo (algunas plataformas bloquean el link en el mensaje de bienvenida). Apps Script empuja cada correo nuevo a un Webhook de Make cada minuto; Make llama a Groq para extraer nombre/número/plataforma del asunto, consulta `GET /check-in?ref=...` (público, sin token) y responde al huésped con el enlace + el `book_id` de la respuesta. **`book_id` y el endpoint público `/check-in` son un contrato con ese pipeline — si se renombran o se protege el endpoint con token, avisar antes, se rompe silenciosamente sin que este repo lo note.**
 
 ## Infraestructura y cuentas
 - La clave de Groq API se movió a un proxy en el backend después de que GitHub auto-revocara una clave expuesta en el repo público — **nunca** hardcodear claves API en el código, aunque el repo sea privado.

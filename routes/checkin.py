@@ -12,7 +12,10 @@ from config import (
     API_TOKEN, TEST_TOKEN, ROOM_CONFIG, RPV_LINKS, TEST_BOOKINGS,
     BEDS24_API_BASE, BEDS24_PROPERTY_ID,
 )
-from services.beds24 import buscar_booking_por_ref, get_beds24_access_token, _extraer_nombre_huesped_beds24
+from services.beds24 import (
+    buscar_booking_por_ref, buscar_booking_por_nombre,
+    get_beds24_access_token, _extraer_nombre_huesped_beds24,
+)
 from services.rpv import parte_recibido_para
 
 logger = logging.getLogger(__name__)
@@ -22,16 +25,23 @@ checkin_bp = Blueprint("checkin", __name__)
 @checkin_bp.route("/check-in", methods=["GET"])
 def check_in_status():
     """
-    GET /check-in?ref=<numero_de_reserva>
+    GET /check-in?ref=<numero_de_reserva_o_nombre_completo>
 
     Endpoint para la web de check-in estática alojada en Firebase.
     El huésped introduce el número de su reserva (de cualquier canal, no
-    solo Booking.com).
+    solo Booking.com) — o, si eso falla, su nombre completo: no hay un
+    campo de "número de reserva" fiable y universal en La Casa de la
+    Primavera, que recibe reservas de Booking, Airbnb y Holidu, cada
+    plataforma con su propio formato.
 
     Flujo:
       1. Busca la reserva en Beds24 por número de reserva, recorriendo
          todas las propiedades configuradas (BEDS24_PROPERTY_IDS)
          → obtiene habitación, nombre del huésped, fechas
+      1b. Si no se encuentra por número, reintenta interpretando `ref` como
+          nombre del huésped (buscar_booking_por_nombre) — restringido a una
+          ventana estrecha de días de llegada para evitar ambigüedad entre
+          huéspedes con nombres parecidos.
       2. Verifica vía la API de registroparteviajeros.com (polling directo,
          sin Gmail) si se recibió el parte
       3. Responde con:
@@ -64,6 +74,13 @@ def check_in_status():
         return jsonify({"ok": True, **t})
 
     booking = buscar_booking_por_ref(ref)
+    if not booking:
+        # Fallback: puede que `ref` sea el nombre del huésped, no un número
+        # de reserva (necesario en La Casa de la Primavera, con reservas de
+        # Booking/Airbnb/Holidu y sin un campo de número unificado).
+        booking, ambiguo = buscar_booking_por_nombre(ref)
+        if ambiguo:
+            return jsonify({"ok": False, "error": "nombre_ambiguo"}), 409
     if not booking:
         return jsonify({"ok": False, "error": "no_encontrado"}), 404
 

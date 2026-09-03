@@ -3,6 +3,8 @@ services/beds24.py — Autenticación con Beds24, búsqueda de reservas y envío
 del código de puerta vía Booking.com Messages.
 """
 import logging
+import re
+import unicodedata
 import requests
 from datetime import date, timedelta
 
@@ -119,6 +121,101 @@ def buscar_booking_por_ref(booking_ref):
 
     logger.warning(f"[check-in] ref='{booking_ref}': no encontrado en ninguna propiedad ({BEDS24_PROPERTY_IDS}).")
     return None
+
+
+def _normalizar_nombre(texto):
+    """Minúsculas, sin acentos, solo letras — para comparar nombres tolerando
+    mayúsculas/tildes/orden. Devuelve el conjunto de palabras (no la cadena),
+    así "Juan Perez" y "Perez Juan" comparan igual."""
+    t = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode("ascii")
+    t = re.sub(r"[^a-zA-Z ]", " ", t).lower()
+    return set(w for w in t.split() if w)
+
+
+def buscar_booking_por_nombre(nombre_query, dias_atras=2, dias_adelante=4):
+    """
+    Busca una reserva por el nombre del huésped, para cuando el número de
+    reserva no sirve (p. ej. La Casa de la Primavera recibe reservas de
+    Booking, Airbnb y Holidu, cada plataforma con su propio formato de
+    referencia — no hay un único campo fiable para buscar por número).
+
+    Solo tiene sentido como respaldo de buscar_booking_por_ref(), NUNCA como
+    búsqueda principal: se restringe deliberadamente a una ventana estrecha
+    de días de llegada (por defecto hoy-2 a hoy+4) porque el huésped recibe
+    el enlace de check-in el día antes o el mismo día de su llegada — así se
+    evita comparar contra reservas de todo el año, que sería mucho más
+    propenso a coincidencias ambiguas entre huéspedes con nombres parecidos.
+
+    Comparación tolerante a mayúsculas/acentos/orden de palabras (ver
+    _normalizar_nombre), pero NO tolera erratas de escritura — para eso
+    existe el escenario de Make con Groq, pensado para el canal de email,
+    no para este backend.
+
+    Devuelve (booking, ambiguo): booking es el dict de Beds24 si hay
+    exactamente una coincidencia, o None si no hay ninguna o si hay más de
+    una (en cuyo caso ambiguo=True, para poder distinguir "no encontrado"
+    de "hacen falta más datos para desambiguar").
+    """
+    query_tokens = _normalizar_nombre(nombre_query)
+    if not query_tokens:
+        return None, False
+
+    try:
+        token = get_beds24_access_token()
+    except Exception as e:
+        logger.error(f"[check-in] Beds24 auth error en buscar_booking_por_nombre: {e}")
+        return None, False
+
+    hoy   = date.today()
+    desde = (hoy - timedelta(days=dias_atras)).isoformat()
+    hasta = (hoy + timedelta(days=dias_adelante)).isoformat()
+
+    candidatos = []
+    for property_id in BEDS24_PROPERTY_IDS:
+        try:
+            resp = requests.get(
+                f"{BEDS24_API_BASE}/bookings",
+                headers={"token": token, "accept": "application/json"},
+                params={"propertyId": property_id,
+                        "arrivalFrom": desde, "arrivalTo": hasta},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            bookings = resp.json().get("data", [])
+        except Exception as e:
+            logger.error(f"[check-in] Error consultando Beds24 por nombre (property {property_id}): {e}")
+            continue
+
+        for b in bookings:
+            if str(b.get("status", "")).lower() == "cancelled":
+                continue
+            nombre_huesped = _extraer_nombre_huesped_beds24(b)
+            candidato_tokens = _normalizar_nombre(nombre_huesped)
+            if not candidato_tokens:
+                continue
+            # Coincide si uno de los dos conjuntos de palabras contiene al otro
+            # entero — tolera que el huésped escriba solo nombre+apellido de
+            # una reserva con nombre completo más largo, y viceversa.
+            if query_tokens <= candidato_tokens or candidato_tokens <= query_tokens:
+                candidatos.append(b)
+
+    if len(candidatos) == 1:
+        b = candidatos[0]
+        logger.info(
+            f"[check-in] Reserva encontrada por nombre: query='{nombre_query}' "
+            f"→ book_id={b.get('id')} room={b.get('roomId')}"
+        )
+        return b, False
+
+    if len(candidatos) > 1:
+        logger.warning(
+            f"[check-in] Nombre ambiguo: query='{nombre_query}' encontró "
+            f"{len(candidatos)} reservas en el rango {desde}→{hasta}."
+        )
+        return None, True
+
+    logger.warning(f"[check-in] nombre='{nombre_query}': no encontrado en el rango {desde}→{hasta}.")
+    return None, False
 
 
 # Nombre de habitación en el formato original (el que usa registroparteviajeros.com
