@@ -159,38 +159,63 @@ def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
     manana = hoy + timedelta(days=1)
     # arrivalFrom amplio para no perder a huéspedes ya alojados con una
     # estancia larga en curso; el filtro real de relevancia es en Python.
-    desde = (hoy - timedelta(days=max_dias_estancia)).isoformat()
-    hasta = manana.isoformat()
+    desde_total = hoy - timedelta(days=max_dias_estancia)
+    hasta_total = manana
 
+    # IMPORTANTE: igual que en mobile_routes.py::_load_bookings, Beds24
+    # devuelve resultados incompletos cuando el rango arrivalFrom→arrivalTo
+    # es amplio en una sola llamada (confirmado con un caso real: una
+    # reserva con llegada HOY, dentro del rango pedido, no aparecía en la
+    # respuesta). Se trocea en ventanas de 30 días y se pide "limit": 500
+    # explícito, igual que las demás consultas amplias de este proyecto.
+    CHUNK_DAYS = 30
     candidatos_con_nombre = []
+    seen_ids = set()
     for property_id in BEDS24_PROPERTY_IDS:
-        try:
-            resp = requests.get(
-                f"{BEDS24_API_BASE}/bookings",
-                headers={"token": token, "accept": "application/json"},
-                params={"propertyId": property_id,
-                        "arrivalFrom": desde, "arrivalTo": hasta},
-                timeout=20,
-            )
-            resp.raise_for_status()
-            bookings = resp.json().get("data", [])
-        except Exception as e:
-            logger.error(f"[check-in] Error consultando Beds24 por nombre (property {property_id}): {e}")
-            continue
-
-        for b in bookings:
-            if str(b.get("status", "")).lower() == "cancelled":
-                continue
+        chunk_start = desde_total
+        while chunk_start <= hasta_total:
+            chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), hasta_total)
             try:
-                arrival_date   = date.fromisoformat(b.get("arrival", ""))
-                departure_date = date.fromisoformat(b.get("departure", ""))
-            except (ValueError, TypeError):
-                continue
-            llegada_inminente = arrival_date in (hoy, manana)
-            ya_alojado         = arrival_date <= hoy <= departure_date
-            if not (llegada_inminente or ya_alojado):
-                continue
-            candidatos_con_nombre.append((b, _extraer_nombre_huesped_beds24(b)))
+                resp = requests.get(
+                    f"{BEDS24_API_BASE}/bookings",
+                    headers={"token": token, "accept": "application/json"},
+                    params={"propertyId": property_id,
+                            "arrivalFrom": chunk_start.isoformat(),
+                            "arrivalTo": chunk_end.isoformat(),
+                            "limit": 500},
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                bookings = resp.json().get("data", [])
+            except Exception as e:
+                logger.error(
+                    f"[check-in] Error consultando Beds24 por nombre "
+                    f"(property {property_id}, {chunk_start}→{chunk_end}): {e}"
+                )
+                bookings = []
+
+            for b in bookings:
+                bid = b.get("id")
+                if bid is not None and bid in seen_ids:
+                    continue  # evitar duplicados en los bordes de cada trozo
+                if str(b.get("status", "")).lower() == "cancelled":
+                    continue
+                try:
+                    arrival_date   = date.fromisoformat(b.get("arrival", ""))
+                    departure_date = date.fromisoformat(b.get("departure", ""))
+                except (ValueError, TypeError):
+                    continue
+                llegada_inminente = arrival_date in (hoy, manana)
+                ya_alojado         = arrival_date <= hoy <= departure_date
+                if not (llegada_inminente or ya_alojado):
+                    continue
+                if bid is not None:
+                    seen_ids.add(bid)
+                candidatos_con_nombre.append((b, _extraer_nombre_huesped_beds24(b)))
+
+            chunk_start = chunk_end + timedelta(days=1)
+
+    desde, hasta = desde_total.isoformat(), hasta_total.isoformat()
 
     booking, ambiguo = emparejar_nombre(nombre_query, candidatos_con_nombre)
     if booking is not None:
