@@ -3,13 +3,12 @@ services/beds24.py — Autenticación con Beds24, búsqueda de reservas y envío
 del código de puerta vía Booking.com Messages.
 """
 import logging
-import re
-import unicodedata
 import requests
 from datetime import date, timedelta
 
 from config import BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID, BEDS24_PROPERTY_IDS, ROOM_CONFIG
 from services.whatsapp import avisar_error_critico
+from services.guest_match import emparejar_nombre
 
 logger = logging.getLogger(__name__)
 
@@ -123,41 +122,31 @@ def buscar_booking_por_ref(booking_ref):
     return None
 
 
-def _normalizar_nombre(texto):
-    """Minúsculas, sin acentos, solo letras — para comparar nombres tolerando
-    mayúsculas/tildes/orden. Devuelve el conjunto de palabras (no la cadena),
-    así "Juan Perez" y "Perez Juan" comparan igual."""
-    t = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode("ascii")
-    t = re.sub(r"[^a-zA-Z ]", " ", t).lower()
-    return set(w for w in t.split() if w)
-
-
-def buscar_booking_por_nombre(nombre_query, dias_atras=2, dias_adelante=4):
+def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
     """
-    Busca una reserva por el nombre del huésped, para cuando el número de
-    reserva no sirve (p. ej. La Casa de la Primavera recibe reservas de
-    Booking, Airbnb y Holidu, cada plataforma con su propio formato de
-    referencia — no hay un único campo fiable para buscar por número).
+    Busca una reserva por el nombre del huésped — es la vía principal de
+    identificación en la web de check-in (no hay un número de reserva
+    universal: La Casa de la Primavera recibe reservas de Booking, Airbnb y
+    Holidu, cada plataforma con su propio formato de referencia).
 
-    Solo tiene sentido como respaldo de buscar_booking_por_ref(), NUNCA como
-    búsqueda principal: se restringe deliberadamente a una ventana estrecha
-    de días de llegada (por defecto hoy-2 a hoy+4) porque el huésped recibe
-    el enlace de check-in el día antes o el mismo día de su llegada — así se
-    evita comparar contra reservas de todo el año, que sería mucho más
-    propenso a coincidencias ambiguas entre huéspedes con nombres parecidos.
+    Se restringe a los candidatos relevantes AHORA MISMO, sin que el
+    huésped tenga que decir nada de fechas — el sistema ya lo sabe:
+      - llegada HOY o MAÑANA (el enlace se envía el día antes o el mismo
+        día del check-in), o
+      - huésped YA ALOJADO (llegada ≤ hoy ≤ salida)
+    Esto evita comparar contra reservas de todo el año, mucho más propenso
+    a confundir huéspedes con nombres parecidos.
 
-    Comparación tolerante a mayúsculas/acentos/orden de palabras (ver
-    _normalizar_nombre), pero NO tolera erratas de escritura — para eso
-    existe el escenario de Make con Groq, pensado para el canal de email,
-    no para este backend.
+    El emparejamiento en sí (normalización determinista, y Groq como
+    respaldo para erratas de escritura) vive en services/guest_match.py —
+    aquí solo se arma la lista de candidatos y se acota por fecha.
 
-    Devuelve (booking, ambiguo): booking es el dict de Beds24 si hay
-    exactamente una coincidencia, o None si no hay ninguna o si hay más de
-    una (en cuyo caso ambiguo=True, para poder distinguir "no encontrado"
-    de "hacen falta más datos para desambiguar").
+    Devuelve (booking, ambiguo): booking es el dict de Beds24 si hay una
+    única coincidencia razonablemente segura, o None si no hay ninguna o
+    sigue siendo ambiguo tras pasar por Groq (ambiguo=True en ese caso, para
+    poder distinguir "no encontrado" de "hacen falta más datos").
     """
-    query_tokens = _normalizar_nombre(nombre_query)
-    if not query_tokens:
+    if not nombre_query or not nombre_query.strip():
         return None, False
 
     try:
@@ -166,11 +155,14 @@ def buscar_booking_por_nombre(nombre_query, dias_atras=2, dias_adelante=4):
         logger.error(f"[check-in] Beds24 auth error en buscar_booking_por_nombre: {e}")
         return None, False
 
-    hoy   = date.today()
-    desde = (hoy - timedelta(days=dias_atras)).isoformat()
-    hasta = (hoy + timedelta(days=dias_adelante)).isoformat()
+    hoy    = date.today()
+    manana = hoy + timedelta(days=1)
+    # arrivalFrom amplio para no perder a huéspedes ya alojados con una
+    # estancia larga en curso; el filtro real de relevancia es en Python.
+    desde = (hoy - timedelta(days=max_dias_estancia)).isoformat()
+    hasta = manana.isoformat()
 
-    candidatos = []
+    candidatos_con_nombre = []
     for property_id in BEDS24_PROPERTY_IDS:
         try:
             resp = requests.get(
@@ -189,33 +181,31 @@ def buscar_booking_por_nombre(nombre_query, dias_atras=2, dias_adelante=4):
         for b in bookings:
             if str(b.get("status", "")).lower() == "cancelled":
                 continue
-            nombre_huesped = _extraer_nombre_huesped_beds24(b)
-            candidato_tokens = _normalizar_nombre(nombre_huesped)
-            if not candidato_tokens:
+            try:
+                arrival_date   = date.fromisoformat(b.get("arrival", ""))
+                departure_date = date.fromisoformat(b.get("departure", ""))
+            except (ValueError, TypeError):
                 continue
-            # Coincide si uno de los dos conjuntos de palabras contiene al otro
-            # entero — tolera que el huésped escriba solo nombre+apellido de
-            # una reserva con nombre completo más largo, y viceversa.
-            if query_tokens <= candidato_tokens or candidato_tokens <= query_tokens:
-                candidatos.append(b)
+            llegada_inminente = arrival_date in (hoy, manana)
+            ya_alojado         = arrival_date <= hoy <= departure_date
+            if not (llegada_inminente or ya_alojado):
+                continue
+            candidatos_con_nombre.append((b, _extraer_nombre_huesped_beds24(b)))
 
-    if len(candidatos) == 1:
-        b = candidatos[0]
+    booking, ambiguo = emparejar_nombre(nombre_query, candidatos_con_nombre)
+    if booking is not None:
         logger.info(
             f"[check-in] Reserva encontrada por nombre: query='{nombre_query}' "
-            f"→ book_id={b.get('id')} room={b.get('roomId')}"
+            f"→ book_id={booking.get('id')} room={booking.get('roomId')}"
         )
-        return b, False
-
-    if len(candidatos) > 1:
+    elif ambiguo:
         logger.warning(
-            f"[check-in] Nombre ambiguo: query='{nombre_query}' encontró "
-            f"{len(candidatos)} reservas en el rango {desde}→{hasta}."
+            f"[check-in] Nombre ambiguo o inseguro tras Groq: query='{nombre_query}' "
+            f"entre {len(candidatos_con_nombre)} candidato(s) en el rango {desde}→{hasta}."
         )
-        return None, True
-
-    logger.warning(f"[check-in] nombre='{nombre_query}': no encontrado en el rango {desde}→{hasta}.")
-    return None, False
+    else:
+        logger.warning(f"[check-in] nombre='{nombre_query}': no encontrado en el rango {desde}→{hasta}.")
+    return booking, ambiguo
 
 
 # Nombre de habitación en el formato original (el que usa registroparteviajeros.com
