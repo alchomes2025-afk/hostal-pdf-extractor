@@ -60,7 +60,11 @@ CALLMEBOT_API_KEY_2 = os.environ.get("CALLMEBOT_API_KEY_2", "")
 # BEDS24_REFRESH_TOKEN se obtiene una vez intercambiando un invite code
 # (Settings > Marketplace > API en Beds24) por GET /authentication/setup
 BEDS24_REFRESH_TOKEN = os.environ.get("BEDS24_REFRESH_TOKEN", "")
-BEDS24_PROPERTY_ID   = os.environ.get("BEDS24_PROPERTY_ID", "339751")
+BEDS24_PROPERTY_ID   = os.environ.get("BEDS24_PROPERTY_ID", "339751")  # ALC Homes San Blas
+BEDS24_PROPERTY_ID_CASA_PRIMAVERA = os.environ.get("BEDS24_PROPERTY_ID_CASA_PRIMAVERA", "349341")
+# Lista de TODAS las propiedades en las que buscar una reserva por su número —
+# el huésped no indica de qué propiedad es, así que el sistema las recorre todas.
+BEDS24_PROPERTY_IDS  = [BEDS24_PROPERTY_ID, BEDS24_PROPERTY_ID_CASA_PRIMAVERA]
 BEDS24_API_BASE      = "https://beds24.com/api/v2"
 
 # PINs de acceso por habitación (se editan solo aquí, en Render → Environment)
@@ -68,6 +72,7 @@ PIN_HABITACION_2 = os.environ.get("PIN_HABITACION_2", "")  # Playa del Albir
 PIN_HABITACION_3 = os.environ.get("PIN_HABITACION_3", "")  # Cala del Moraig
 PIN_DOBLE        = os.environ.get("PIN_DOBLE", "")         # Playa de la Fossá
 PIN_DELUXE       = os.environ.get("PIN_DELUXE", "")        # Cala Coveta Fumá
+PIN_CASA_PRIMAVERA = os.environ.get("PIN_CASA_PRIMAVERA", "2486")  # Código del cajetín de llaves
 
 # Configuración de las 5 habitaciones: roomId de Beds24 → nombre + PIN + palabras clave
 # para detectar a qué habitación corresponde un parte de viajero (buscando en el
@@ -78,6 +83,9 @@ ROOM_CONFIG = {
     "702399": {"nombre": "Cala del Moraig",    "pin": PIN_HABITACION_3, "keywords": ["moraig"]},
     "702396": {"nombre": "Playa de la Fossá",  "pin": PIN_DOBLE,        "keywords": ["fossa"]},
     "702395": {"nombre": "Cala Coveta Fumá",   "pin": PIN_DELUXE,       "keywords": ["coveta", "fuma"]},
+    # La Casa de la Primavera — Gran Alacant (propiedad Beds24 349341).
+    # "pin" aquí es el código del cajetín de llaves (no una cerradura electrónica).
+    "720841": {"nombre": "La Casa de la Primavera", "pin": PIN_CASA_PRIMAVERA, "keywords": ["primavera"]},
 }
 
 HABITACIONES = {
@@ -106,7 +114,8 @@ RPV_LINKS = {
 }
 
 # ── Configuración: API de registroparteviajeros ───────────────────────
-RPV_API_KEY = os.environ.get("RPV_API_KEY", "")
+RPV_API_KEY = os.environ.get("RPV_API_KEY", "")  # Cuenta RPV del hostal (ALC Homes San Blas)
+RPV_API_KEY_CASA_PRIMAVERA = os.environ.get("RPV_API_KEY_CASA_PRIMAVERA", "")  # Cuenta RPV distinta, propia de La Casa de la Primavera
 RPV_API_URL = "https://app.registroparteviajeros.com/api/v1/usuarios"
 
 # Mapeo: room_id de Beds24 → prop_id real de registroparteviajeros
@@ -117,6 +126,14 @@ RPV_PROPERTY_MAP = {
     "702399": "prop_W17mVBrVyrGinzWj80wzxw",    # Cala del Moraig     (Hab 3)
     "702396": "prop_W17mVBrVyrGinzWivGS55Q",    # Playa de la Fossá   (Hab 4)
     "702395": "prop_W17mVBrVyrGinzWhTOByeA",    # Cala Coveta Fumá    (Hab 5)
+    "720841": "prop_W1w0u47vzIWL-biD4feb1Q",    # La Casa de la Primavera
+}
+
+# Mapeo: room_id → qué API key de RPV usar (algunas propiedades tienen cuenta
+# de RPV propia, distinta de la del hostal). Si un room_id no aparece aquí,
+# se usa RPV_API_KEY (la cuenta del hostal) por defecto.
+RPV_API_KEY_MAP = {
+    "720841": RPV_API_KEY_CASA_PRIMAVERA,  # La Casa de la Primavera — cuenta RPV propia
 }
 
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")

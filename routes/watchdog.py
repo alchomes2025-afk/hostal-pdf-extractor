@@ -12,7 +12,7 @@ import config
 from config import (
     API_TOKEN, TEST_TOKEN, ROOM_CONFIG, TEST_BOOKINGS,
     BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID,
-    RPV_API_KEY, RPV_API_URL, RPV_PROPERTY_MAP,
+    RPV_API_KEY, RPV_API_URL, RPV_PROPERTY_MAP, RPV_API_KEY_MAP,
     CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
     GOOGLE_REFRESH_TOKEN,
     GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI,
@@ -22,6 +22,50 @@ from services.whatsapp import alerta
 
 logger = logging.getLogger(__name__)
 watchdog_bp = Blueprint("watchdog", __name__)
+
+
+def _watchdog_debe_avisar(problemas):
+    """
+    Decide si hay que enviar un aviso de WhatsApp para este resultado del
+    watchdog, comparando con el último estado guardado en Firestore.
+
+    Evita el problema de repetir el MISMO aviso en cada ejecución (cada 15
+    min) mientras el problema persiste sin cambios — solo avisa de nuevo
+    si el conjunto de problemas cambia (aparece uno distinto, o se resuelve
+    alguno), y envía un único aviso de "recuperado" cuando el sistema
+    vuelve a estar OK tras haber tenido problemas.
+
+    Devuelve (debe_avisar: bool, es_recuperacion: bool).
+    Si Firestore no está configurado, no se puede recordar el estado
+    anterior — en ese caso avisa siempre que haya problemas (comportamiento
+    de antes, sin deduplicar) para no perder visibilidad por error.
+    """
+    firma_actual = "|".join(sorted(d for _, d, _ in problemas)) if problemas else ""
+
+    if config.db is None:
+        return (bool(problemas), False)
+
+    doc_ref = config.db.collection("system_state").document("watchdog")
+    try:
+        doc = doc_ref.get()
+        firma_anterior = doc.to_dict().get("firma", "") if doc.exists else ""
+    except Exception as e:
+        logger.error(f"[watchdog] Error leyendo estado anterior en Firestore: {e}")
+        # Sin poder leer el estado anterior, avisa igualmente si hay problemas
+        return (bool(problemas), False)
+
+    es_recuperacion = bool(firma_anterior) and not problemas
+    debe_avisar = (firma_actual != firma_anterior) if problemas else es_recuperacion
+
+    try:
+        doc_ref.set({
+            "firma": firma_actual,
+            "actualizado": datetime.now(ZoneInfo('Europe/Madrid')).isoformat(),
+        })
+    except Exception as e:
+        logger.error(f"[watchdog] Error guardando estado en Firestore: {e}")
+
+    return (debe_avisar, es_recuperacion)
 
 
 @watchdog_bp.route("/watchdog", methods=["GET", "POST"])
@@ -116,15 +160,21 @@ def watchdog():
     rpv_fail = []
     for room_id, prop_id in RPV_PROPERTY_MAP.items():
         nombre = ROOM_CONFIG.get(room_id, {}).get("nombre", room_id)
+        # Usa la clave de RPV correcta para esta habitación (algunas propiedades
+        # tienen cuenta de RPV propia, distinta de la del hostal) — mismo criterio
+        # que ya usa parte_recibido_para().
+        api_key_usar = RPV_API_KEY_MAP.get(room_id) or RPV_API_KEY
         try:
             resp = requests.get(
                 RPV_API_URL,
-                headers={"Authorization": f"Bearer {RPV_API_KEY}", "accept": "application/json"},
+                headers={"Authorization": f"Bearer {api_key_usar}", "accept": "application/json"},
                 params={"propiedad": prop_id},
                 timeout=8,
             )
             if resp.status_code == 401:
                 raise Exception("API key inválida (401)")
+            if resp.status_code == 403:
+                raise Exception("Acceso denegado (403) — revisa que la API key usada tenga permiso sobre esta propiedad")
             if resp.status_code == 404:
                 raise Exception(f"Propiedad no encontrada: {prop_id}")
             resp.raise_for_status()
@@ -136,7 +186,9 @@ def watchdog():
     if rpv_fail:
         problemas.append(("critico",
             f"RPV API falla en {len(rpv_fail)} habitación(es): {'; '.join(rpv_fail)}",
-            "Verificar RPV_API_KEY en Render — puede haber caducado o cambiado"))
+            "Verificar en Render que RPV_API_KEY (hostal) y RPV_API_KEY_CASA_PRIMAVERA "
+            "(si aplica) están configuradas y son correctas — puede haber caducado, "
+            "cambiado, o faltar la variable de la propiedad afectada"))
 
     # ── 4. Groq API ───────────────────────────────────────────────────────
     if GROQ_API_KEY:
@@ -212,12 +264,14 @@ def watchdog():
                 f"Firestore no responde: {e}",
                 "Verificar credenciales de servicio y permisos del proyecto en Firebase Console"))
 
-    # ── Resumen y alerta WhatsApp ─────────────────────────────────────────
+    # ── Resumen y alerta WhatsApp (con deduplicación) ─────────────────────
     n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")
     n_warnings  = sum(1 for nivel, _, _ in problemas if nivel == "warning")
     todo_ok = len(problemas) == 0
 
-    if problemas:
+    debe_avisar, es_recuperacion = _watchdog_debe_avisar(problemas)
+
+    if problemas and debe_avisar:
         lineas = [f"{'🔴' if nivel=='critico' else '🟡'} {desc}\n   → {accion}"
                   for nivel, desc, accion in problemas]
         alerta(
@@ -225,6 +279,10 @@ def watchdog():
             "\n\n".join(lineas),
             nivel="critico" if n_criticos > 0 else "warning"
         )
+    elif problemas and not debe_avisar:
+        logger.info("[watchdog] Mismo(s) problema(s) que en el último aviso — no se repite la notificación por WhatsApp.")
+    elif es_recuperacion:
+        alerta("Watchdog — ✅ Recuperado, todos los sistemas vuelven a estar operativos", "", nivel="info")
     else:
         logger.info("[watchdog] ✅ Todos los sistemas operativos — sin aviso WhatsApp (solo se avisa si hay problemas)")
 

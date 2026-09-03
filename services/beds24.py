@@ -6,7 +6,7 @@ import logging
 import requests
 from datetime import date, timedelta
 
-from config import BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID, ROOM_CONFIG
+from config import BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID, BEDS24_PROPERTY_IDS, ROOM_CONFIG
 from services.whatsapp import avisar_error_critico
 from services.rooms import detectar_room_id
 
@@ -86,42 +86,39 @@ def buscar_booking_por_ref(booking_ref):
     desde = (hoy - timedelta(days=5)).isoformat()
     hasta = (hoy + timedelta(days=180)).isoformat()
 
-    try:
-        resp = requests.get(
-            f"{BEDS24_API_BASE}/bookings",
-            headers={"token": token, "accept": "application/json"},
-            params={"propertyId": BEDS24_PROPERTY_ID,
-                    "arrivalFrom": desde, "arrivalTo": hasta},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        bookings = resp.json().get("data", [])
-        logger.info(f"[check-in] Beds24: {len(bookings)} reservas en rango {desde}→{hasta}")
-    except Exception as e:
-        logger.error(f"[check-in] Error consultando Beds24: {e}")
-        return None
-
     ref_norm = booking_ref.strip().lower()
 
-    for b in bookings:
-        if str(b.get("status", "")).lower() == "cancelled":
-            continue
-        campo = _ref_en_booking(b, ref_norm)
-        if campo is not None:
-            logger.info(
-                f"[check-in] Reserva encontrada: ref='{booking_ref}' "
-                f"en campo '{campo}' → book_id={b.get('id')} room={b.get('roomId')}"
+    # Recorre TODAS las propiedades configuradas (hostal + La Casa de la Primavera).
+    # El huésped no indica de qué propiedad es su reserva, así que hay que
+    # comprobarlas todas hasta encontrar una coincidencia.
+    for property_id in BEDS24_PROPERTY_IDS:
+        try:
+            resp = requests.get(
+                f"{BEDS24_API_BASE}/bookings",
+                headers={"token": token, "accept": "application/json"},
+                params={"propertyId": property_id,
+                        "arrivalFrom": desde, "arrivalTo": hasta},
+                timeout=20,
             )
-            return b
+            resp.raise_for_status()
+            bookings = resp.json().get("data", [])
+            logger.info(f"[check-in] Beds24 property {property_id}: {len(bookings)} reservas en rango {desde}→{hasta}")
+        except Exception as e:
+            logger.error(f"[check-in] Error consultando Beds24 (property {property_id}): {e}")
+            continue
 
-    # Log de diagnóstico: ayuda a ver qué campos devuelve Beds24
-    if bookings:
-        logger.warning(
-            f"[check-in] ref='{booking_ref}' no encontrado. "
-            f"Campos del primer booking: {list(bookings[0].keys())}"
-        )
-    else:
-        logger.warning(f"[check-in] ref='{booking_ref}': sin reservas en el rango.")
+        for b in bookings:
+            if str(b.get("status", "")).lower() == "cancelled":
+                continue
+            campo = _ref_en_booking(b, ref_norm)
+            if campo is not None:
+                logger.info(
+                    f"[check-in] Reserva encontrada: ref='{booking_ref}' "
+                    f"en campo '{campo}' → book_id={b.get('id')} room={b.get('roomId')} property={property_id}"
+                )
+                return b
+
+    logger.warning(f"[check-in] ref='{booking_ref}': no encontrado en ninguna propiedad ({BEDS24_PROPERTY_IDS}).")
     return None
 
 

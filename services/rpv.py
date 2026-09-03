@@ -5,26 +5,32 @@ verificar si el parte de viajero de una reserva ya fue completado.
 import logging
 import requests
 
-from config import RPV_API_KEY, RPV_API_URL, RPV_PROPERTY_MAP
+from config import RPV_API_KEY, RPV_API_URL, RPV_PROPERTY_MAP, RPV_API_KEY_MAP
 
 logger = logging.getLogger(__name__)
 
 
-def _consultar_rpv_propiedad(prop_id):
+def _consultar_rpv_propiedad(prop_id, api_key=None):
     """
     Llama a la API de registroparteviajeros.com para una propiedad concreta.
     Devuelve la lista de registros (cada uno con reserva + huespedes) o [].
+
+    api_key: clave de la cuenta de RPV a usar. Si no se indica, usa la
+    cuenta del hostal (RPV_API_KEY) por defecto — así el resto de llamadas
+    existentes en el código, que no pasan este parámetro, siguen funcionando
+    exactamente igual que antes.
 
     Estructura de respuesta:
       [ { "reserva": { "fecha_entrada": "YYYY-MM-DD", "fecha_salida": "...", ... },
           "huespedes": { "huesped": [...] } }, ... ]
     """
-    if not RPV_API_KEY or not prop_id:
+    key = api_key or RPV_API_KEY
+    if not key or not prop_id:
         return []
     try:
         resp = requests.get(
             RPV_API_URL,
-            headers={"Authorization": f"Bearer {RPV_API_KEY}", "accept": "application/json"},
+            headers={"Authorization": f"Bearer {key}", "accept": "application/json"},
             params={"propiedad": prop_id},
             timeout=10,
         )
@@ -45,13 +51,18 @@ def parte_recibido_para(room_id, fecha_entrada_iso):
 
     La presencia de un registro con reserva.fecha_entrada coincidente
     es suficiente para confirmar que el huésped completó el proceso.
+
+    Usa la cuenta de RPV correcta para esa habitación (RPV_API_KEY_MAP),
+    ya que algunas propiedades (ej. La Casa de la Primavera) tienen su
+    propia cuenta de RPV, distinta de la del hostal.
     """
     prop_id = RPV_PROPERTY_MAP.get(room_id)
     if not prop_id:
         logger.warning(f"[check-in] room_id {room_id} no tiene prop_id en RPV_PROPERTY_MAP")
         return False
 
-    registros = _consultar_rpv_propiedad(prop_id)
+    api_key = RPV_API_KEY_MAP.get(room_id)  # None → usa RPV_API_KEY por defecto
+    registros = _consultar_rpv_propiedad(prop_id, api_key=api_key)
     for reg in registros:
         reserva = reg.get("reserva", {})
         if reserva.get("fecha_entrada", "") == fecha_entrada_iso:
@@ -80,7 +91,8 @@ def obtener_partes_recibidos_hoy():
         return recibidos
 
     for room_id, prop_id in RPV_PROPERTY_MAP.items():
-        registros = _consultar_rpv_propiedad(prop_id)
+        api_key = RPV_API_KEY_MAP.get(room_id)  # None → usa RPV_API_KEY por defecto
+        registros = _consultar_rpv_propiedad(prop_id, api_key=api_key)
         for reg in registros:
             reserva = reg.get("reserva", {})
             fecha = reserva.get("fecha_entrada", "")
