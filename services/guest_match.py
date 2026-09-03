@@ -50,7 +50,10 @@ def _desambiguar_con_groq(nombre_query, nombres_candidatos):
     Devuelve el índice (int) del candidato elegido, o None si Groq no está
     configurado, falla, o no encuentra ninguno con confianza suficiente.
     """
-    if not GROQ_API_KEY or not nombres_candidatos:
+    if not GROQ_API_KEY:
+        logger.warning(f"[guest_match] GROQ_API_KEY no configurada — no se puede desambiguar '{nombre_query}'")
+        return None
+    if not nombres_candidatos:
         return None
 
     lista = "\n".join(f"{i}: {n}" for i, n in enumerate(nombres_candidatos))
@@ -79,16 +82,18 @@ def _desambiguar_con_groq(nombre_query, nombres_candidatos):
             logger.warning(f"[guest_match] {GROQ_MODEL_PRI} → {resp.status_code}, probando fallback")
             resp = _llamar(GROQ_MODEL_FALL)
         resp.raise_for_status()
-        contenido = resp.json()["choices"][0]["message"]["content"].strip()
-        contenido = re.sub(r"^```(json)?|```$", "", contenido, flags=re.M).strip()
+        contenido_crudo = resp.json()["choices"][0]["message"]["content"].strip()
+        contenido = re.sub(r"^```(json)?|```$", "", contenido_crudo, flags=re.M).strip()
         data = json.loads(contenido)
         idx = data.get("indice")
+        logger.info(f"[guest_match] Groq respuesta cruda para '{nombre_query}': {contenido_crudo!r}")
         if isinstance(idx, int) and 0 <= idx < len(nombres_candidatos):
             logger.info(f"[guest_match] Groq desambiguó '{nombre_query}' → candidato {idx} ('{nombres_candidatos[idx]}')")
             return idx
+        logger.info(f"[guest_match] Groq no encontró coincidencia segura para '{nombre_query}' (índice={idx!r})")
         return None
     except Exception as e:
-        logger.warning(f"[guest_match] Groq no pudo desambiguar '{nombre_query}': {e}")
+        logger.warning(f"[guest_match] Groq FALLÓ desambiguando '{nombre_query}': {type(e).__name__}: {e}")
         return None
 
 
@@ -111,11 +116,14 @@ def emparejar_nombre(nombre_query, candidatos_con_nombre):
         return None, False
 
     nombres = [n for _, n in candidatos_con_nombre]
+    logger.info(f"[guest_match] query='{nombre_query}' — candidatos disponibles: {nombres}")
     candidatos_tokens = [normalizar_nombre(n) for n in nombres]
 
     exactos = _match_exacto(query_tokens, candidatos_tokens)
     if len(exactos) == 1:
         return candidatos_con_nombre[exactos[0]][0], False
+    if len(exactos) > 1:
+        logger.info(f"[guest_match] query='{nombre_query}' — match exacto ambiguo entre: {[nombres[i] for i in exactos]}")
 
     idx = _desambiguar_con_groq(nombre_query, nombres)
     if idx is not None:
