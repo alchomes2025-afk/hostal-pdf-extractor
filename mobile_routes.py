@@ -913,14 +913,21 @@ def _load_overrides(token=None):
     return overrides
 
 
+_last_load_error = None  # último error de _load_bookings(), para diagnóstico vía /mobile/health y /mobile/all-data
+
+
 def _ensure_loaded():
     """Carga datos de Beds24 si el servidor acaba de arrancar (state vacío)."""
+    global _last_load_error
     if _state["loaded"]:
         return True
     try:
         _load_bookings()
+        _last_load_error = None
         return True
-    except Exception:
+    except Exception as e:
+        _last_load_error = f"{type(e).__name__}: {e}"
+        print(f"[_ensure_loaded] Error cargando datos de Beds24: {_last_load_error}")
         return False
 
 
@@ -1053,6 +1060,7 @@ def health():
         "loaded":  _state["loaded"],
         "bookings": len(_state["bookings"]),
         "loaded_at": _state["loaded_at"],
+        "last_load_error": _last_load_error,
     })
 
 
@@ -1178,7 +1186,7 @@ def all_data():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
     if not _ensure_loaded():
-        return jsonify({"ok": False, "error": "No se pudo cargar datos de Beds24"}), 500
+        return jsonify({"ok": False, "error": "No se pudo cargar datos de Beds24", "detalle": _last_load_error}), 500
 
     # Convertir BASE_PRICES (claves int) a str para JSON
     prices_str = {str(rid): prices for rid, prices in BASE_PRICES.items()}
