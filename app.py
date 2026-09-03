@@ -23,8 +23,6 @@ from services.whatsapp import enviar_whatsapp_callmebot
 from routes.misc import misc_bp
 from routes.chat import chat_bp
 from routes.checkin import checkin_bp
-from routes.oauth import oauth_bp
-from routes.extraccion import extraccion_bp
 from routes.resumen_routes import resumen_bp
 from routes.historial import historial_bp
 from routes.watchdog import watchdog_bp
@@ -35,7 +33,7 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.register_blueprint(mobile_bp)
 for _bp in (
-    misc_bp, chat_bp, checkin_bp, oauth_bp, extraccion_bp,
+    misc_bp, chat_bp, checkin_bp,
     resumen_bp, historial_bp, watchdog_bp, debug_bp,
 ):
     app.register_blueprint(_bp)

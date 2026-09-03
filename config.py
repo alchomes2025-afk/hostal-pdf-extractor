@@ -14,11 +14,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class GmailAuthError(Exception):
-    """Se lanza cuando el refresh token de Gmail ha caducado o es inválido."""
-    pass
-
-
 # ════════════════════════════════════════════════════════════════════════════
 # FIRESTORE — Histórico de interacciones y conversaciones por reserva
 # ════════════════════════════════════════════════════════════════════════════
@@ -40,13 +35,8 @@ else:
     logger.warning("[Firestore] FIRESTORE_CREDENTIALS_JSON no configurada — histórico desactivado")
 
 
-PDF_PASSWORD         = os.environ.get("PDF_PASSWORD", "Alchomes2025")
 API_TOKEN            = os.environ.get("API_TOKEN", "")
 TEST_TOKEN           = os.environ.get("TEST_TOKEN", "test1234")
-GOOGLE_CLIENT_ID     = os.environ.get("GOOGLE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
-GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
-REDIRECT_URI         = os.environ.get("REDIRECT_URI", "https://hostal-pdf-extractor.onrender.com/oauth/callback")
 # ── WhatsApp CallMeBot ──────────────────────────────────────────────────────
 # CALLMEBOT_PHONE  : número en formato internacional sin '+' (ej: 34644597897)
 # CALLMEBOT_API_KEY: obtenida enviando "I allow callmebot to send me messages"
@@ -88,23 +78,10 @@ ROOM_CONFIG = {
     "720841": {"nombre": "La Casa de la Primavera", "pin": PIN_CASA_PRIMAVERA, "keywords": ["primavera"]},
 }
 
-HABITACIONES = {
-    "habitacion simple 1": "Habitación Simple 1",
-    "habitacion simple 2": "Habitación Simple 2",
-    "habitacion simple 3": "Habitación Simple 3",
-    "habitacion doble 1":  "Habitación Doble 1",
-    "habitacion doble 2":  "Habitación Doble 2",
-    "habitacion doble 3":  "Habitación Doble 3",
-    "habitacion doble 4":  "Habitación Doble 4",
-    "habitacion doble 5":  "Habitación Doble 5",
-    "habitacion deluxe 1": "Habitación Deluxe 1",
-    "habitacion deluxe 2": "Habitación Deluxe 2",
-    "habitacion deluxe 3": "Habitación Deluxe 3",
-    "habitacion deluxe 4": "Habitación Deluxe 4",
-    "habitacion deluxe 5": "Habitación Deluxe 5",
-}
-
 # ── Links de registroparteviajeros.com por room_id de Beds24 ─────────────
+# "720841" (La Casa de la Primavera) pendiente: falta el enlace público de esa
+# cuenta de RPV separada — mientras no se añada, esos huéspedes en estado
+# pre_checkin/checkin_pending no verán el botón de "completar registro".
 RPV_LINKS = {
     "702397": "https://app.registroparteviajeros.com/propiedad/hliPDoDTb9",  # Hab 1 · Playa Lanuza
     "702398": "https://app.registroparteviajeros.com/propiedad/CgbPrarDLi",  # Hab 2 · Playa del Albir
@@ -179,6 +156,42 @@ TEST_BOOKINGS = {
         "arrival":       "2026-07-20",
         "departure":     "2026-07-22",
         "pin":           ROOM_CONFIG.get("702398", {}).get("pin", "XXXXXX"),
+        "rpv_link":      None,
+    },
+    "9999000011": {
+        "estado":        "pre_checkin",
+        "parte_submitted": False,
+        "pin_available": False,
+        "guest_name":    "Sophie Martin",
+        "room_id":       "720841",
+        "room_name":     "La Casa de la Primavera",
+        "arrival":       "2026-07-20",
+        "departure":     "2026-07-22",
+        "pin":           None,
+        "rpv_link":      RPV_LINKS.get("720841"),
+    },
+    "9999000012": {
+        "estado":        "pending_early",
+        "parte_submitted": True,
+        "pin_available": False,
+        "guest_name":    "Sophie Martin",
+        "room_id":       "720841",
+        "room_name":     "La Casa de la Primavera",
+        "arrival":       "2026-07-20",
+        "departure":     "2026-07-22",
+        "pin":           None,
+        "rpv_link":      None,
+    },
+    "9999000013": {
+        "estado":        "staying",
+        "parte_submitted": True,
+        "pin_available": True,
+        "guest_name":    "Sophie Martin",
+        "room_id":       "720841",
+        "room_name":     "La Casa de la Primavera",
+        "arrival":       "2026-07-20",
+        "departure":     "2026-07-22",
+        "pin":           ROOM_CONFIG.get("720841", {}).get("pin", "XXXXXX"),
         "rpv_link":      None,
     },
 }

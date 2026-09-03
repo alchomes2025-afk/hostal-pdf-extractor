@@ -661,6 +661,7 @@ const ROOM_LABEL = {
   702397: { name: "Hab. 1",  sub: "Std Queen" },
   702398: { name: "Hab. 2",  sub: "Sup Queen" },
   702399: { name: "Hab. 3",  sub: "Queen" },
+  720841: { name: "Primavera", sub: "Vivienda completa" },
 };
 
 // ── HELPERS ────────────────────────────────────────────
@@ -884,6 +885,20 @@ function renderCalendar() {
 
   // ── Una fila por habitación ──
   ROOMS.forEach((room) => {
+    // Separador visual antes de La Casa de la Primavera: es una propiedad
+    // distinta del hostal (vivienda completa en Gran Alacant), no una
+    // habitación más — se marca con una fila de ancho completo para que
+    // no se confunda a simple vista con el resto del calendario.
+    if (String(room.id) === "720841") {
+      const trSep = document.createElement("tr");
+      const tdSep = document.createElement("td");
+      tdSep.colSpan = dates.length + 1;
+      tdSep.style.cssText = "background:#fdf0f6;color:#a3457a;font-weight:600;padding:6px 10px;font-size:12px;border-top:2px solid #e8a3c8;border-bottom:2px solid #e8a3c8";
+      tdSep.textContent = "🌸 La Casa de la Primavera — Gran Alacant (vivienda completa, propiedad distinta del hostal)";
+      trSep.appendChild(tdSep);
+      tb.appendChild(trSep);
+    }
+
     const tr = document.createElement("tr");
     tr.className = "room-row";
 

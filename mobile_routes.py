@@ -35,7 +35,22 @@ BEDS24_REFRESH_TOKEN = (
     os.environ.get("MOBILE_BEDS24_TOKEN") or os.environ.get("BEDS24_REFRESH_TOKEN")
 )
 MOBILE_APP_PIN = os.environ.get("MOBILE_APP_PIN")
-PROPERTY_ID = os.environ.get("BEDS24_PROPERTY_ID", "339751")
+PROPERTY_ID = os.environ.get("BEDS24_PROPERTY_ID", "339751")  # ALC Homes San Blas
+PROPERTY_ID_CASA_PRIMAVERA = os.environ.get("BEDS24_PROPERTY_ID_CASA_PRIMAVERA", "349341")
+# Todas las propiedades que gestiona esta app — se recorren en las cargas
+# generales (todos los bookings, delta sync); las operaciones sobre una
+# habitación concreta usan _property_for_room() para saber a cuál pertenece.
+PROPERTY_IDS = [PROPERTY_ID, PROPERTY_ID_CASA_PRIMAVERA]
+# room_id (str) → propertyId, solo para habitaciones que NO son del hostal
+# (PROPERTY_ID). Si un room_id no aparece aquí, se asume PROPERTY_ID.
+ROOM_PROPERTY_MAP = {
+    "720841": PROPERTY_ID_CASA_PRIMAVERA,  # La Casa de la Primavera
+}
+
+
+def _property_for_room(room_id):
+    """Devuelve el propertyId de Beds24 al que pertenece una habitación."""
+    return ROOM_PROPERTY_MAP.get(str(room_id), PROPERTY_ID)
 
 # Bloqueo de fechas mediante reserva ficticia (más fiable que /inventory/rooms/calendar,
 # que Beds24 estaba rechazando/ignorando de forma silenciosa en algunos casos).
@@ -719,6 +734,9 @@ ROOMS = [
     {"id": 702397, "name": "Std Queen"},
     {"id": 702398, "name": "Sup Queen"},
     {"id": 702399, "name": "Queen"},
+    # La Casa de la Primavera — Gran Alacant (propiedad Beds24 349341).
+    # Nombre provisional: ajústalo al nombre real del room type en Beds24 si es distinto.
+    {"id": 720841, "name": "Casa Primavera"},
 ]
 
 # Caché del access token
@@ -775,15 +793,18 @@ def _parse_bookings_list(raw, include_cancelled=False):
 
 def _load_bookings():
     """
-    Carga TODOS los bookings de la propiedad.
+    Carga TODOS los bookings de TODAS las propiedades (PROPERTY_IDS).
 
-    Estrategia de llamadas a Beds24 (v9 — corregido):
+    Estrategia de llamadas a Beds24 (v9 — corregido; v10 — multi-propiedad):
     · Beds24 devuelve resultados INCOMPLETOS cuando el rango arrivalFrom→arrivalTo
       es muy amplio (545 días: 180 atrás + 365 adelante) en una sola llamada —
       confirmado comparando contra una consulta de 60 días, que sí trae todo.
       No es un error HTTP, simplemente omite reservas silenciosamente.
     · Fix: se pide en trozos de ~60 días (igual que /debug-bookings, que es fiable)
       y se combinan los resultados, sin pasarnos nunca de un rango ancho por llamada.
+    · Se repite la misma consulta por trozos para cada propertyId de PROPERTY_IDS
+      (el id de reserva de Beds24 es único en toda la cuenta, así que seen_ids
+      sigue siendo válido como set global entre propiedades).
     · Esta función solo se ejecuta al arrancar el servidor o en /reload.
     """
     token = get_access_token()
@@ -795,37 +816,38 @@ def _load_bookings():
     all_raw = []
     seen_ids = set()
 
-    chunk_start = window_from
-    while chunk_start <= window_to:
-        chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), window_to)
-        params_base = {
-            "propertyId":          PROPERTY_ID,
-            "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
-            "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
-            "includePersonalInfo": "true",
-            "limit":               500,
-        }
+    for property_id in PROPERTY_IDS:
+        chunk_start = window_from
+        while chunk_start <= window_to:
+            chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), window_to)
+            params_base = {
+                "propertyId":          property_id,
+                "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
+                "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
+                "includePersonalInfo": "true",
+                "limit":               500,
+            }
 
-        page = 1
-        while True:
-            resp = b24_get(token, "/bookings", params={**params_base, "page": page})
-            if not resp.ok:
-                break  # este trozo falló; seguimos con el resto en vez de abortar todo
-            data = resp.json().get("data") or []
-            for b in data:
-                bid = b.get("id")
-                if bid is not None and bid in seen_ids:
-                    continue  # evitar duplicados en los bordes de cada trozo
-                if bid is not None:
-                    seen_ids.add(bid)
-                all_raw.append(b)
-            if len(data) < 500:
-                break
-            page += 1
-            if page > 10:
-                break
+            page = 1
+            while True:
+                resp = b24_get(token, "/bookings", params={**params_base, "page": page})
+                if not resp.ok:
+                    break  # este trozo falló; seguimos con el resto en vez de abortar todo
+                data = resp.json().get("data") or []
+                for b in data:
+                    bid = b.get("id")
+                    if bid is not None and bid in seen_ids:
+                        continue  # evitar duplicados en los bordes de cada trozo
+                    if bid is not None:
+                        seen_ids.add(bid)
+                    all_raw.append(b)
+                if len(data) < 500:
+                    break
+                page += 1
+                if page > 10:
+                    break
 
-        chunk_start = chunk_end + timedelta(days=1)
+            chunk_start = chunk_end + timedelta(days=1)
 
     _state["bookings"]   = _parse_bookings_list(all_raw)
     _state["overrides"]  = _load_overrides_from_firestore()  # precios editados manualmente, guardados por nosotros
@@ -1224,40 +1246,48 @@ def check_changes():
     try:
         token = get_access_token()
 
-        # 1) Reservas activas nuevas o modificadas (como antes)
-        resp = b24_get(token, "/bookings", params={
-            "propertyId":          PROPERTY_ID,
-            "modifiedFrom":        since[:19],
-            "includePersonalInfo": "true",
-            "limit":               100,
-        })
-
-        if not resp.ok:
-            # 429 u otro error: informar sin romper la app
-            return jsonify({"ok": True, "changed": False, "checked_at": checked_at,
-                            "warning": f"Beds24 {resp.status_code}"})
-
-        active_raw = resp.json().get("data") or []
-
-        # 2) Cancelaciones recientes — consulta EXPLÍCITA, porque Beds24 no
-        #    las incluye en la consulta normal aunque estén dentro del rango
-        #    de modifiedFrom. Si esta consulta falla, no abortamos: mejor
-        #    detectar las nuevas/modificadas igualmente que no detectar nada.
+        active_raw = []
         cancelled_raw = []
-        try:
-            resp_cancel = b24_get(token, "/bookings", params={
-                "propertyId":          PROPERTY_ID,
+        warnings = []
+
+        for property_id in PROPERTY_IDS:
+            # 1) Reservas activas nuevas o modificadas (como antes)
+            resp = b24_get(token, "/bookings", params={
+                "propertyId":          property_id,
                 "modifiedFrom":        since[:19],
-                "status":              "cancelled",
                 "includePersonalInfo": "true",
                 "limit":               100,
             })
-            if resp_cancel.ok:
-                cancelled_raw = resp_cancel.json().get("data") or []
-            else:
-                print(f"[check-changes] consulta de canceladas falló: {resp_cancel.status_code} {resp_cancel.text[:200]}")
-        except Exception as e:
-            print(f"[check-changes] error consultando canceladas: {e}")
+
+            if not resp.ok:
+                # 429 u otro error: informar sin romper la app, seguir con el resto
+                warnings.append(f"Beds24 {resp.status_code} (property {property_id})")
+                continue
+
+            active_raw.extend(resp.json().get("data") or [])
+
+            # 2) Cancelaciones recientes — consulta EXPLÍCITA, porque Beds24 no
+            #    las incluye en la consulta normal aunque estén dentro del rango
+            #    de modifiedFrom. Si esta consulta falla, no abortamos: mejor
+            #    detectar las nuevas/modificadas igualmente que no detectar nada.
+            try:
+                resp_cancel = b24_get(token, "/bookings", params={
+                    "propertyId":          property_id,
+                    "modifiedFrom":        since[:19],
+                    "status":              "cancelled",
+                    "includePersonalInfo": "true",
+                    "limit":               100,
+                })
+                if resp_cancel.ok:
+                    cancelled_raw.extend(resp_cancel.json().get("data") or [])
+                else:
+                    print(f"[check-changes] consulta de canceladas falló (property {property_id}): {resp_cancel.status_code} {resp_cancel.text[:200]}")
+            except Exception as e:
+                print(f"[check-changes] error consultando canceladas (property {property_id}): {e}")
+
+        if not active_raw and not cancelled_raw and warnings:
+            return jsonify({"ok": True, "changed": False, "checked_at": checked_at,
+                            "warning": "; ".join(warnings)})
 
         new_bookings = _parse_bookings_list(active_raw, include_cancelled=True) + \
                        _parse_bookings_list(cancelled_raw, include_cancelled=True)
@@ -1386,7 +1416,7 @@ def _lookup_booking_id(token, room_id, arrival, email=None):
     """
     try:
         resp = b24_get(token, "/bookings", params={
-            "propertyId":          PROPERTY_ID,
+            "propertyId":          _property_for_room(room_id),
             "roomId":              int(room_id),
             "arrivalFrom":         arrival,
             "arrivalTo":           arrival,
@@ -1867,23 +1897,25 @@ def debug_bookings():
         today = date.today()
         results = {}
 
-        # Test 1: sin filtro de habitación (todas las reservas, próximos 60 días)
-        r1 = requests.get(
-            f"{BEDS24_API}/bookings",
-            params={
-                "propertyId": PROPERTY_ID,
-                "arrivalFrom": today.strftime("%Y-%m-%d"),
-                "arrivalTo": (today + timedelta(days=60)).strftime("%Y-%m-%d"),
-                "includePersonalInfo": "true",
-            },
-            headers={"accept": "application/json", "token": token},
-            timeout=20,
-        )
-        results["sin_filtro_habitacion"] = {
-            "status": r1.status_code,
-            "data_count": len((r1.json().get("data") or [])) if r1.ok else 0,
-            "raw": r1.json() if r1.ok else r1.text[:500],
-        }
+        # Test 1: sin filtro de habitación (todas las reservas, próximos 60 días),
+        # repetido para cada propiedad configurada (hostal + La Casa de la Primavera)
+        for property_id in PROPERTY_IDS:
+            r1 = requests.get(
+                f"{BEDS24_API}/bookings",
+                params={
+                    "propertyId": property_id,
+                    "arrivalFrom": today.strftime("%Y-%m-%d"),
+                    "arrivalTo": (today + timedelta(days=60)).strftime("%Y-%m-%d"),
+                    "includePersonalInfo": "true",
+                },
+                headers={"accept": "application/json", "token": token},
+                timeout=20,
+            )
+            results[f"sin_filtro_habitacion_property_{property_id}"] = {
+                "status": r1.status_code,
+                "data_count": len((r1.json().get("data") or [])) if r1.ok else 0,
+                "raw": r1.json() if r1.ok else r1.text[:500],
+            }
 
         # Test 2: con roomId de Deluxe
         r2 = requests.get(
@@ -1932,6 +1964,7 @@ def debug_bookings():
         return jsonify({
             "ok": True,
             "property_id": PROPERTY_ID,
+            "property_ids": PROPERTY_IDS,
             "token_prefix": (BEDS24_REFRESH_TOKEN or "")[:12] + "…",
             "results": results,
         })
@@ -1973,36 +2006,37 @@ def test_sync():
         all_raw = []
         seen_ids = set()
         beds24_error = None
-        chunk_start = window_from
-        while chunk_start <= window_to:
-            chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), window_to)
-            page = 1
-            while True:
-                resp = b24_get(token, "/bookings", params={
-                    "propertyId":          PROPERTY_ID,
-                    "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
-                    "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
-                    "includePersonalInfo": "true",
-                    "limit":               500,
-                    "page":                page,
-                })
-                if not resp.ok:
-                    beds24_error = f"HTTP {resp.status_code}: {resp.text[:300]}"
-                    break
-                data = resp.json().get("data") or []
-                for b in data:
-                    bid = b.get("id")
-                    if bid is not None and bid in seen_ids:
-                        continue
-                    if bid is not None:
-                        seen_ids.add(bid)
-                    all_raw.append(b)
-                if len(data) < 500:
-                    break
-                page += 1
-                if page > 10:
-                    break
-            chunk_start = chunk_end + timedelta(days=1)
+        for property_id in PROPERTY_IDS:
+            chunk_start = window_from
+            while chunk_start <= window_to:
+                chunk_end = min(chunk_start + timedelta(days=CHUNK_DAYS), window_to)
+                page = 1
+                while True:
+                    resp = b24_get(token, "/bookings", params={
+                        "propertyId":          property_id,
+                        "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
+                        "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
+                        "includePersonalInfo": "true",
+                        "limit":               500,
+                        "page":                page,
+                    })
+                    if not resp.ok:
+                        beds24_error = f"HTTP {resp.status_code} (property {property_id}): {resp.text[:300]}"
+                        break
+                    data = resp.json().get("data") or []
+                    for b in data:
+                        bid = b.get("id")
+                        if bid is not None and bid in seen_ids:
+                            continue
+                        if bid is not None:
+                            seen_ids.add(bid)
+                        all_raw.append(b)
+                    if len(data) < 500:
+                        break
+                    page += 1
+                    if page > 10:
+                        break
+                chunk_start = chunk_end + timedelta(days=1)
 
         beds24_bookings = _parse_bookings_list(all_raw)  # sin canceladas (igual que la app)
 

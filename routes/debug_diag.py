@@ -1,11 +1,10 @@
 """
-routes/debug_diag.py — Endpoints de diagnóstico manual contra Beds24 y la
-página HTML de debug de estructura de emails Gmail.
+routes/debug_diag.py — Endpoints de diagnóstico manual contra Beds24.
 """
 import logging
 import requests
 from datetime import date, timedelta
-from flask import Blueprint, request, jsonify, render_template_string
+from flask import Blueprint, request, jsonify
 
 from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
 from services.beds24 import get_beds24_access_token, _ref_en_booking
@@ -177,37 +176,3 @@ def ver_reservas_dia_beds24():
         "primeros_10_items": resumen_items[:10],
         "todos_los_items_resumidos": resumen_items,
     }), 200
-
-
-DEBUG_PAGE = """<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8"><title>Debug Gmail</title>
-<style>body{font-family:system-ui;padding:2rem;max-width:600px;margin:auto}
-input{width:100%;padding:.5rem;margin:.5rem 0 1rem;border:1px solid #ccc;border-radius:6px}
-button{padding:.6rem 1.5rem;background:#5c2d91;color:#fff;border:none;border-radius:6px;cursor:pointer}
-pre{background:#f4f4f4;padding:1rem;border-radius:6px;white-space:pre-wrap;word-break:break-all;font-size:.8rem}
-</style></head><body>
-<h2>🔍 Debug estructura email Gmail</h2>
-<label>Test token</label><input id="tok" value="test1234"/>
-<label>Message ID (del email original de registroparteviajeros.com)</label>
-<input id="mid" placeholder="ej: 19eac43cf2de581f"/>
-<button onclick="run()">Analizar</button>
-<pre id="out">Resultado aparecerá aquí...</pre>
-<script>
-async function run(){
-  const out=document.getElementById('out');
-  out.textContent='Consultando...';
-  try{
-    const r=await fetch('/debug-mensaje',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({message_id:document.getElementById('mid').value,
-        token:document.getElementById('tok').value})});
-    const d=await r.json();
-    out.textContent=JSON.stringify(d,null,2);
-  }catch(e){out.textContent='Error: '+e;}
-}
-</script></body></html>"""
-
-
-@debug_bp.route("/debug", methods=["GET"])
-def debug_page():
-    return render_template_string(DEBUG_PAGE)

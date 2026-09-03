@@ -14,7 +14,6 @@ from config import (
     BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID,
     RPV_API_KEY, RPV_API_URL, RPV_PROPERTY_MAP, RPV_API_KEY_MAP,
     CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
-    GOOGLE_REFRESH_TOKEN,
     GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI,
 )
 from services.beds24 import get_beds24_access_token
@@ -110,7 +109,6 @@ def watchdog():
     env_warning = {
         "CALLMEBOT_PHONE_2":    CALLMEBOT_PHONE_2,
         "CALLMEBOT_API_KEY_2":  CALLMEBOT_API_KEY_2,
-        "GOOGLE_REFRESH_TOKEN": GOOGLE_REFRESH_TOKEN,  # para /extraer legacy
     }
     pins = {
         f"PIN hab. {ROOM_CONFIG[rid]['nombre']}": ROOM_CONFIG[rid]["pin"]

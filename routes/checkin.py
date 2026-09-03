@@ -22,15 +22,18 @@ checkin_bp = Blueprint("checkin", __name__)
 @checkin_bp.route("/check-in", methods=["GET"])
 def check_in_status():
     """
-    GET /check-in?ref=<numero_confirmacion_booking_com>
+    GET /check-in?ref=<numero_de_reserva>
 
     Endpoint para la web de check-in estática alojada en Firebase.
-    El huésped introduce el número de su confirmación de Booking.com.
+    El huésped introduce el número de su reserva (de cualquier canal, no
+    solo Booking.com).
 
     Flujo:
-      1. Busca la reserva en Beds24 por número de Booking.com
+      1. Busca la reserva en Beds24 por número de reserva, recorriendo
+         todas las propiedades configuradas (BEDS24_PROPERTY_IDS)
          → obtiene habitación, nombre del huésped, fechas
-      2. Verifica en Gmail (vía Make/Render) si se recibió el parte
+      2. Verifica vía la API de registroparteviajeros.com (polling directo,
+         sin Gmail) si se recibió el parte
       3. Responde con:
          - parte_submitted: false  →  rpv_link  (enlace a registroparteviajeros.com)
          - parte_submitted: true   →  pin        (código de puerta de Render env vars)
@@ -73,7 +76,7 @@ def check_in_status():
     # Hora local española (CET/CEST) para comparar con horarios del hostal
     MADRID_TZ     = ZoneInfo('Europe/Madrid')
     HORA_CHECKIN  = dtime(15, 0)   # Check-in a las 15:00
-    HORA_CHECKOUT = dtime(11, 0)   # Check-out hasta las 11:00
+    HORA_CHECKOUT = dtime(12, 0)   # Check-out hasta las 12:00
 
     ahora_madrid = datetime.now(MADRID_TZ)
     hoy          = ahora_madrid.date()
@@ -91,7 +94,7 @@ def check_in_status():
         "book_id": booking.get("id"),
     }
 
-    # ── 1. Estancia finalizada (después de las 11:00 del día de salida) ──
+    # ── 1. Estancia finalizada (después de las 12:00 del día de salida) ──
     if hoy > departure_date or (hoy == departure_date and hora_local >= HORA_CHECKOUT):
         return jsonify({**base,
             "estado": "expired", "parte_submitted": False,
@@ -170,7 +173,7 @@ def diagnostico_checkin():
 
     MADRID_TZ     = ZoneInfo('Europe/Madrid')
     HORA_CHECKIN  = dtime(15, 0)
-    HORA_CHECKOUT = dtime(11, 0)
+    HORA_CHECKOUT = dtime(12, 0)
 
     ahora_madrid = datetime.now(MADRID_TZ)
     hoy          = ahora_madrid.date()
