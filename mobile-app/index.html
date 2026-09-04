@@ -19,7 +19,7 @@
   --bk:#d17fae;--bk2:#e0a0c4;--acc:#e0629e;--yel:#d9b8f5;
   --avail:#4caf7d;--avail-bg:#d9f2e3;
   --blocked:#d1655c;--blocked-bg:#fbe0dd;
-  --booked:#c94f8f;--booked-bg:#f7d9ec;
+  --booked:#c94f8f;--booked-bg:#f7d9ec;--booked-bg-alt:#eebbdb;
   --muted:#8a7690;--border:#f0dceb;--ink:#4a2c40;
   --cell:62px;--radius:16px;
 }
@@ -189,6 +189,7 @@ html,body{
 .day-cell:active{opacity:.65}
 .day-cell.av{background:var(--avail-bg)}
 .day-cell.bk{background:var(--booked-bg)}
+.day-cell.bk.alt{background:var(--booked-bg-alt)}
 .day-cell.bl{background:var(--blocked-bg)}
 /* Icono de estado (✔ o —) */
 .dc-icon{font-size:20px;font-weight:700;line-height:1}
@@ -909,6 +910,12 @@ function renderCalendar() {
     tr.appendChild(lbl);
 
     // Celdas de días
+    // Alterna el tono de fondo cada vez que cambia el id de reserva dentro
+    // de esta fila, para que dos reservas contiguas (checkout de una =
+    // check-in de la siguiente, sin hueco entre medias) se distingan a
+    // simple vista aunque compartan la misma habitación y estén pegadas.
+    let prevBkId = null;
+    let altShade = false;
     dates.forEach(({ds}) => {
       const bkRaw = roomBookedOn(room.id, ds);
       const isBlock = isBlockBooking(bkRaw);
@@ -917,7 +924,15 @@ function renderCalendar() {
       const bl = isBlock || numAvail === 0;
 
       const td = document.createElement("td");
-      td.className = "day-cell" + (bk ? " bk" : bl ? " bl" : " av");
+      let cls = "day-cell" + (bk ? " bk" : bl ? " bl" : " av");
+      if (bk) {
+        if (bk.id !== prevBkId) altShade = !altShade;
+        prevBkId = bk.id;
+        if (altShade) cls += " alt";
+      } else {
+        prevBkId = null;
+      }
+      td.className = cls;
 
       if (bk) {
         const first = (bk.guestName || "Hués.").split(" ")[0].substring(0, 7);
