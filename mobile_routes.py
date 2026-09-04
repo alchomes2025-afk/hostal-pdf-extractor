@@ -2061,6 +2061,53 @@ def debug_bookings():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@mobile_bp.route("/debug-booking-lookup", methods=["GET"])
+def debug_booking_lookup():
+    """
+    Diagnóstico puntual: consulta Beds24 directamente por id de reserva, o por
+    habitación + rango de fechas amplio, sin pasar por la caché ni el filtrado
+    normal de _load_bookings() (que descarta las canceladas). Pensado para
+    investigar reservas que se ven en el panel de Beds24 pero no en
+    /mobile/all-data.
+
+    Uso:
+      GET /mobile/debug-booking-lookup?pin=1234&id=90942880
+      GET /mobile/debug-booking-lookup?pin=1234&roomId=702399&arrivalFrom=2026-08-25&arrivalTo=2026-09-10
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    try:
+        token = get_access_token()
+        booking_id = request.args.get("id")
+        room_id = request.args.get("roomId")
+        arrival_from = request.args.get("arrivalFrom")
+        arrival_to = request.args.get("arrivalTo")
+
+        params = {"includePersonalInfo": "true", "limit": 500}
+        if booking_id:
+            params["id"] = booking_id
+        else:
+            params["propertyId"] = PROPERTY_ID
+            if room_id:
+                params["roomId"] = int(room_id)
+            if arrival_from:
+                params["arrivalFrom"] = arrival_from
+            if arrival_to:
+                params["arrivalTo"] = arrival_to
+
+        resp = b24_get(token, "/bookings", params=params)
+        raw = resp.json() if resp.ok else {"status": resp.status_code, "text": resp.text[:1000]}
+        return jsonify({
+            "ok": True,
+            "params_enviados": params,
+            "http_status": resp.status_code,
+            "raw": raw,
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({"ok": False, "error": str(e), "trace": traceback.format_exc()}), 500
+
+
 @mobile_bp.route("/test-sync", methods=["GET"])
 def test_sync():
     """
