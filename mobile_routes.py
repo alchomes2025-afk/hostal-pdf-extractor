@@ -914,7 +914,8 @@ def _load_bookings():
                 resp = b24_get(token, "/bookings", params={**params_base, "page": page})
                 if not resp.ok:
                     break  # este trozo falló; seguimos con el resto en vez de abortar todo
-                data = resp.json().get("data") or []
+                payload = resp.json()
+                data = payload.get("data") or []
                 for b in data:
                     bid = b.get("id")
                     if bid is not None and bid in seen_ids:
@@ -922,7 +923,11 @@ def _load_bookings():
                     if bid is not None:
                         seen_ids.add(bid)
                     all_raw.append(b)
-                if len(data) < 500:
+                # Beds24 pagina en bloques de ~100 aunque se pida limit=500 (no
+                # documentado), así que "len(data) < 500" nunca detecta la
+                # página 2 y la pierde en silencio — hay que mirar el campo
+                # real que Beds24 da para esto: pages.nextPageExists.
+                if not (payload.get("pages") or {}).get("nextPageExists"):
                     break
                 page += 1
                 if page > 10:
@@ -2159,7 +2164,8 @@ def test_sync():
                     if not resp.ok:
                         beds24_error = f"HTTP {resp.status_code} (property {property_id}): {resp.text[:300]}"
                         break
-                    data = resp.json().get("data") or []
+                    payload = resp.json()
+                    data = payload.get("data") or []
                     for b in data:
                         bid = b.get("id")
                         if bid is not None and bid in seen_ids:
@@ -2167,7 +2173,10 @@ def test_sync():
                         if bid is not None:
                             seen_ids.add(bid)
                         all_raw.append(b)
-                    if len(data) < 500:
+                    # Mismo fix que en _load_bookings(): Beds24 pagina en
+                    # bloques de ~100 pese a pedir limit=500, así que hay que
+                    # mirar pages.nextPageExists en vez de len(data) < 500.
+                    if not (payload.get("pages") or {}).get("nextPageExists"):
                         break
                     page += 1
                     if page > 10:
