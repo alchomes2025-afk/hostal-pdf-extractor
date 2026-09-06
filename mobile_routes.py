@@ -2087,8 +2087,11 @@ def debug_booking_lookup():
         room_id = request.args.get("roomId")
         arrival_from = request.args.get("arrivalFrom")
         arrival_to = request.args.get("arrivalTo")
+        page = request.args.get("page")
 
         params = {"includePersonalInfo": "true", "limit": 500}
+        if page:
+            params["page"] = int(page)
         if booking_id:
             params["id"] = booking_id
         else:
