@@ -831,7 +831,9 @@ _token_cache = {"token": None, "expires_at": 0}
 _state = {
     "loaded":    False,
     "bookings":  [],    # Todos los bookings futuros de la propiedad
-    "overrides": {},    # {room_id_str: {date_str: {price1?, numAvail?}}}
+    "overrides": {},    # {room_id_str: {date_str: {price1?, numAvail?}}} — manuales, Firestore
+    "live_prices":  {}, # {room_id_str: {date_str: price1}} — en vivo de Beds24
+    "live_blocked": {}, # {room_id_str: {date_str: True}} — numAvail==0 en vivo, sin reserva
     "loaded_at": None,
     "checked_at": None,
 }
@@ -937,9 +939,84 @@ def _load_bookings():
 
     _state["bookings"]   = _parse_bookings_list(all_raw)
     _state["overrides"]  = _load_overrides_from_firestore()  # precios editados manualmente, guardados por nosotros
+    _state["live_prices"], _state["live_blocked"] = _load_live_calendar(token)
     _state["loaded_at"]  = datetime.utcnow().isoformat()
     _state["checked_at"] = datetime.utcnow().isoformat()
     _state["loaded"]     = True
+
+
+def _load_live_calendar(token=None):
+    """
+    Lee precio (price1) y disponibilidad (numAvail) EN VIVO de Beds24 vía
+    GET /inventory/rooms/calendar para las 6 habitaciones (hostal + Casa
+    Primavera).
+
+    Clave del fix: sin los parámetros includePrices=true e includeNumAvail=true
+    Beds24 devuelve el calendario VACÍO por defecto — no es un problema de
+    scope del token (el token ya tenía read:inventory) ni de esta cuenta en
+    particular, simplemente hay que pedirlo explícitamente (no documentado
+    claramente, confirmado sep 2026 comparando contra la captura real del
+    panel de Beds24).
+
+    Sustituye a BASE_PRICES como fuente de precio "base" (BASE_PRICES queda
+    solo como fallback si esta llamada falla para alguna habitación) y añade
+    detección de bloqueos de calendario que NO son una reserva (numAvail=0
+    sin ninguna reserva asociada) — antes invisibles para la app porque
+    _load_bookings() solo puede ver reservas reales, nunca bloqueos puestos
+    directamente en el calendario de Beds24.
+
+    Devuelve (prices, blocked):
+      prices:  {room_id_str: {date: price1}}
+      blocked: {room_id_str: {date: True}}  — solo fechas con numAvail == 0
+    """
+    if token is None:
+        token = get_access_token()
+    today = date.today()
+    window_from = today.strftime("%Y-%m-%d")
+    window_to = (today + timedelta(days=365)).strftime("%Y-%m-%d")
+
+    prices = {}
+    blocked = {}
+    for room in ROOMS:
+        room_id = room["id"]
+        rid_str = str(room_id)
+        try:
+            resp = b24_get(token, "/inventory/rooms/calendar", params={
+                "roomId":          room_id,
+                "startDate":       window_from,
+                "endDate":         window_to,
+                "includePrices":   "true",
+                "includeNumAvail": "true",
+            })
+            if not resp.ok:
+                print(f"[live-calendar] GET calendario habitación {room_id} falló: {resp.status_code} {resp.text[:200]}")
+                continue
+            data = resp.json().get("data") or []
+            for entry in data:
+                cal = entry.get("calendar") if isinstance(entry, dict) else None
+                day_list = cal if cal is not None else [entry]
+                for day in day_list:
+                    if not isinstance(day, dict):
+                        continue
+                    d_from = day.get("from") or day.get("date")
+                    d_to = day.get("to") or d_from
+                    if not d_from:
+                        continue
+                    price1 = day.get("price1")
+                    num_avail = day.get("numAvail")
+                    d = datetime.strptime(d_from, "%Y-%m-%d").date()
+                    d_end = datetime.strptime(d_to, "%Y-%m-%d").date()
+                    while d <= d_end:
+                        ds = d.strftime("%Y-%m-%d")
+                        if price1 is not None:
+                            prices.setdefault(rid_str, {})[ds] = price1
+                        if num_avail == 0:
+                            blocked.setdefault(rid_str, {})[ds] = True
+                        d += timedelta(days=1)
+        except Exception as e:
+            print(f"[live-calendar] error habitación {room_id}: {e}")
+            continue
+    return prices, blocked
 
 
 def _load_overrides(token=None):
@@ -1265,7 +1342,8 @@ def all_data():
       rooms:     [{id, name}],
       bookings:  [{roomId, arrival, departure, guestName, phone, email}],
       overrides: {room_id_str: {date_str: {price1?, numAvail?}}},
-      prices:    {room_id_str: {date_str: precio_base}},  ← BASE_PRICES
+      prices:    {room_id_str: {date_str: precio_base}},  ← precio EN VIVO de Beds24
+                 (con BASE_PRICES como fallback si la llamada en vivo falló)
       loaded_at, checked_at
     }
     El frontend combina prices + overrides para mostrar el precio correcto.
@@ -1276,14 +1354,36 @@ def all_data():
     if not _ensure_loaded():
         return jsonify({"ok": False, "error": "No se pudo cargar datos de Beds24", "detalle": _last_load_error}), 500
 
-    # Convertir BASE_PRICES (claves int) a str para JSON
-    prices_str = {str(rid): prices for rid, prices in BASE_PRICES.items()}
+    # Precio base: BASE_PRICES (foto fija, fallback) + precio en vivo de Beds24
+    # encima (gana el vivo allí donde exista dato).
+    live_prices = _state.get("live_prices") or {}
+    prices_str = {}
+    for rid, base_prices in BASE_PRICES.items():
+        rid_str = str(rid)
+        merged = dict(base_prices)
+        merged.update(live_prices.get(rid_str, {}))
+        prices_str[rid_str] = merged
+    for rid_str, day_prices in live_prices.items():
+        if rid_str not in prices_str:
+            prices_str[rid_str] = dict(day_prices)
+
+    # Overrides: los manuales de Firestore tal cual, más numAvail=0 sintetizado
+    # desde el calendario en vivo de Beds24 para fechas bloqueadas directamente
+    # en Beds24 que no tienen ninguna reserva asociada (antes invisibles).
+    live_blocked = _state.get("live_blocked") or {}
+    overrides_out = {rid_str: dict(days) for rid_str, days in (_state["overrides"] or {}).items()}
+    for rid_str, blocked_days in live_blocked.items():
+        room_overrides = overrides_out.setdefault(rid_str, {})
+        for ds in blocked_days:
+            day_entry = dict(room_overrides.get(ds, {}))
+            day_entry.setdefault("numAvail", 0)
+            room_overrides[ds] = day_entry
 
     return jsonify({
         "ok":           True,
         "rooms":        ROOMS,
         "bookings":     _state["bookings"],
-        "overrides":    _state["overrides"],
+        "overrides":    overrides_out,
         "prices":       prices_str,
         "loaded_at":    _state["loaded_at"],
         "checked_at":   _state["checked_at"],
