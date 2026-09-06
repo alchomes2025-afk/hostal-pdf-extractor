@@ -966,9 +966,11 @@ def _load_overrides(token=None):
         rid_str = str(room_id)
         try:
             resp = b24_get(token, "/inventory/rooms/calendar", params={
-                "roomId":    room_id,
-                "startDate": window_from,
-                "endDate":   window_to,
+                "roomId":         room_id,
+                "startDate":      window_from,
+                "endDate":        window_to,
+                "includePrices":  "true",
+                "includeNumAvail": "true",
             })
             if not resp.ok:
                 print(f"[overrides] GET calendar habitación {room_id} falló: {resp.status_code} {resp.text[:200]}")
@@ -1931,6 +1933,8 @@ def debug_overrides():
                 "roomId": int(only_room),
                 "startDate": window_from,
                 "endDate": window_to,
+                "includePrices": "true",
+                "includeNumAvail": "true",
             })
             raw = resp.json() if resp.ok else {"status": resp.status_code, "text": resp.text[:1000]}
             return jsonify({
