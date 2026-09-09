@@ -161,23 +161,6 @@ TEST_BOOKINGS = {
         "pin":           ROOM_CONFIG.get("702398", {}).get("pin", "XXXXXX"),
         "rpv_link":      None,
     },
-    # TEMPORAL — verificación puntual de la cerradura averiada de la habitación 4
-    # (Playa de la Fossá, sep 2026). Borrar esta entrada en cuanto se confirme
-    # que el mensaje se ve bien; el pin se lee de ROOM_CONFIG de verdad, así
-    # que refleja el estado real (ahora mismo None → debería mostrar la
-    # leyenda de "código no funciona").
-    "9999000004": {
-        "estado":        "staying",
-        "parte_submitted": True,
-        "pin_available": True,
-        "guest_name":    "TEST Habitación 4",
-        "room_id":       "702396",
-        "room_name":     "Playa de la Fossá",
-        "arrival":       "2026-07-20",
-        "departure":     "2026-07-22",
-        "pin":           ROOM_CONFIG.get("702396", {}).get("pin", "XXXXXX"),
-        "rpv_link":      None,
-    },
     "9999000011": {
         "estado":        "pre_checkin",
         "parte_submitted": False,
