@@ -112,7 +112,7 @@ def watchdog():
     }
     pins = {
         f"PIN hab. {ROOM_CONFIG[rid]['nombre']}": ROOM_CONFIG[rid]["pin"]
-        for rid in ["702398", "702399", "702396", "702395"]  # Lanuza no tiene PIN
+        for rid in ["702398", "702399", "702395"]  # Lanuza y Fossá (Doble) no tienen PIN a propósito (cerraduras averiadas/inexistentes)
     }
 
     falt_criticas = [k for k, v in env_criticas.items() if not v]

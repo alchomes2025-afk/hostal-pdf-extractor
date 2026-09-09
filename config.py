@@ -71,7 +71,12 @@ ROOM_CONFIG = {
     "702397": {"nombre": "Playa Lanuza",       "pin": None,             "keywords": ["lanuza"]},
     "702398": {"nombre": "Playa del Albir",    "pin": PIN_HABITACION_2, "keywords": ["albir"]},
     "702399": {"nombre": "Cala del Moraig",    "pin": PIN_HABITACION_3, "keywords": ["moraig"]},
-    "702396": {"nombre": "Playa de la Fossá",  "pin": PIN_DOBLE,        "keywords": ["fossa"]},
+    # Cerradura electrónica averiada (sep 2026) — pin a None a propósito, igual
+    # que Playa Lanuza, para que la web de check-in muestre el aviso de "código
+    # no funciona, la habitación estará abierta" en vez de un código inválido.
+    # PIN_DOBLE se deja sin usar aquí (no se borra) por si se repara y hay que
+    # volver a activarlo sin más que restaurar esta línea a "pin": PIN_DOBLE.
+    "702396": {"nombre": "Playa de la Fossá",  "pin": None,             "keywords": ["fossa"]},
     "702395": {"nombre": "Cala Coveta Fumá",   "pin": PIN_DELUXE,       "keywords": ["coveta", "fuma"]},
     # La Casa de la Primavera — Gran Alacant (propiedad Beds24 349341).
     # "pin" aquí es el código del cajetín de llaves (no una cerradura electrónica).
