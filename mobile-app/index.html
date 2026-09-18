@@ -1877,10 +1877,10 @@ function renderFinance(d) {
     const esPrimavera = d.propertyId === "349341";
     const costesFijosLabel = esPrimavera
       ? "Costes fijos (comunidad, IBI, seguro, suministros…)"
-      : "Costes fijos (suministros, seguro de negocio, software…)";
+      : "Costes fijos (IBI, suministros, seguro de negocio, software…)";
     const notaFuente = esPrimavera
       ? `Costes fijos y limpieza son estimaciones (ver chat "Estimación de costes fijos diarios") — ajustar en el backend si cambian los recibos reales.`
-      : `Costes fijos y limpieza son estimaciones (sin alquiler/IBI ni seguro de local, aún por definir) — ajustar en el backend si cambian los recibos reales.`;
+      : `Costes fijos y limpieza son estimaciones (sin alquiler, aún por definir) — ajustar en el backend si cambian los recibos reales.`;
     html += `<div class="fin-channels-title">Rentabilidad estimada</div>
       <table class="fin-table">
         <tbody>

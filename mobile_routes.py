@@ -1391,9 +1391,9 @@ PCT_COMISION_GESTION = 0.20
 
 # Rentabilidad estimada del Hostal (pedido directamente por Adrián en esta
 # sesión, 18/09/2026 — sin recibos reales, son estimaciones a ajustar).
-# Alquiler/IBI/seguro de hogar quedan FUERA a petición suya (de momento no
-# se sabe si el local es alquilado o en propiedad).
-HOSTAL_COSTES_FIJOS_ANUALES = 4800.0  # suministros (luz+agua+internet, sin gas) + seguro de negocio + software, prop.
+# El alquiler queda FUERA de momento (Adrián no ha confirmado si el local es
+# alquilado o en propiedad); el IBI sí se incluye (Adrián confirmó incluirlo).
+HOSTAL_COSTES_FIJOS_ANUALES = 5700.0  # IBI (~900€, estimación) + suministros (luz+agua+internet, sin gas) + seguro de negocio + software, prop.
 HOSTAL_COSTE_LIMPIEZA_EUR_HORA = 10.0
 # Horas de limpieza/día: Adrián indicó 1-3h/día según ocupación y suciedad,
 # para 5 habitaciones + 2 baños compartidos + mostrador (microondas/cafetera)
