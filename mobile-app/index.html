@@ -1831,9 +1831,16 @@ function renderFinance(d) {
     <div class="fin-summary">
       <div class="fin-card"><div class="fin-label">Reservas</div><div class="fin-value">${r.reservas}</div></div>
       <div class="fin-card"><div class="fin-label">Ingresos brutos</div><div class="fin-value">${fmtEUR(r.ingresos_brutos)}</div></div>
-      <div class="fin-card commission"><div class="fin-label">Comisiones</div><div class="fin-value">${fmtEUR(r.comisiones)}</div></div>
+      <div class="fin-card commission"><div class="fin-label">Comisiones de los portales</div><div class="fin-value">${fmtEUR(r.comisiones)}</div></div>
       <div class="fin-card net"><div class="fin-label">Ingresos netos</div><div class="fin-value">${fmtEUR(r.ingresos_netos)}</div></div>
     </div>`;
+
+  if (d.comision_gestion) {
+    html += `<div class="fin-days-card">
+      <div class="fin-label">Comisión de gestión (${d.comision_gestion.pct}%)</div>
+      <div class="fin-value">${fmtEUR(d.comision_gestion.importe)}</div>
+    </div>`;
+  }
 
   if (d.ocupacion && d.ocupacion.por_habitacion) {
     html += `<div class="fin-channels-title">Ocupación</div>
@@ -1854,6 +1861,22 @@ function renderFinance(d) {
       <div class="fin-label">Días ocupados</div>
       <div class="fin-value">${d.ocupacion.dias_ocupados} / ${d.ocupacion.dias_mes}</div>
     </div>`;
+  }
+
+  if (d.por_tipo_habitacion && d.por_tipo_habitacion.length) {
+    html += `<div class="fin-channels-title">Ingresos por tipo de habitación</div>
+      <table class="fin-table">
+        <thead><tr><th>Tipo</th><th class="num">Bruto</th><th class="num">Neto</th><th class="num">% ingresos</th></tr></thead>
+        <tbody>`;
+    for (const t of d.por_tipo_habitacion) {
+      html += `<tr>
+        <td>${t.nombre}</td>
+        <td class="num">${fmtEUR(t.ingresos_brutos)}</td>
+        <td class="num">${fmtEUR(t.ingresos_netos)}</td>
+        <td class="num">${t.pct_ingresos}%</td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
   }
 
   if (d.rentabilidad) {
@@ -1881,7 +1904,7 @@ function renderFinance(d) {
   } else {
     html += `<div class="fin-channels-title">Por canal</div>
       <table class="fin-table">
-        <thead><tr><th>Canal</th><th class="num">Reservas</th><th class="num">Bruto</th><th class="num">Comisión</th><th class="num">Neto</th></tr></thead>
+        <thead><tr><th>Canal</th><th class="num">Reservas</th><th class="num">Bruto</th><th class="num">Comisión de portal</th><th class="num">Neto</th></tr></thead>
         <tbody>`;
     for (const c of d.por_canal) {
       html += `<tr>
@@ -1898,7 +1921,7 @@ function renderFinance(d) {
   if (d.reservas_detalle && d.reservas_detalle.length) {
     html += `<div class="fin-channels-title">Reservas</div>
       <table class="fin-table">
-        <thead><tr><th>Check-in</th><th class="num">Noches</th><th>Canal</th><th class="num">Bruto</th><th class="num">Neto</th></tr></thead>
+        <thead><tr><th>Check-in</th><th class="num">Noches</th><th>Canal</th><th>Tipo</th><th class="num">Bruto</th><th class="num">Neto</th></tr></thead>
         <tbody>`;
     for (const rd of d.reservas_detalle) {
       const fecha = new Date(rd.fecha_checkin + "T00:00:00").toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit", year: "numeric"});
@@ -1906,6 +1929,7 @@ function renderFinance(d) {
         <td>${fecha}</td>
         <td class="num">${rd.noches}</td>
         <td>${rd.canal}</td>
+        <td>${rd.tipo_habitacion}</td>
         <td class="num">${fmtEUR(rd.bruto)}</td>
         <td class="num">${fmtEUR(rd.neto)}</td>
       </tr>`;
@@ -1913,7 +1937,7 @@ function renderFinance(d) {
     html += `</tbody></table>`;
   }
 
-  html += `<div id="fin-note">Las reservas a caballo de dos meses se reparten por noches. Las comisiones son las que Beds24 tiene registradas — pueden faltar en alguna reserva importada sin ese dato.</div>`;
+  html += `<div id="fin-note">Las reservas a caballo de dos meses se reparten por noches. Las comisiones de los portales son las que Beds24 tiene registradas — pueden faltar en alguna reserva importada sin ese dato.</div>`;
   $("#fin-body").innerHTML = html;
 }
 

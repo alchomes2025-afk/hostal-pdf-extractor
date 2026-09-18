@@ -1380,8 +1380,21 @@ def mobile_rooms():
 # pasa las cifras reales (recibos de IBI, seguro, comunidad...).
 PRIMAVERA_COSTES_FIJOS_ANUALES = 3100.0  # IBI + seguro + comunidad + suministros + Beds24/RPV prop.
 PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA = 69.0  # limpieza + productos, una vez por reserva (no por noche)
-PRIMAVERA_PCT_COMISION_GESTION = 0.20  # se reparte Adrián / Ione
 PRIMAVERA_PCT_IMPUESTO_SOCIEDADES = 0.25  # IS, Blockademy SL
+
+# Comisión de gestión de Adrián/Ione — 20% de los ingresos brutos, igual en
+# el Hostal que en La Casa de la Primavera (no es un coste específico de
+# ninguna de las dos, por eso no lleva prefijo PRIMAVERA_).
+PCT_COMISION_GESTION = 0.20
+
+# Agrupación de las 5 habitaciones del hostal en los 3 "tipos" que se
+# muestran en Finanzas (ocupación e ingresos): Deluxe y Doble tienen nombre
+# propio, las otras tres son habitaciones "individuales" equivalentes entre sí.
+HOSTAL_GRUPOS_HABITACION = [
+    {"key": "deluxe", "nombre": "Deluxe", "room_ids": ["702395"]},
+    {"key": "doble", "nombre": "Doble", "room_ids": ["702396"]},
+    {"key": "individuales", "nombre": "Individuales (Hab. 1, 2 y 3)", "room_ids": ["702397", "702398", "702399"]},
+]
 
 
 FINANCE_CHANNEL_LABELS = {
@@ -1408,6 +1421,20 @@ def _finance_channel_label(b):
     if not channel:
         return "Desconocido"
     return FINANCE_CHANNEL_LABELS.get(channel, channel.capitalize())
+
+
+def _finance_tipo_habitacion(property_id, room_id):
+    """Nombre del 'tipo' de habitación de una reserva, para el listado de
+    Finanzas: en el hostal, el grupo (Deluxe/Doble/Individual) de
+    HOSTAL_GRUPOS_HABITACION; en La Casa de la Primavera, al ser una sola
+    unidad, siempre el mismo nombre."""
+    if property_id == PROPERTY_ID_CASA_PRIMAVERA:
+        return "Casa Primavera"
+    room_id = str(room_id or "")
+    for g in HOSTAL_GRUPOS_HABITACION:
+        if room_id in g["room_ids"]:
+            return g["nombre"]
+    return "Desconocido"
 
 
 def _finance_es_bloqueo(b):
@@ -1542,6 +1569,7 @@ def mobile_finance():
     resumen = {"reservas": 0, "ingresos_brutos": 0.0, "comisiones": 0.0, "ingresos_netos": 0.0}
     por_canal = {}
     noches_por_habitacion = {}  # room_id (str) -> noches ocupadas dentro del mes
+    ingresos_por_habitacion = {}  # room_id (str) -> {ingresos_brutos, ingresos_netos}
     reservas_detalle = []
 
     for b in raw:
@@ -1580,12 +1608,17 @@ def mobile_finance():
             acc["comisiones"] += comision_prop
             acc["ingresos_netos"] += neto_prop
 
+        h = ingresos_por_habitacion.setdefault(room_id, {"ingresos_brutos": 0.0, "ingresos_netos": 0.0})
+        h["ingresos_brutos"] += precio_prop
+        h["ingresos_netos"] += neto_prop
+
         reservas_detalle.append({
-            "fecha_checkin": arrival.isoformat(),
-            "noches":        nights_in_month,
-            "canal":         canal,
-            "bruto":         round(precio_prop, 2),
-            "neto":          round(neto_prop, 2),
+            "fecha_checkin":    arrival.isoformat(),
+            "noches":           nights_in_month,
+            "canal":            canal,
+            "tipo_habitacion":  _finance_tipo_habitacion(property_id, room_id),
+            "bruto":            round(precio_prop, 2),
+            "neto":             round(neto_prop, 2),
         })
 
     for k in ("ingresos_brutos", "comisiones", "ingresos_netos"):
@@ -1600,16 +1633,14 @@ def mobile_finance():
 
     dias_mes = (month_end_exclusive - month_start).days
     ocupacion = None
+    por_tipo_habitacion = None
+    comision_gestion_hostal = None
     if property_id == PROPERTY_ID:
-        grupos = [
-            {"key": "deluxe", "nombre": "Deluxe", "room_ids": ["702395"]},
-            {"key": "doble", "nombre": "Doble", "room_ids": ["702396"]},
-            {"key": "individuales", "nombre": "Individuales (Hab. 1, 2 y 3)", "room_ids": ["702397", "702398", "702399"]},
-        ]
         por_habitacion = []
+        por_tipo_habitacion = []
         noches_totales = 0
         habitaciones_totales = 0
-        for g in grupos:
+        for g in HOSTAL_GRUPOS_HABITACION:
             noches_grupo = sum(noches_por_habitacion.get(rid, 0) for rid in g["room_ids"])
             disponibles_grupo = len(g["room_ids"]) * dias_mes
             noches_totales += noches_grupo
@@ -1619,10 +1650,23 @@ def mobile_finance():
                 "nombre": g["nombre"],
                 "pct":    round(100 * noches_grupo / disponibles_grupo, 1) if disponibles_grupo else 0.0,
             })
+            brutos_grupo = sum(ingresos_por_habitacion.get(rid, {}).get("ingresos_brutos", 0.0) for rid in g["room_ids"])
+            netos_grupo = sum(ingresos_por_habitacion.get(rid, {}).get("ingresos_netos", 0.0) for rid in g["room_ids"])
+            por_tipo_habitacion.append({
+                "key":            g["key"],
+                "nombre":         g["nombre"],
+                "ingresos_brutos": round(brutos_grupo, 2),
+                "ingresos_netos":  round(netos_grupo, 2),
+                "pct_ingresos":    round(100 * brutos_grupo / resumen["ingresos_brutos"], 1) if resumen["ingresos_brutos"] else 0.0,
+            })
         disponibles_total = habitaciones_totales * dias_mes
         ocupacion = {
             "total_pct":     round(100 * noches_totales / disponibles_total, 1) if disponibles_total else 0.0,
             "por_habitacion": por_habitacion,
+        }
+        comision_gestion_hostal = {
+            "pct":     round(PCT_COMISION_GESTION * 100),
+            "importe": round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2),
         }
     elif property_id == PROPERTY_ID_CASA_PRIMAVERA:
         ocupacion = {
@@ -1632,7 +1676,7 @@ def mobile_finance():
 
     rentabilidad = None
     if property_id == PROPERTY_ID_CASA_PRIMAVERA:
-        comision_gestion = round(resumen["ingresos_brutos"] * PRIMAVERA_PCT_COMISION_GESTION, 2)
+        comision_gestion = round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2)
         costes_fijos = round(PRIMAVERA_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
         costes_limpieza = round(PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA * resumen["reservas"], 2)
         beneficio_antes_impuestos = round(
@@ -1657,6 +1701,8 @@ def mobile_finance():
         "por_canal":  por_canal_list,
         "reservas_detalle": reservas_detalle,
         "ocupacion":  ocupacion,
+        "por_tipo_habitacion": por_tipo_habitacion,
+        "comision_gestion": comision_gestion_hostal,
         "rentabilidad": rentabilidad,
         "completo":   chunks_fallidos == 0,
         "aviso":      (
