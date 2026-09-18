@@ -1741,6 +1741,7 @@ const today0 = new Date();
 let FIN_YEAR = today0.getFullYear();
 let FIN_MONTH = today0.getMonth() + 1; // 1-12
 let FIN_LOADED = false;
+let FIN_REQUEST_ID = 0;
 
 function showTab(tab) {
   const isCal = tab === "calendar";
@@ -1770,18 +1771,27 @@ function fmtEUR(n) {
 }
 
 async function loadFinance() {
+  // Si el usuario cambia de mes/propiedad varias veces seguido, puede haber
+  // varias peticiones en vuelo a la vez — sin esto, una respuesta antigua
+  // que tarda más puede llegar la última y pisar el resultado correcto del
+  // mes que se está viendo ahora. Solo se pinta la respuesta de la petición
+  // MÁS RECIENTE; cualquier otra que llegue después de haberse quedado
+  // obsoleta se descarta en silencio.
+  const myRequestId = ++FIN_REQUEST_ID;
   const monthStr = `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
   $("#fin-month-text").textContent = `${MONTHS_LONG[FIN_MONTH - 1]} ${FIN_YEAR}`;
   $("#fin-body").innerHTML = `<div id="fin-loading">Cargando…</div>`;
   try {
     const r = await fetch(`${API}/finance?propertyId=${FIN_PROPERTY}&month=${monthStr}&pin=${PIN}`, {headers: {"x-app-pin": PIN}});
     const d = await r.json();
+    if (myRequestId !== FIN_REQUEST_ID) return; // obsoleta: ya se pidió otro mes/propiedad
     if (!d.ok) {
       $("#fin-body").innerHTML = `<div id="fin-empty">Error: ${d.error || "desconocido"}</div>`;
       return;
     }
     renderFinance(d);
   } catch (e) {
+    if (myRequestId !== FIN_REQUEST_ID) return;
     $("#fin-body").innerHTML = `<div id="fin-empty">Error de conexión. Pulsa ↺ o vuelve a intentarlo.</div>`;
   }
 }
