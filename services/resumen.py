@@ -12,6 +12,21 @@ from services.whatsapp import avisar_error_critico
 logger = logging.getLogger(__name__)
 
 
+ROOM_ID_PRIMAVERA = "720841"
+
+
+def _formatear_estancia(entrada):
+    """(noches, fecha_salida_fmt) a partir de arrival/departure ISO de la
+    reserva. Devuelve (None, valor_crudo) si no se puede calcular, para no
+    romper el resumen por un campo ausente o con formato inesperado."""
+    try:
+        llegada = date.fromisoformat(entrada["arrival"])
+        salida = date.fromisoformat(entrada["departure"])
+        return (salida - llegada).days, salida.strftime("%d/%m/%Y")
+    except Exception:
+        return None, entrada.get("departure") or "?"
+
+
 def generar_mensaje_resumen(hora_str=None):
     """
     Genera el resumen diario para WhatsApp.
@@ -21,6 +36,18 @@ def generar_mensaje_resumen(hora_str=None):
       ya ha rellenado el parte o no.
     - Para cada ENTRADA se indica además si el parte de viajero ya se ha
       recibido (cruzando con los emails procesados) o si sigue pendiente.
+    - Para las entradas de La Casa de la Primavera se añade además cuántas
+      noches dura la reserva y la fecha de salida (en el hostal esto no
+      aporta tanto porque el huésped suele ver la duración a simple vista;
+      en Primavera, al ser una vivienda completa reservada con más antelación
+      y menos rotación visual, conviene dejarlo explícito).
+
+    Devuelve (mensaje, primavera_book_ids_hoy): el segundo valor es la lista
+    de book_id de Beds24 de las entradas de hoy en La Casa de la Primavera,
+    para que el llamador las marque como "ya anunciadas" en
+    services/primavera_avisos tras confirmar el envío — así el chequeo de
+    última hora (ver services/primavera_avisos.py) no vuelve a avisar de
+    ellas.
     """
     hoy = date.today()
     hoy_iso = hoy.isoformat()
@@ -52,7 +79,12 @@ def generar_mensaje_resumen(hora_str=None):
         for e in entradas_beds24:
             parte_ok = (e["room_id"], hoy_iso) in partes_recibidos
             estado = "📄 parte recibido" if parte_ok else "⚠️ parte PENDIENTE"
-            lineas.append(f"• {e['nombre_habitacion']} ({estado})")
+            if e["room_id"] == ROOM_ID_PRIMAVERA:
+                noches, salida_fmt = _formatear_estancia(e)
+                estancia = f"{noches} noche{'s' if noches != 1 else ''}, sale {salida_fmt}" if noches is not None else f"sale {salida_fmt}"
+                lineas.append(f"• {e['nombre_habitacion']} ({estado}) — {estancia}")
+            else:
+                lineas.append(f"• {e['nombre_habitacion']} ({estado})")
     else:
         lineas.append("• (ninguna)")
 
@@ -63,4 +95,5 @@ def generar_mensaje_resumen(hora_str=None):
     else:
         lineas.append("• (ninguna)")
 
-    return "\n".join(lineas)
+    primavera_book_ids_hoy = [e["book_id"] for e in entradas_beds24 if e["room_id"] == ROOM_ID_PRIMAVERA]
+    return "\n".join(lineas), primavera_book_ids_hoy

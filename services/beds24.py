@@ -322,6 +322,8 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
                 "nombre_habitacion": ROOM_ID_DISPLAY_NAME.get(room_id, ROOM_CONFIG.get(room_id, {}).get("nombre", f"Room {room_id}")),
                 "huesped": _extraer_nombre_huesped_beds24(b),
                 "book_id": b.get("id"),
+                "arrival": b.get("arrival"),
+                "departure": b.get("departure"),
             })
 
         if descartadas_por_fecha:

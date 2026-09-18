@@ -18,6 +18,7 @@ from config import (
 )
 from services.beds24 import get_beds24_access_token
 from services.whatsapp import alerta
+from services.primavera_avisos import comprobar_y_avisar_checkins_ultima_hora
 
 logger = logging.getLogger(__name__)
 watchdog_bp = Blueprint("watchdog", __name__)
@@ -261,6 +262,16 @@ def watchdog():
             problemas.append(("critico",
                 f"Firestore no responde: {e}",
                 "Verificar credenciales de servicio y permisos del proyecto en Firebase Console"))
+
+    # ── 9. Check-ins de última hora en La Casa de la Primavera ─────────────
+    # No es un chequeo de salud del sistema (no entra en `problemas`/dedupe
+    # de watchdog): es un aviso de negocio aparte, con su propio dedupe por
+    # book_id en Firestore. Se aprovecha esta ejecución cada 15 min para
+    # detectar rápido una reserva que llega después del resumen de la mañana.
+    try:
+        comprobar_y_avisar_checkins_ultima_hora()
+    except Exception as e:
+        logger.error(f"[watchdog] Error comprobando check-ins de última hora en Casa Primavera: {e}")
 
     # ── Resumen y alerta WhatsApp (con deduplicación) ─────────────────────
     n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")
