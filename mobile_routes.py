@@ -1376,24 +1376,48 @@ def _fetch_bookings_finance(property_id, arrival_from, arrival_to):
     Igual que _load_bookings(): trocea en ventanas de 60 días y pagina cada
     trozo mirando pages.nextPageExists — Beds24 pierde resultados en
     silencio si no se hace así (ver commit c6bfabb, mismo bug real).
+
+    Beds24 tiene un límite de peticiones "por créditos" en una ventana de 5
+    minutos (no documentado con un número exacto) — con rangos amplios esto
+    puede generar bastantes llamadas seguidas, y un fallo puntual (429 u
+    otro) se traducía antes en perder ese trozo EN SILENCIO, dando un
+    informe incompleto sin avisar (confirmado en producción: la misma
+    consulta a veces devolvía las reservas reales y otras veces 0). Ahora
+    cada trozo reintenta hasta 2 veces con una pequeña espera, y si aun así
+    falla, se registra en `chunks_fallidos` en vez de fingir que no había
+    nada — el endpoint usa esto para avisar de que el informe puede estar
+    incompleto en lugar de dar un "0 reservas" con apariencia de dato real.
+
+    Devuelve (bookings, chunks_fallidos).
     """
     token = get_access_token()
     all_raw = []
     seen_ids = set()
+    chunks_fallidos = 0
     chunk_start = arrival_from
     while chunk_start <= arrival_to:
         chunk_end = min(chunk_start + timedelta(days=60), arrival_to)
         page = 1
         while True:
-            resp = b24_get(token, "/bookings", params={
-                "propertyId":          property_id,
-                "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
-                "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
-                "includePersonalInfo": "true",
-                "limit":               500,
-                "page":                page,
-            })
+            resp = None
+            for intento in range(3):
+                resp = b24_get(token, "/bookings", params={
+                    "propertyId":          property_id,
+                    "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
+                    "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
+                    "includePersonalInfo": "true",
+                    "limit":               500,
+                    "page":                page,
+                })
+                if resp.ok:
+                    break
+                time.sleep(1.5 * (intento + 1))
             if not resp.ok:
+                print(
+                    f"[finance] Trozo {chunk_start}→{chunk_end} (página {page}) falló tras 3 "
+                    f"intentos: {resp.status_code} {resp.text[:200]}"
+                )
+                chunks_fallidos += 1
                 break
             payload = resp.json()
             data = payload.get("data") or []
@@ -1410,7 +1434,7 @@ def _fetch_bookings_finance(property_id, arrival_from, arrival_to):
             if page > 10:
                 break
         chunk_start = chunk_end + timedelta(days=1)
-    return all_raw
+    return all_raw, chunks_fallidos
 
 
 @mobile_bp.route("/finance", methods=["GET"])
@@ -1447,7 +1471,7 @@ def mobile_finance():
     arrival_to = month_end_exclusive - timedelta(days=1)
 
     try:
-        raw = _fetch_bookings_finance(property_id, arrival_from, arrival_to)
+        raw, chunks_fallidos = _fetch_bookings_finance(property_id, arrival_from, arrival_to)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Error consultando Beds24: {e}"}), 500
 
@@ -1501,6 +1525,12 @@ def mobile_finance():
         "mes":        month_str,
         "resumen":    resumen,
         "por_canal":  por_canal_list,
+        "completo":   chunks_fallidos == 0,
+        "aviso":      (
+            f"Beds24 no respondió para {chunks_fallidos} tramo(s) de fechas tras varios "
+            f"intentos — estos números pueden estar incompletos. Vuelve a intentarlo en "
+            f"un momento."
+        ) if chunks_fallidos else None,
     })
 
 

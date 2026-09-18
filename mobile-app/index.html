@@ -181,6 +181,15 @@ table.fin-table th{
 table.fin-table td{padding:8px 6px;border-bottom:1px solid var(--border)}
 table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 #fin-empty,#fin-loading{text-align:center;color:var(--muted);padding:30px 10px;font-size:13px}
+#fin-warning{
+  background:var(--blocked-bg);color:var(--blocked);border:1px solid var(--blocked);
+  border-radius:10px;padding:10px 12px;font-size:12px;font-weight:600;
+  margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+}
+#fin-warning button{
+  background:var(--blocked);color:#fff;border:none;border-radius:8px;
+  padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;
+}
 #fin-note{font-size:10px;color:var(--muted);margin-top:16px;line-height:1.5;text-align:center}
 
 /* Calendar table */
@@ -1798,7 +1807,11 @@ async function loadFinance() {
 
 function renderFinance(d) {
   const r = d.resumen;
-  let html = `
+  let html = "";
+  if (d.completo === false) {
+    html += `<div id="fin-warning">⚠️ ${d.aviso || "Datos incompletos, vuelve a intentarlo."} <button type="button" onclick="loadFinance()">Reintentar</button></div>`;
+  }
+  html += `
     <div class="fin-summary">
       <div class="fin-card"><div class="fin-label">Reservas</div><div class="fin-value">${r.reservas}</div></div>
       <div class="fin-card"><div class="fin-label">Ingresos brutos</div><div class="fin-value">${fmtEUR(r.ingresos_brutos)}</div></div>
