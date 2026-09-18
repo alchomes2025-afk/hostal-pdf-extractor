@@ -713,7 +713,7 @@ const MONTHS_LONG = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","A
 const MONTHS_SHORT = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
 
 // ── STATE ──────────────────────────────────────────────
-let PIN = "", ROOMS = [];
+let PIN = "", ROOMS = [], IS_ADMIN = false;
 
 // ── IDENTIDAD / DISPOSITIVO ─────────────────────────────
 // Versionado: al subir de v1 a v2 se vuelve a preguntar el nombre a todos,
@@ -811,6 +811,11 @@ async function doLogin() {
     });
     const d = await r.json();
     if (d.ok) {
+      IS_ADMIN = !!d.admin;
+      if (IS_ADMIN) {
+        $("#fin-property-bar").style.display = "flex";
+        $("#tab-btn-fin").textContent = "💶 Finanzas";
+      }
       $("#login-screen").style.display = "none";
       if (!USER_NAME) {
         showIdentityScreen();
@@ -1885,6 +1890,24 @@ function renderFinance(d) {
         <td class="num">${fmtEUR(c.ingresos_brutos)}</td>
         <td class="num">${fmtEUR(c.comisiones)}</td>
         <td class="num">${fmtEUR(c.ingresos_netos)}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
+  if (d.reservas_detalle && d.reservas_detalle.length) {
+    html += `<div class="fin-channels-title">Reservas</div>
+      <table class="fin-table">
+        <thead><tr><th>Check-in</th><th class="num">Noches</th><th>Canal</th><th class="num">Bruto</th><th class="num">Neto</th></tr></thead>
+        <tbody>`;
+    for (const rd of d.reservas_detalle) {
+      const fecha = new Date(rd.fecha_checkin + "T00:00:00").toLocaleDateString("es-ES", {day: "2-digit", month: "2-digit", year: "numeric"});
+      html += `<tr>
+        <td>${fecha}</td>
+        <td class="num">${rd.noches}</td>
+        <td>${rd.canal}</td>
+        <td class="num">${fmtEUR(rd.bruto)}</td>
+        <td class="num">${fmtEUR(rd.neto)}</td>
       </tr>`;
     }
     html += `</tbody></table>`;

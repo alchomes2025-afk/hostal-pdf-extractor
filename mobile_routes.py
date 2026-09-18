@@ -35,6 +35,9 @@ BEDS24_REFRESH_TOKEN = (
     os.environ.get("MOBILE_BEDS24_TOKEN") or os.environ.get("BEDS24_REFRESH_TOKEN")
 )
 MOBILE_APP_PIN = os.environ.get("MOBILE_APP_PIN")
+# PIN alternativo con acceso además a Finanzas del Hostal (property_id=339751),
+# que con el PIN normal queda oculta/bloqueada — ver check_pin()/_es_pin_admin().
+MOBILE_APP_PIN_ADMIN = os.environ.get("MOBILE_APP_PIN_ADMIN")
 PROPERTY_ID = os.environ.get("BEDS24_PROPERTY_ID", "339751")  # ALC Homes San Blas
 PROPERTY_ID_CASA_PRIMAVERA = os.environ.get("BEDS24_PROPERTY_ID_CASA_PRIMAVERA", "349341")
 # Todas las propiedades que gestiona esta app — se recorren en las cargas
@@ -1219,15 +1222,27 @@ def get_access_token():
     raise ultimo_error
 
 
-def check_pin():
-    pin = (
+def _pin_recibido():
+    return (
         request.headers.get("x-app-pin")
         or request.args.get("pin")
         or (request.get_json(silent=True) or {}).get("pin")
     )
+
+
+def check_pin():
+    pin = _pin_recibido()
     if not MOBILE_APP_PIN:
         return False
-    return str(pin) == str(MOBILE_APP_PIN)
+    return str(pin) == str(MOBILE_APP_PIN) or (
+        bool(MOBILE_APP_PIN_ADMIN) and str(pin) == str(MOBILE_APP_PIN_ADMIN)
+    )
+
+
+def _es_pin_admin():
+    if not MOBILE_APP_PIN_ADMIN:
+        return False
+    return str(_pin_recibido()) == str(MOBILE_APP_PIN_ADMIN)
 
 
 def is_valid_email(email):
@@ -1346,7 +1361,7 @@ def get_logs():
 @mobile_bp.route("/login", methods=["POST", "GET"])
 def mobile_login():
     if check_pin():
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "admin": _es_pin_admin()})
     return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
 
@@ -1503,6 +1518,9 @@ def mobile_finance():
     if not property_id or not month_str:
         return jsonify({"ok": False, "error": "Faltan propertyId o month"}), 400
 
+    if property_id == PROPERTY_ID and not _es_pin_admin():
+        return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
+
     try:
         year_s, month_s = month_str.split("-")
         year, month = int(year_s), int(month_s)
@@ -1524,6 +1542,7 @@ def mobile_finance():
     resumen = {"reservas": 0, "ingresos_brutos": 0.0, "comisiones": 0.0, "ingresos_netos": 0.0}
     por_canal = {}
     noches_por_habitacion = {}  # room_id (str) -> noches ocupadas dentro del mes
+    reservas_detalle = []
 
     for b in raw:
         if str(b.get("status", "")).lower() == "cancelled":
@@ -1561,6 +1580,14 @@ def mobile_finance():
             acc["comisiones"] += comision_prop
             acc["ingresos_netos"] += neto_prop
 
+        reservas_detalle.append({
+            "fecha_checkin": arrival.isoformat(),
+            "noches":        nights_in_month,
+            "canal":         canal,
+            "bruto":         round(precio_prop, 2),
+            "neto":          round(neto_prop, 2),
+        })
+
     for k in ("ingresos_brutos", "comisiones", "ingresos_netos"):
         resumen[k] = round(resumen[k], 2)
     por_canal_list = []
@@ -1568,6 +1595,8 @@ def mobile_finance():
         for k in ("ingresos_brutos", "comisiones", "ingresos_netos"):
             c[k] = round(c[k], 2)
         por_canal_list.append({"canal": canal, **c})
+
+    reservas_detalle.sort(key=lambda r: r["fecha_checkin"], reverse=True)
 
     dias_mes = (month_end_exclusive - month_start).days
     ocupacion = None
@@ -1626,6 +1655,7 @@ def mobile_finance():
         "mes":        month_str,
         "resumen":    resumen,
         "por_canal":  por_canal_list,
+        "reservas_detalle": reservas_detalle,
         "ocupacion":  ocupacion,
         "rentabilidad": rentabilidad,
         "completo":   chunks_fallidos == 0,
