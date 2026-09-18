@@ -191,6 +191,16 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
   padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;
 }
 #fin-note{font-size:10px;color:var(--muted);margin-top:16px;line-height:1.5;text-align:center}
+.fin-occ-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px}
+.fin-occ-row:last-child{border-bottom:none}
+.fin-occ-row.total .fin-occ-name{color:var(--ink)}
+.fin-occ-name{font-weight:700;color:var(--muted);width:120px;flex-shrink:0}
+.fin-occ-bar-wrap{flex:1;height:7px;background:var(--border);border-radius:4px;overflow:hidden;margin:0 10px}
+.fin-occ-bar{height:100%;background:var(--avail);border-radius:4px}
+.fin-occ-pct{font-weight:800;font-variant-numeric:tabular-nums;min-width:44px;text-align:right;color:var(--ink)}
+.fin-days-card{background:#fdf1f8;border-radius:var(--radius);padding:12px;border:1px solid var(--border);margin-bottom:16px;display:flex;align-items:baseline;justify-content:space-between}
+.fin-days-card .fin-label{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+.fin-days-card .fin-value{font-size:20px;font-weight:800;color:var(--ink)}
 
 /* Calendar table */
 #cal{border-collapse:collapse;table-layout:fixed}
@@ -1818,6 +1828,27 @@ function renderFinance(d) {
       <div class="fin-card commission"><div class="fin-label">Comisiones</div><div class="fin-value">${fmtEUR(r.comisiones)}</div></div>
       <div class="fin-card net"><div class="fin-label">Ingresos netos</div><div class="fin-value">${fmtEUR(r.ingresos_netos)}</div></div>
     </div>`;
+
+  if (d.ocupacion && d.ocupacion.por_habitacion) {
+    html += `<div class="fin-channels-title">Ocupación</div>
+      <div class="fin-occ-row total">
+        <div class="fin-occ-name">Hostal completo</div>
+        <div class="fin-occ-bar-wrap"><div class="fin-occ-bar" style="width:${d.ocupacion.total_pct}%"></div></div>
+        <div class="fin-occ-pct">${d.ocupacion.total_pct}%</div>
+      </div>`;
+    for (const h of d.ocupacion.por_habitacion) {
+      html += `<div class="fin-occ-row">
+        <div class="fin-occ-name">${h.nombre}</div>
+        <div class="fin-occ-bar-wrap"><div class="fin-occ-bar" style="width:${h.pct}%"></div></div>
+        <div class="fin-occ-pct">${h.pct}%</div>
+      </div>`;
+    }
+  } else if (d.ocupacion && d.ocupacion.dias_ocupados !== undefined) {
+    html += `<div class="fin-days-card">
+      <div class="fin-label">Días ocupados</div>
+      <div class="fin-value">${d.ocupacion.dias_ocupados} / ${d.ocupacion.dias_mes}</div>
+    </div>`;
+  }
 
   if (!d.por_canal.length) {
     html += `<div id="fin-empty">Sin reservas este mes.</div>`;

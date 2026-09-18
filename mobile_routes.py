@@ -1490,6 +1490,7 @@ def mobile_finance():
 
     resumen = {"reservas": 0, "ingresos_brutos": 0.0, "comisiones": 0.0, "ingresos_netos": 0.0}
     por_canal = {}
+    noches_por_habitacion = {}  # room_id (str) -> noches ocupadas dentro del mes
 
     for b in raw:
         if str(b.get("status", "")).lower() == "cancelled":
@@ -1510,6 +1511,9 @@ def mobile_finance():
         nights_in_month = (overlap_end - overlap_start).days
         if nights_in_month <= 0:
             continue  # llegada dentro del rango pedido a Beds24 pero sin solape real con el mes
+
+        room_id = str(b.get("roomId") or "")
+        noches_por_habitacion[room_id] = noches_por_habitacion.get(room_id, 0) + nights_in_month
 
         frac = nights_in_month / total_nights
         precio_prop = float(b.get("price") or 0) * frac
@@ -1532,12 +1536,45 @@ def mobile_finance():
             c[k] = round(c[k], 2)
         por_canal_list.append({"canal": canal, **c})
 
+    dias_mes = (month_end_exclusive - month_start).days
+    ocupacion = None
+    if property_id == PROPERTY_ID:
+        grupos = [
+            {"key": "deluxe", "nombre": "Deluxe", "room_ids": ["702395"]},
+            {"key": "doble", "nombre": "Doble", "room_ids": ["702396"]},
+            {"key": "individuales", "nombre": "Individuales (Hab. 1, 2 y 3)", "room_ids": ["702397", "702398", "702399"]},
+        ]
+        por_habitacion = []
+        noches_totales = 0
+        habitaciones_totales = 0
+        for g in grupos:
+            noches_grupo = sum(noches_por_habitacion.get(rid, 0) for rid in g["room_ids"])
+            disponibles_grupo = len(g["room_ids"]) * dias_mes
+            noches_totales += noches_grupo
+            habitaciones_totales += len(g["room_ids"])
+            por_habitacion.append({
+                "key":    g["key"],
+                "nombre": g["nombre"],
+                "pct":    round(100 * noches_grupo / disponibles_grupo, 1) if disponibles_grupo else 0.0,
+            })
+        disponibles_total = habitaciones_totales * dias_mes
+        ocupacion = {
+            "total_pct":     round(100 * noches_totales / disponibles_total, 1) if disponibles_total else 0.0,
+            "por_habitacion": por_habitacion,
+        }
+    elif property_id == PROPERTY_ID_CASA_PRIMAVERA:
+        ocupacion = {
+            "dias_ocupados": noches_por_habitacion.get("720841", 0),
+            "dias_mes":      dias_mes,
+        }
+
     return jsonify({
         "ok":         True,
         "propertyId": property_id,
         "mes":        month_str,
         "resumen":    resumen,
         "por_canal":  por_canal_list,
+        "ocupacion":  ocupacion,
         "completo":   chunks_fallidos == 0,
         "aviso":      (
             f"Beds24 no respondió para {chunks_fallidos} tramo(s) de fechas tras varios "
