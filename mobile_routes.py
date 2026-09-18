@@ -1397,13 +1397,19 @@ def _finance_channel_label(b):
 
 def _finance_es_bloqueo(b):
     """True si esta 'reserva' es en realidad un bloqueo de calendario sin
-    ingresos reales — ni el que crea la propia app (bloqueo@bloqueo.com) ni
-    los que llegan importados de algún canal como 'BLOCKED by X' cuentan
-    para el informe financiero."""
+    ingresos reales — ni el que crea la propia app (bloqueo@bloqueo.com), ni
+    los que llegan importados de algún canal como 'BLOCKED by X', ni los
+    sincronizados por iCal desde otro calendario (canal 'iCal import N', sin
+    huésped real, siempre a 0€) cuentan para el informe financiero."""
     guest = b.get("guest") or {}
     nombre = f"{guest.get('firstName') or b.get('firstName') or ''} {guest.get('lastName') or b.get('lastName') or ''}".strip().lower()
     email = (guest.get("email") or b.get("email") or "").strip().lower()
-    return email == "bloqueo@bloqueo.com" or nombre.startswith("blocked") or nombre.startswith("fecha bloqueada")
+    if email == "bloqueo@bloqueo.com" or nombre.startswith("blocked") or nombre.startswith("fecha bloqueada"):
+        return True
+    canal = _finance_channel_label(b).strip().lower()
+    if canal.startswith("ical import") and float(b.get("price") or 0) == 0:
+        return True
+    return False
 
 
 def _fetch_bookings_finance(property_id, arrival_from, arrival_to):
