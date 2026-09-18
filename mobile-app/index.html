@@ -1835,13 +1835,6 @@ function renderFinance(d) {
       <div class="fin-card net"><div class="fin-label">Ingresos netos</div><div class="fin-value">${fmtEUR(r.ingresos_netos)}</div></div>
     </div>`;
 
-  if (d.comision_gestion) {
-    html += `<div class="fin-days-card">
-      <div class="fin-label">Comisión de gestión (${d.comision_gestion.pct}%)</div>
-      <div class="fin-value">${fmtEUR(d.comision_gestion.importe)}</div>
-    </div>`;
-  }
-
   if (d.ocupacion && d.ocupacion.por_habitacion) {
     html += `<div class="fin-channels-title">Ocupación</div>
       <div class="fin-occ-row total">
@@ -1881,12 +1874,19 @@ function renderFinance(d) {
 
   if (d.rentabilidad) {
     const r2 = d.rentabilidad;
+    const esPrimavera = d.propertyId === "349341";
+    const costesFijosLabel = esPrimavera
+      ? "Costes fijos (comunidad, IBI, seguro, suministros…)"
+      : "Costes fijos (suministros, seguro de negocio, software…)";
+    const notaFuente = esPrimavera
+      ? `Costes fijos y limpieza son estimaciones (ver chat "Estimación de costes fijos diarios") — ajustar en el backend si cambian los recibos reales.`
+      : `Costes fijos y limpieza son estimaciones (sin alquiler/IBI ni seguro de local, aún por definir) — ajustar en el backend si cambian los recibos reales.`;
     html += `<div class="fin-channels-title">Rentabilidad estimada</div>
       <table class="fin-table">
         <tbody>
           <tr><td>Ingresos netos (tras comisión de portal)</td><td class="num">${fmtEUR(r.ingresos_netos)}</td></tr>
           <tr><td>Comisión de gestión (20%)</td><td class="num">− ${fmtEUR(r2.comision_gestion)}</td></tr>
-          <tr><td>Costes fijos (comunidad, IBI, seguro, suministros…)</td><td class="num">− ${fmtEUR(r2.costes_fijos)}</td></tr>
+          <tr><td>${costesFijosLabel}</td><td class="num">− ${fmtEUR(r2.costes_fijos)}</td></tr>
           <tr><td>Limpieza</td><td class="num">− ${fmtEUR(r2.costes_limpieza)}</td></tr>
           <tr><td>Beneficio antes de impuestos</td><td class="num">${fmtEUR(r2.beneficio_antes_impuestos)}</td></tr>
           <tr><td>Impuesto de sociedades (25%)</td><td class="num">− ${fmtEUR(r2.impuesto_sociedades)}</td></tr>
@@ -1896,7 +1896,7 @@ function renderFinance(d) {
         <div class="fin-card net"><div class="fin-label">Beneficio neto (propietario)</div><div class="fin-value">${fmtEUR(r2.beneficio_neto_propietario)}</div></div>
         <div class="fin-card"><div class="fin-label">Gestión (20%)</div><div class="fin-value">${fmtEUR(r2.comision_gestion)}</div></div>
       </div>
-      <div id="fin-note">Costes fijos y limpieza son estimaciones (ver chat "Estimación de costes fijos diarios") — ajustar en el backend si cambian los recibos reales.</div>`;
+      <div id="fin-note">${notaFuente}</div>`;
   }
 
   if (!d.por_canal.length) {

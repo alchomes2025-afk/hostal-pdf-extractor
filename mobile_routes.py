@@ -1380,12 +1380,27 @@ def mobile_rooms():
 # pasa las cifras reales (recibos de IBI, seguro, comunidad...).
 PRIMAVERA_COSTES_FIJOS_ANUALES = 3100.0  # IBI + seguro + comunidad + suministros + Beds24/RPV prop.
 PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA = 69.0  # limpieza + productos, una vez por reserva (no por noche)
-PRIMAVERA_PCT_IMPUESTO_SOCIEDADES = 0.25  # IS, Blockademy SL
+
+# Impuesto de Sociedades — mismo 25% (Blockademy SL) para las dos propiedades.
+PCT_IMPUESTO_SOCIEDADES = 0.25
 
 # Comisión de gestión de Adrián/Ione — 20% de los ingresos brutos, igual en
 # el Hostal que en La Casa de la Primavera (no es un coste específico de
 # ninguna de las dos, por eso no lleva prefijo PRIMAVERA_).
 PCT_COMISION_GESTION = 0.20
+
+# Rentabilidad estimada del Hostal (pedido directamente por Adrián en esta
+# sesión, 18/09/2026 — sin recibos reales, son estimaciones a ajustar).
+# Alquiler/IBI/seguro de hogar quedan FUERA a petición suya (de momento no
+# se sabe si el local es alquilado o en propiedad).
+HOSTAL_COSTES_FIJOS_ANUALES = 4800.0  # suministros (luz+agua+internet, sin gas) + seguro de negocio + software, prop.
+HOSTAL_COSTE_LIMPIEZA_EUR_HORA = 10.0
+# Horas de limpieza/día: Adrián indicó 1-3h/día según ocupación y suciedad,
+# para 5 habitaciones + 2 baños compartidos + mostrador (microondas/cafetera)
+# + pequeño estar. Se interpola linealmente con la ocupación real del mes:
+# 1h con el hostal vacío, 3h a ocupación completa.
+HOSTAL_LIMPIEZA_HORAS_MIN = 1.0
+HOSTAL_LIMPIEZA_HORAS_MAX = 3.0
 
 # Agrupación de las 5 habitaciones del hostal en los 3 "tipos" que se
 # muestran en Finanzas (ocupación e ingresos): Deluxe y Doble tienen nombre
@@ -1634,7 +1649,7 @@ def mobile_finance():
     dias_mes = (month_end_exclusive - month_start).days
     ocupacion = None
     por_tipo_habitacion = None
-    comision_gestion_hostal = None
+    ocupacion_total_pct = 0.0
     if property_id == PROPERTY_ID:
         por_habitacion = []
         por_tipo_habitacion = []
@@ -1660,13 +1675,10 @@ def mobile_finance():
                 "pct_ingresos":    round(100 * brutos_grupo / resumen["ingresos_brutos"], 1) if resumen["ingresos_brutos"] else 0.0,
             })
         disponibles_total = habitaciones_totales * dias_mes
+        ocupacion_total_pct = round(100 * noches_totales / disponibles_total, 1) if disponibles_total else 0.0
         ocupacion = {
-            "total_pct":     round(100 * noches_totales / disponibles_total, 1) if disponibles_total else 0.0,
+            "total_pct":     ocupacion_total_pct,
             "por_habitacion": por_habitacion,
-        }
-        comision_gestion_hostal = {
-            "pct":     round(PCT_COMISION_GESTION * 100),
-            "importe": round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2),
         }
     elif property_id == PROPERTY_ID_CASA_PRIMAVERA:
         ocupacion = {
@@ -1682,10 +1694,26 @@ def mobile_finance():
         beneficio_antes_impuestos = round(
             resumen["ingresos_netos"] - comision_gestion - costes_fijos - costes_limpieza, 2
         )
-        impuesto = round(max(0.0, beneficio_antes_impuestos) * PRIMAVERA_PCT_IMPUESTO_SOCIEDADES, 2)
+        impuesto = round(max(0.0, beneficio_antes_impuestos) * PCT_IMPUESTO_SOCIEDADES, 2)
         rentabilidad = {
             "comision_gestion":          comision_gestion,
-            "comision_gestion_persona":  round(comision_gestion / 2, 2),
+            "costes_fijos":              costes_fijos,
+            "costes_limpieza":           costes_limpieza,
+            "beneficio_antes_impuestos": beneficio_antes_impuestos,
+            "impuesto_sociedades":       impuesto,
+            "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
+        }
+    elif property_id == PROPERTY_ID:
+        comision_gestion = round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2)
+        costes_fijos = round(HOSTAL_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
+        horas_limpieza_dia = HOSTAL_LIMPIEZA_HORAS_MIN + (HOSTAL_LIMPIEZA_HORAS_MAX - HOSTAL_LIMPIEZA_HORAS_MIN) * (ocupacion_total_pct / 100)
+        costes_limpieza = round(horas_limpieza_dia * HOSTAL_COSTE_LIMPIEZA_EUR_HORA * dias_mes, 2)
+        beneficio_antes_impuestos = round(
+            resumen["ingresos_netos"] - comision_gestion - costes_fijos - costes_limpieza, 2
+        )
+        impuesto = round(max(0.0, beneficio_antes_impuestos) * PCT_IMPUESTO_SOCIEDADES, 2)
+        rentabilidad = {
+            "comision_gestion":          comision_gestion,
             "costes_fijos":              costes_fijos,
             "costes_limpieza":           costes_limpieza,
             "beneficio_antes_impuestos": beneficio_antes_impuestos,
@@ -1702,7 +1730,6 @@ def mobile_finance():
         "reservas_detalle": reservas_detalle,
         "ocupacion":  ocupacion,
         "por_tipo_habitacion": por_tipo_habitacion,
-        "comision_gestion": comision_gestion_hostal,
         "rentabilidad": rentabilidad,
         "completo":   chunks_fallidos == 0,
         "aviso":      (
