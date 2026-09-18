@@ -898,6 +898,7 @@ def _load_bookings():
     CHUNK_DAYS = 60
     all_raw = []
     seen_ids = set()
+    chunks_fallidos = 0
 
     for property_id in PROPERTY_IDS:
         chunk_start = window_from
@@ -913,8 +914,15 @@ def _load_bookings():
 
             page = 1
             while True:
-                resp = b24_get(token, "/bookings", params={**params_base, "page": page})
+                resp = None
+                for intento in range(3):
+                    resp = b24_get(token, "/bookings", params={**params_base, "page": page})
+                    if resp.ok:
+                        break
+                    time.sleep(1.5 * (intento + 1))
                 if not resp.ok:
+                    print(f"[_load_bookings] Trozo {chunk_start}→{chunk_end} propertyId={property_id} (página {page}) falló tras 3 intentos: {resp.status_code} {resp.text[:200]}")
+                    chunks_fallidos += 1
                     break  # este trozo falló; seguimos con el resto en vez de abortar todo
                 payload = resp.json()
                 data = payload.get("data") or []
@@ -942,7 +950,15 @@ def _load_bookings():
     _state["live_prices"], _state["live_blocked"] = _load_live_calendar(token)
     _state["loaded_at"]  = datetime.utcnow().isoformat()
     _state["checked_at"] = datetime.utcnow().isoformat()
-    _state["loaded"]     = True
+    # Si algún trozo falló (p.ej. Beds24 devolvió 429), NO marcamos loaded=True:
+    # así la próxima petición reintenta la carga completa en vez de dejar
+    # cacheado para siempre un resultado parcial/vacío (lo que antes hacía que
+    # el calendario se quedara sin reservas hasta un /reload manual).
+    _state["loaded"] = chunks_fallidos == 0
+    if chunks_fallidos:
+        global _last_load_error
+        _last_load_error = f"{chunks_fallidos} trozo(s) fallaron al consultar Beds24 — datos parciales, se reintentará en la próxima petición"
+        print(f"[_load_bookings] {_last_load_error}")
 
 
 def _load_live_calendar(token=None):
