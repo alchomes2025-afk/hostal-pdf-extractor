@@ -1178,16 +1178,29 @@ def get_access_token():
     now = time.time()
     if _token_cache["token"] and now < _token_cache["expires_at"]:
         return _token_cache["token"]
-    resp = requests.get(
-        f"{BEDS24_API}/authentication/token",
-        headers={"accept": "application/json", "refreshToken": BEDS24_REFRESH_TOKEN},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    _token_cache["token"] = data["token"]
-    _token_cache["expires_at"] = now + data.get("expiresIn", 3600) - 60
-    return _token_cache["token"]
+    # Reintentos: si justo aquí Beds24 devuelve 429 (límite de peticiones por
+    # créditos en 5 min — se ha visto real, sobre todo tras un despliegue con
+    # la caché de token vacía y varias peticiones seguidas), antes esto tiraba
+    # la excepción al momento y rompía TODO lo que dependiera del token, sin
+    # ninguna posibilidad de recuperarse solo.
+    ultimo_error = None
+    for intento in range(3):
+        try:
+            resp = requests.get(
+                f"{BEDS24_API}/authentication/token",
+                headers={"accept": "application/json", "refreshToken": BEDS24_REFRESH_TOKEN},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            _token_cache["token"] = data["token"]
+            _token_cache["expires_at"] = now + data.get("expiresIn", 3600) - 60
+            return _token_cache["token"]
+        except Exception as e:
+            ultimo_error = e
+            if intento < 2:
+                time.sleep(2 * (intento + 1))
+    raise ultimo_error
 
 
 def check_pin():
