@@ -1851,6 +1851,26 @@ function renderFinance(d) {
     </div>`;
   }
 
+  if (d.rentabilidad) {
+    const r2 = d.rentabilidad;
+    html += `<div class="fin-channels-title">Rentabilidad estimada</div>
+      <table class="fin-table">
+        <tbody>
+          <tr><td>Ingresos netos (tras comisión de portal)</td><td class="num">${fmtEUR(r.ingresos_netos)}</td></tr>
+          <tr><td>Comisión de gestión (20%)</td><td class="num">− ${fmtEUR(r2.comision_gestion)}</td></tr>
+          <tr><td>Costes fijos (comunidad, IBI, seguro, suministros…)</td><td class="num">− ${fmtEUR(r2.costes_fijos)}</td></tr>
+          <tr><td>Limpieza</td><td class="num">− ${fmtEUR(r2.costes_limpieza)}</td></tr>
+          <tr><td>Beneficio antes de impuestos</td><td class="num">${fmtEUR(r2.beneficio_antes_impuestos)}</td></tr>
+          <tr><td>Impuesto de sociedades (25%)</td><td class="num">− ${fmtEUR(r2.impuesto_sociedades)}</td></tr>
+        </tbody>
+      </table>
+      <div class="fin-summary" style="margin-top:10px">
+        <div class="fin-card net"><div class="fin-label">Beneficio neto (propietario)</div><div class="fin-value">${fmtEUR(r2.beneficio_neto_propietario)}</div></div>
+        <div class="fin-card"><div class="fin-label">Gestión — Adrián / Ione</div><div class="fin-value">${fmtEUR(r2.comision_gestion_persona)} c/u</div></div>
+      </div>
+      <div id="fin-note">Costes fijos y limpieza son estimaciones (ver chat "Estimación de costes fijos diarios") — ajustar en el backend si cambian los recibos reales.</div>`;
+  }
+
   if (!d.por_canal.length) {
     html += `<div id="fin-empty">Sin reservas este mes.</div>`;
   } else {

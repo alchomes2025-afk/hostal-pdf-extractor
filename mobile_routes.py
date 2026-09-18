@@ -1358,6 +1358,17 @@ def mobile_rooms():
 
 
 # ── FINANZAS ─────────────────────────────────────────────────────────────
+
+# Rentabilidad estimada de La Casa de la Primavera (chat "Estimación de costes
+# fijos diarios", 17/09/2026). Son estimaciones, no datos en vivo — el propio
+# análisis avisaba de que la comunidad puede variar; ajustar aquí si Adrián
+# pasa las cifras reales (recibos de IBI, seguro, comunidad...).
+PRIMAVERA_COSTES_FIJOS_ANUALES = 3100.0  # IBI + seguro + comunidad + suministros + Beds24/RPV prop.
+PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA = 69.0  # limpieza + productos, una vez por reserva (no por noche)
+PRIMAVERA_PCT_COMISION_GESTION = 0.20  # se reparte Adrián / Ione
+PRIMAVERA_PCT_IMPUESTO_SOCIEDADES = 0.25  # IS, Blockademy SL
+
+
 FINANCE_CHANNEL_LABELS = {
     "booking": "Booking.com",
     "airbnb": "Airbnb",
@@ -1584,6 +1595,25 @@ def mobile_finance():
             "dias_mes":      dias_mes,
         }
 
+    rentabilidad = None
+    if property_id == PROPERTY_ID_CASA_PRIMAVERA:
+        comision_gestion = round(resumen["ingresos_brutos"] * PRIMAVERA_PCT_COMISION_GESTION, 2)
+        costes_fijos = round(PRIMAVERA_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
+        costes_limpieza = round(PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA * resumen["reservas"], 2)
+        beneficio_antes_impuestos = round(
+            resumen["ingresos_netos"] - comision_gestion - costes_fijos - costes_limpieza, 2
+        )
+        impuesto = round(max(0.0, beneficio_antes_impuestos) * PRIMAVERA_PCT_IMPUESTO_SOCIEDADES, 2)
+        rentabilidad = {
+            "comision_gestion":          comision_gestion,
+            "comision_gestion_persona":  round(comision_gestion / 2, 2),
+            "costes_fijos":              costes_fijos,
+            "costes_limpieza":           costes_limpieza,
+            "beneficio_antes_impuestos": beneficio_antes_impuestos,
+            "impuesto_sociedades":       impuesto,
+            "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
+        }
+
     return jsonify({
         "ok":         True,
         "propertyId": property_id,
@@ -1591,6 +1621,7 @@ def mobile_finance():
         "resumen":    resumen,
         "por_canal":  por_canal_list,
         "ocupacion":  ocupacion,
+        "rentabilidad": rentabilidad,
         "completo":   chunks_fallidos == 0,
         "aviso":      (
             f"Beds24 no respondió para {chunks_fallidos} tramo(s) de fechas tras varios "
