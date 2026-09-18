@@ -503,9 +503,10 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
     </div>
   </div>
   <div id="finance-screen">
-    <div id="fin-property-bar">
-      <button class="fin-prop-btn active" id="fin-prop-hostal" onclick="setFinanceProperty(339751)">🏨 Hostal</button>
-      <button class="fin-prop-btn" id="fin-prop-primavera" onclick="setFinanceProperty(349341)">🌸 Casa Primavera</button>
+    <!-- Pestaña Hostal desactivada temporalmente a petición de Adrián (18/09/2026) — reactivar quitando style="display:none" -->
+    <div id="fin-property-bar" style="display:none">
+      <button class="fin-prop-btn" id="fin-prop-hostal" onclick="setFinanceProperty(339751)">🏨 Hostal</button>
+      <button class="fin-prop-btn active" id="fin-prop-primavera" onclick="setFinanceProperty(349341)">🌸 Casa Primavera</button>
     </div>
     <div id="fin-month-bar">
       <button class="fin-nav-btn" onclick="shiftFinanceMonth(-1)">‹</button>
@@ -1755,7 +1756,7 @@ $("#month-bar-today").addEventListener("click", () => {
 });
 
 // ── FINANZAS ─────────────────────────────────────────────
-let FIN_PROPERTY = 339751;
+let FIN_PROPERTY = 349341; // Casa Primavera — Hostal desactivado temporalmente (ver fin-property-bar)
 const today0 = new Date();
 let FIN_YEAR = today0.getFullYear();
 let FIN_MONTH = today0.getMonth() + 1; // 1-12
