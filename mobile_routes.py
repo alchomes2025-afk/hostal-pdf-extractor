@@ -1328,6 +1328,182 @@ def mobile_rooms():
     return jsonify({"ok": True, "rooms": ROOMS})
 
 
+# ── FINANZAS ─────────────────────────────────────────────────────────────
+FINANCE_CHANNEL_LABELS = {
+    "booking": "Booking.com",
+    "airbnb": "Airbnb",
+    "direct": "Directo",
+    "vrbo": "Vrbo",
+    "expedia": "Expedia",
+    "holidu": "Holidu",
+    "homeaway": "HomeAway",
+    "hostelworld": "Hostelworld",
+    "tripcom": "Trip.com",
+}
+
+
+def _finance_channel_label(b):
+    """Nombre del canal para mostrar. apiSource ya viene legible ('Booking.com',
+    'Direct'...) en la mayoría de reservas; si falta, se cae a 'channel'
+    (código corto tipo 'booking') traducido con FINANCE_CHANNEL_LABELS."""
+    api_source = (b.get("apiSource") or "").strip()
+    if api_source:
+        return api_source
+    channel = (b.get("channel") or "").strip().lower()
+    if not channel:
+        return "Desconocido"
+    return FINANCE_CHANNEL_LABELS.get(channel, channel.capitalize())
+
+
+def _finance_es_bloqueo(b):
+    """True si esta 'reserva' es en realidad un bloqueo de calendario sin
+    ingresos reales — ni el que crea la propia app (bloqueo@bloqueo.com) ni
+    los que llegan importados de algún canal como 'BLOCKED by X' cuentan
+    para el informe financiero."""
+    guest = b.get("guest") or {}
+    nombre = f"{guest.get('firstName') or b.get('firstName') or ''} {guest.get('lastName') or b.get('lastName') or ''}".strip().lower()
+    email = (guest.get("email") or b.get("email") or "").strip().lower()
+    return email == "bloqueo@bloqueo.com" or nombre.startswith("blocked") or nombre.startswith("fecha bloqueada")
+
+
+def _fetch_bookings_finance(property_id, arrival_from, arrival_to):
+    """
+    Descarga TODAS las reservas de una propiedad con llegada en el rango
+    dado, con los campos de precio/comisión/canal que hacen falta para el
+    informe financiero (que _load_bookings()/_parse_bookings_list() no
+    guardan, solo les interesan los datos de ocupación del calendario).
+
+    Igual que _load_bookings(): trocea en ventanas de 60 días y pagina cada
+    trozo mirando pages.nextPageExists — Beds24 pierde resultados en
+    silencio si no se hace así (ver commit c6bfabb, mismo bug real).
+    """
+    token = get_access_token()
+    all_raw = []
+    seen_ids = set()
+    chunk_start = arrival_from
+    while chunk_start <= arrival_to:
+        chunk_end = min(chunk_start + timedelta(days=60), arrival_to)
+        page = 1
+        while True:
+            resp = b24_get(token, "/bookings", params={
+                "propertyId":          property_id,
+                "arrivalFrom":         chunk_start.strftime("%Y-%m-%d"),
+                "arrivalTo":           chunk_end.strftime("%Y-%m-%d"),
+                "includePersonalInfo": "true",
+                "limit":               500,
+                "page":                page,
+            })
+            if not resp.ok:
+                break
+            payload = resp.json()
+            data = payload.get("data") or []
+            for b in data:
+                bid = b.get("id")
+                if bid is not None and bid in seen_ids:
+                    continue
+                if bid is not None:
+                    seen_ids.add(bid)
+                all_raw.append(b)
+            if not (payload.get("pages") or {}).get("nextPageExists"):
+                break
+            page += 1
+            if page > 10:
+                break
+        chunk_start = chunk_end + timedelta(days=1)
+    return all_raw
+
+
+@mobile_bp.route("/finance", methods=["GET"])
+def mobile_finance():
+    """
+    Informe financiero mensual de una propiedad: número de reservas,
+    ingresos brutos/comisiones/netos, y el mismo desglose por canal.
+
+    Una reserva que abarca dos meses se reparte proporcionalmente por
+    noches entre ambos (una estancia de 10 noches con 3 en septiembre y 7
+    en octubre aporta el 30% de su precio y comisión a septiembre).
+
+    GET /mobile/finance?pin=1234&propertyId=339751&month=2026-09
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+
+    property_id = request.args.get("propertyId")
+    month_str = request.args.get("month")
+    if not property_id or not month_str:
+        return jsonify({"ok": False, "error": "Faltan propertyId o month"}), 400
+
+    try:
+        year_s, month_s = month_str.split("-")
+        year, month = int(year_s), int(month_s)
+        month_start = date(year, month, 1)
+    except Exception:
+        return jsonify({"ok": False, "error": "month debe tener formato YYYY-MM"}), 400
+    month_end_exclusive = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+
+    # Rango amplio hacia atrás para capturar reservas que empezaron en un mes
+    # anterior pero que todavía tienen noches dentro del mes pedido.
+    arrival_from = month_start - timedelta(days=400)
+    arrival_to = month_end_exclusive - timedelta(days=1)
+
+    try:
+        raw = _fetch_bookings_finance(property_id, arrival_from, arrival_to)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error consultando Beds24: {e}"}), 500
+
+    resumen = {"reservas": 0, "ingresos_brutos": 0.0, "comisiones": 0.0, "ingresos_netos": 0.0}
+    por_canal = {}
+
+    for b in raw:
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
+        if _finance_es_bloqueo(b):
+            continue
+        try:
+            arrival = date.fromisoformat((b.get("arrival") or "")[:10])
+            departure = date.fromisoformat((b.get("departure") or "")[:10])
+        except Exception:
+            continue
+        total_nights = (departure - arrival).days
+        if total_nights <= 0:
+            continue
+
+        overlap_start = max(arrival, month_start)
+        overlap_end = min(departure, month_end_exclusive)
+        nights_in_month = (overlap_end - overlap_start).days
+        if nights_in_month <= 0:
+            continue  # llegada dentro del rango pedido a Beds24 pero sin solape real con el mes
+
+        frac = nights_in_month / total_nights
+        precio_prop = float(b.get("price") or 0) * frac
+        comision_prop = float(b.get("commission") or 0) * frac
+        neto_prop = precio_prop - comision_prop
+
+        canal = _finance_channel_label(b)
+        c = por_canal.setdefault(canal, {"reservas": 0, "ingresos_brutos": 0.0, "comisiones": 0.0, "ingresos_netos": 0.0})
+        for acc in (c, resumen):
+            acc["reservas"] += 1
+            acc["ingresos_brutos"] += precio_prop
+            acc["comisiones"] += comision_prop
+            acc["ingresos_netos"] += neto_prop
+
+    for k in ("ingresos_brutos", "comisiones", "ingresos_netos"):
+        resumen[k] = round(resumen[k], 2)
+    por_canal_list = []
+    for canal, c in sorted(por_canal.items(), key=lambda kv: -kv[1]["ingresos_netos"]):
+        for k in ("ingresos_brutos", "comisiones", "ingresos_netos"):
+            c[k] = round(c[k], 2)
+        por_canal_list.append({"canal": canal, **c})
+
+    return jsonify({
+        "ok":         True,
+        "propertyId": property_id,
+        "mes":        month_str,
+        "resumen":    resumen,
+        "por_canal":  por_canal_list,
+    })
+
+
 @mobile_bp.route("/all-data", methods=["GET"])
 def all_data():
     """

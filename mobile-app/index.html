@@ -138,6 +138,51 @@ html,body{
 #btn-refresh.spinning{display:inline-block;animation:spin 1s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ── Tabs (Calendario / Finanzas) ─────────────────────── */
+#tab-bar{background:var(--bk);display:flex;flex-shrink:0;border-bottom:2px solid rgba(0,0,0,.15)}
+.tab-btn{
+  flex:1;background:none;border:none;color:rgba(255,255,255,.65);
+  font-size:13px;font-weight:700;padding:10px 6px;cursor:pointer;
+  border-bottom:3px solid transparent;transition:all .15s;
+}
+.tab-btn.active{color:#fff;border-bottom-color:var(--yel)}
+
+/* ── Finanzas ──────────────────────────────────────────── */
+#finance-screen{flex:1;overflow:auto;background:#fff;display:none;flex-direction:column}
+#fin-property-bar{background:var(--bk2);display:flex;flex-shrink:0}
+.fin-prop-btn{
+  flex:1;background:none;border:none;color:rgba(255,255,255,.75);
+  font-size:12px;font-weight:700;padding:9px 6px;cursor:pointer;
+}
+.fin-prop-btn.active{color:#fff;background:rgba(255,255,255,.18)}
+#fin-month-bar{
+  background:var(--bk2);padding:8px 14px;display:flex;align-items:center;
+  justify-content:space-between;flex-shrink:0;border-bottom:2px solid rgba(0,0,0,.15);
+}
+#fin-month-text{font-size:15px;font-weight:700;color:#fff}
+.fin-nav-btn{
+  font-size:16px;background:rgba(255,255,255,.15);border:none;
+  color:#fff;width:30px;height:30px;border-radius:8px;cursor:pointer;
+}
+.fin-nav-btn:active{background:rgba(255,255,255,.3)}
+#fin-body{padding:14px}
+.fin-summary{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+.fin-card{background:#fdf1f8;border-radius:var(--radius);padding:12px;border:1px solid var(--border)}
+.fin-card .fin-label{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+.fin-card .fin-value{font-size:20px;font-weight:800;color:var(--ink);margin-top:4px}
+.fin-card.net .fin-value{color:var(--avail)}
+.fin-card.commission .fin-value{color:var(--blocked)}
+.fin-channels-title{font-size:13px;font-weight:800;color:var(--ink);margin:6px 0 10px}
+table.fin-table{width:100%;border-collapse:collapse;font-size:12px}
+table.fin-table th{
+  text-align:left;color:var(--muted);font-weight:700;font-size:10px;
+  text-transform:uppercase;padding:4px 6px;border-bottom:2px solid var(--border);
+}
+table.fin-table td{padding:8px 6px;border-bottom:1px solid var(--border)}
+table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
+#fin-empty,#fin-loading{text-align:center;color:var(--muted);padding:30px 10px;font-size:13px}
+#fin-note{font-size:10px;color:var(--muted);margin-top:16px;line-height:1.5;text-align:center}
+
 /* Calendar table */
 #cal{border-collapse:collapse;table-layout:fixed}
 #cal th,#cal td{
@@ -418,19 +463,37 @@ html,body{
       <div id="sync-pill">Cargando…</div>
     </div>
   </div>
-  <div id="warn-banner">
-    1 · Una vez modificados los precios, verificar en Booking (pasados unos minutos).<br>
-    2 · Para reservas y bloqueos, informar a Ione para verificación en BEDS24.
+  <div id="tab-bar">
+    <button class="tab-btn active" id="tab-btn-cal" onclick="showTab('calendar')">📅 Calendario</button>
+    <button class="tab-btn" id="tab-btn-fin" onclick="showTab('finance')">💶 Finanzas</button>
   </div>
-  <div id="month-bar">
-    <span id="month-bar-text">Cargando…</span>
-    <div style="display:flex;gap:6px;align-items:center">
-      <button id="btn-refresh" title="Actualizar datos">↺</button>
-      <span id="month-bar-today">Hoy</span>
+  <div id="calendar-screen" style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+    <div id="warn-banner">
+      1 · Una vez modificados los precios, verificar en Booking (pasados unos minutos).<br>
+      2 · Para reservas y bloqueos, informar a Ione para verificación en BEDS24.
+    </div>
+    <div id="month-bar">
+      <span id="month-bar-text">Cargando…</span>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button id="btn-refresh" title="Actualizar datos">↺</button>
+        <span id="month-bar-today">Hoy</span>
+      </div>
+    </div>
+    <div id="cal-wrap">
+      <table id="cal"><tbody id="cal-body"></tbody></table>
     </div>
   </div>
-  <div id="cal-wrap">
-    <table id="cal"><tbody id="cal-body"></tbody></table>
+  <div id="finance-screen">
+    <div id="fin-property-bar">
+      <button class="fin-prop-btn active" id="fin-prop-hostal" onclick="setFinanceProperty(339751)">🏨 Hostal</button>
+      <button class="fin-prop-btn" id="fin-prop-primavera" onclick="setFinanceProperty(349341)">🌸 Casa Primavera</button>
+    </div>
+    <div id="fin-month-bar">
+      <button class="fin-nav-btn" onclick="shiftFinanceMonth(-1)">‹</button>
+      <span id="fin-month-text">—</span>
+      <button class="fin-nav-btn" onclick="shiftFinanceMonth(1)">›</button>
+    </div>
+    <div id="fin-body"><div id="fin-loading">Cargando…</div></div>
   </div>
 </div>
 
@@ -1671,6 +1734,90 @@ $("#month-bar-today").addEventListener("click", () => {
   $("#cal-wrap").scrollTo({left: 0, behavior: "smooth"});
   updateMonthBar();
 });
+
+// ── FINANZAS ─────────────────────────────────────────────
+let FIN_PROPERTY = 339751;
+const today0 = new Date();
+let FIN_YEAR = today0.getFullYear();
+let FIN_MONTH = today0.getMonth() + 1; // 1-12
+let FIN_LOADED = false;
+
+function showTab(tab) {
+  const isCal = tab === "calendar";
+  $("#calendar-screen").style.display = isCal ? "flex" : "none";
+  $("#finance-screen").style.display = isCal ? "none" : "flex";
+  $("#tab-btn-cal").classList.toggle("active", isCal);
+  $("#tab-btn-fin").classList.toggle("active", !isCal);
+  if (!isCal && !FIN_LOADED) { FIN_LOADED = true; loadFinance(); }
+}
+
+function setFinanceProperty(propId) {
+  FIN_PROPERTY = propId;
+  $("#fin-prop-hostal").classList.toggle("active", propId === 339751);
+  $("#fin-prop-primavera").classList.toggle("active", propId === 349341);
+  loadFinance();
+}
+
+function shiftFinanceMonth(delta) {
+  FIN_MONTH += delta;
+  if (FIN_MONTH < 1)  { FIN_MONTH = 12; FIN_YEAR--; }
+  if (FIN_MONTH > 12) { FIN_MONTH = 1;  FIN_YEAR++; }
+  loadFinance();
+}
+
+function fmtEUR(n) {
+  return (n || 0).toLocaleString("es-ES", {style: "currency", currency: "EUR", maximumFractionDigits: 0});
+}
+
+async function loadFinance() {
+  const monthStr = `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
+  $("#fin-month-text").textContent = `${MONTHS_LONG[FIN_MONTH - 1]} ${FIN_YEAR}`;
+  $("#fin-body").innerHTML = `<div id="fin-loading">Cargando…</div>`;
+  try {
+    const r = await fetch(`${API}/finance?propertyId=${FIN_PROPERTY}&month=${monthStr}&pin=${PIN}`, {headers: {"x-app-pin": PIN}});
+    const d = await r.json();
+    if (!d.ok) {
+      $("#fin-body").innerHTML = `<div id="fin-empty">Error: ${d.error || "desconocido"}</div>`;
+      return;
+    }
+    renderFinance(d);
+  } catch (e) {
+    $("#fin-body").innerHTML = `<div id="fin-empty">Error de conexión. Pulsa ↺ o vuelve a intentarlo.</div>`;
+  }
+}
+
+function renderFinance(d) {
+  const r = d.resumen;
+  let html = `
+    <div class="fin-summary">
+      <div class="fin-card"><div class="fin-label">Reservas</div><div class="fin-value">${r.reservas}</div></div>
+      <div class="fin-card"><div class="fin-label">Ingresos brutos</div><div class="fin-value">${fmtEUR(r.ingresos_brutos)}</div></div>
+      <div class="fin-card commission"><div class="fin-label">Comisiones</div><div class="fin-value">${fmtEUR(r.comisiones)}</div></div>
+      <div class="fin-card net"><div class="fin-label">Ingresos netos</div><div class="fin-value">${fmtEUR(r.ingresos_netos)}</div></div>
+    </div>`;
+
+  if (!d.por_canal.length) {
+    html += `<div id="fin-empty">Sin reservas este mes.</div>`;
+  } else {
+    html += `<div class="fin-channels-title">Por canal</div>
+      <table class="fin-table">
+        <thead><tr><th>Canal</th><th class="num">Reservas</th><th class="num">Bruto</th><th class="num">Comisión</th><th class="num">Neto</th></tr></thead>
+        <tbody>`;
+    for (const c of d.por_canal) {
+      html += `<tr>
+        <td>${c.canal}</td>
+        <td class="num">${c.reservas}</td>
+        <td class="num">${fmtEUR(c.ingresos_brutos)}</td>
+        <td class="num">${fmtEUR(c.comisiones)}</td>
+        <td class="num">${fmtEUR(c.ingresos_netos)}</td>
+      </tr>`;
+    }
+    html += `</tbody></table>`;
+  }
+
+  html += `<div id="fin-note">Las reservas a caballo de dos meses se reparten por noches. Las comisiones son las que Beds24 tiene registradas — pueden faltar en alguna reserva importada sin ese dato.</div>`;
+  $("#fin-body").innerHTML = html;
+}
 
 // ── BOOT ───────────────────────────────────────────────
 buildKeypad();
