@@ -28,6 +28,8 @@ from datetime import datetime, date, timedelta
 from flask import Blueprint, request, jsonify, Response
 import re
 
+from config import GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI, GROQ_MODEL_FALL
+
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
 
 BEDS24_API = "https://beds24.com/api/v2"
@@ -1738,6 +1740,105 @@ def mobile_finance():
             f"un momento."
         ) if chunks_fallidos else None,
     })
+
+
+FINANCE_CHAT_DIAS_ATRAS = 400   # igual que /finance, cubre historial largo del hostal
+FINANCE_CHAT_DIAS_ADELANTE = 60
+FINANCE_CHAT_MAX_RESERVAS = 400  # tope de reservas pasadas al modelo, las más recientes primero
+
+FINANCE_CHAT_SYSTEM = """Eres un asistente que responde preguntas sobre el histórico de reservas de {propiedad} a partir ÚNICAMENTE de los datos JSON que se te dan a continuación (no inventes nada que no esté ahí). Cada reserva tiene: checkin, checkout, habitacion, huesped, canal, precio (precio total de la reserva en euros). Están ordenadas de más reciente a más antigua por checkin. Responde en español, de forma breve y directa. Si la pregunta no se puede responder con estos datos (p.ej. pide algo fuera del rango de fechas cubierto, o un dato que no se incluye), dilo con claridad en vez de inventar.
+
+Rango de fechas cubierto: {desde} a {hasta}.
+
+Reservas (JSON):
+{datos}"""
+
+
+@mobile_bp.route("/finance-chat", methods=["POST"])
+def mobile_finance_chat():
+    """
+    Asistente virtual de la pestaña Finanzas: responde preguntas en lenguaje
+    natural sobre el histórico de reservas de una propiedad (ej. "¿quién se
+    alojó por última vez en la Deluxe?"), usando Groq con los datos de
+    reservas como contexto — nunca acepta el system prompt del cliente
+    (a diferencia de /chat, público para la web de check-in): aquí los datos
+    se arman en el servidor a partir del PIN ya autenticado.
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    if not GROQ_API_KEY:
+        return jsonify({"ok": False, "error": "GROQ_API_KEY no configurada en Render"}), 500
+
+    data = request.get_json(force=True) or {}
+    property_id = str(data.get("propertyId") or "")
+    pregunta = (data.get("pregunta") or "").strip()
+    if not property_id or not pregunta:
+        return jsonify({"ok": False, "error": "Faltan propertyId o pregunta"}), 400
+    if property_id == PROPERTY_ID and not _es_pin_admin():
+        return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
+
+    hoy = date.today()
+    desde = hoy - timedelta(days=FINANCE_CHAT_DIAS_ATRAS)
+    hasta = hoy + timedelta(days=FINANCE_CHAT_DIAS_ADELANTE)
+
+    try:
+        raw, _chunks_fallidos = _fetch_bookings_finance(property_id, desde, hasta)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error consultando Beds24: {e}"}), 500
+
+    room_names = {str(r["id"]): r["name"] for r in ROOMS}
+    reservas = []
+    for b in raw:
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
+        if _finance_es_bloqueo(b):
+            continue
+        guest = b.get("guest") or {}
+        nombre = f"{guest.get('firstName') or b.get('firstName') or ''} {guest.get('lastName') or b.get('lastName') or ''}".strip()
+        reservas.append({
+            "checkin":    (b.get("arrival") or "")[:10],
+            "checkout":   (b.get("departure") or "")[:10],
+            "habitacion": room_names.get(str(b.get("roomId") or ""), "Desconocida"),
+            "huesped":    nombre or "Desconocido",
+            "canal":      _finance_channel_label(b),
+            "precio":     round(float(b.get("price") or 0), 2),
+        })
+    reservas.sort(key=lambda r: r["checkin"], reverse=True)
+    total_reservas = len(reservas)
+    reservas = reservas[:FINANCE_CHAT_MAX_RESERVAS]
+
+    propiedad_nombre = "La Casa de la Primavera" if property_id == PROPERTY_ID_CASA_PRIMAVERA else "el Hostal ALC Homes San Blas"
+    system = FINANCE_CHAT_SYSTEM.format(
+        propiedad=propiedad_nombre,
+        desde=desde.isoformat(),
+        hasta=hasta.isoformat(),
+        datos=json.dumps(reservas, ensure_ascii=False),
+    )
+    if total_reservas > len(reservas):
+        system += f"\n\n(Aviso: hay {total_reservas} reservas en total en el rango de fechas, mostrando solo las {len(reservas)} más recientes.)"
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": pregunta},
+    ]
+
+    def llamar_groq(model):
+        return requests.post(
+            GROQ_API_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json={"model": model, "messages": messages, "max_tokens": 500, "temperature": 0.2},
+            timeout=30,
+        )
+
+    try:
+        resp = llamar_groq(GROQ_MODEL_PRI)
+        if resp.status_code in (429, 503):
+            resp = llamar_groq(GROQ_MODEL_FALL)
+        resp.raise_for_status()
+        respuesta = resp.json()["choices"][0]["message"]["content"].strip()
+        return jsonify({"ok": True, "respuesta": respuesta})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error consultando el asistente: {e}"}), 500
 
 
 @mobile_bp.route("/all-data", methods=["GET"])

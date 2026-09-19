@@ -209,6 +209,33 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fin-days-card .fin-label{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px}
 .fin-days-card .fin-value{font-size:20px;font-weight:800;color:var(--ink)}
 
+/* Asistente de Finanzas */
+#fin-chat-toggle{
+  display:block;width:calc(100% - 28px);margin:0 14px 10px;
+  background:var(--bk2);color:#fff;border:none;border-radius:10px;
+  padding:10px;font-size:13px;font-weight:700;cursor:pointer;
+}
+#fin-chat-panel{
+  margin:0 14px 14px;background:#fff;border:1.5px solid var(--border);
+  border-radius:var(--radius);padding:12px;display:none;flex-direction:column;
+}
+#fin-chat-messages{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;margin-bottom:10px}
+.fin-chat-msg{padding:8px 12px;border-radius:10px;margin-bottom:8px;font-size:12.5px;line-height:1.45;max-width:88%}
+.fin-chat-msg.user{background:var(--bk2);color:#fff;margin-left:auto;text-align:right}
+.fin-chat-msg.bot{background:#fdf1f8;color:var(--ink);border:1px solid var(--border)}
+.fin-chat-msg.loading{opacity:.65;font-style:italic}
+.fin-chat-msg.error{background:var(--blocked-bg);color:var(--blocked);border:1px solid var(--blocked)}
+#fin-chat-empty{font-size:11.5px;color:var(--muted);text-align:center;padding:6px 0 10px}
+#fin-chat-inputrow{display:flex;gap:8px}
+#fin-chat-input{
+  flex:1;border:1.5px solid var(--border);border-radius:10px;padding:9px 12px;
+  font-size:13px;font-family:inherit;
+}
+#fin-chat-send{
+  background:var(--bk2);color:#fff;border:none;border-radius:10px;
+  width:40px;font-size:16px;cursor:pointer;flex-shrink:0;
+}
+
 /* Calendar table */
 #cal{border-collapse:collapse;table-layout:fixed}
 #cal th,#cal td{
@@ -528,6 +555,16 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
       <button class="fin-nav-btn" onclick="shiftFinanceMonth(-1)">‹</button>
       <span id="fin-month-text">—</span>
       <button class="fin-nav-btn" onclick="shiftFinanceMonth(1)">›</button>
+    </div>
+    <button type="button" id="fin-chat-toggle" onclick="toggleFinChat()">💬 Preguntar al asistente</button>
+    <div id="fin-chat-panel">
+      <div id="fin-chat-messages">
+        <div id="fin-chat-empty">Pregunta lo que quieras sobre el histórico de reservas, ej. "¿quién se alojó por última vez en la Deluxe?"</div>
+      </div>
+      <div id="fin-chat-inputrow">
+        <input type="text" id="fin-chat-input" placeholder="Escribe tu pregunta…">
+        <button type="button" id="fin-chat-send" onclick="sendFinChat()">➤</button>
+      </div>
     </div>
     <div id="fin-body"><div id="fin-loading">Cargando…</div></div>
   </div>
@@ -1857,6 +1894,7 @@ function setFinanceProperty(propId) {
   FIN_PROPERTY = propId;
   $("#fin-prop-hostal").classList.toggle("active", propId === 339751);
   $("#fin-prop-primavera").classList.toggle("active", propId === 349341);
+  resetFinChat();
   loadFinance();
 }
 
@@ -1866,6 +1904,54 @@ function shiftFinanceMonth(delta) {
   if (FIN_MONTH > 12) { FIN_MONTH = 1;  FIN_YEAR++; }
   loadFinance();
 }
+
+// ── Asistente de Finanzas ───────────────────────────────
+function toggleFinChat() {
+  const panel = $("#fin-chat-panel");
+  const opening = panel.style.display !== "flex";
+  panel.style.display = opening ? "flex" : "none";
+  if (opening) setTimeout(() => $("#fin-chat-input").focus(), 100);
+}
+function resetFinChat() {
+  $("#fin-chat-messages").innerHTML = `<div id="fin-chat-empty">Pregunta lo que quieras sobre el histórico de reservas, ej. "¿quién se alojó por última vez en la Deluxe?"</div>`;
+  $("#fin-chat-panel").style.display = "none";
+}
+function appendFinChatMsg(cls, text) {
+  const empty = $("#fin-chat-empty");
+  if (empty) empty.remove();
+  const wrap = $("#fin-chat-messages");
+  const el = document.createElement("div");
+  el.className = "fin-chat-msg " + cls;
+  el.textContent = text;
+  wrap.appendChild(el);
+  wrap.scrollTop = wrap.scrollHeight;
+  return el;
+}
+async function sendFinChat() {
+  const input = $("#fin-chat-input");
+  const pregunta = input.value.trim();
+  if (!pregunta) return;
+  input.value = "";
+  appendFinChatMsg("user", pregunta);
+  const loadingEl = appendFinChatMsg("bot loading", "Consultando el histórico de reservas…");
+  try {
+    const r = await fetch(`${API}/finance-chat`, {
+      method: "POST",
+      headers: {"x-app-pin": PIN, "content-type": "application/json"},
+      body: JSON.stringify({propertyId: FIN_PROPERTY, pregunta, pin: PIN}),
+    });
+    const d = await r.json();
+    loadingEl.remove();
+    if (d.ok) appendFinChatMsg("bot", d.respuesta);
+    else appendFinChatMsg("bot error", d.error || "No se pudo responder.");
+  } catch (e) {
+    loadingEl.remove();
+    appendFinChatMsg("bot error", "Error de conexión, inténtalo de nuevo.");
+  }
+}
+$("#fin-chat-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); sendFinChat(); }
+});
 
 function fmtEUR(n) {
   return (n || 0).toLocaleString("es-ES", {style: "currency", currency: "EUR", maximumFractionDigits: 0});
