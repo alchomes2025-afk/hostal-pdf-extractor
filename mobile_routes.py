@@ -1386,10 +1386,12 @@ PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA = 69.0  # limpieza + productos, una vez po
 # Impuesto de Sociedades — mismo 25% (Blockademy SL) para las dos propiedades.
 PCT_IMPUESTO_SOCIEDADES = 0.25
 
-# Comisión de gestión de Adrián/Ione — 20% de los ingresos brutos, igual en
-# el Hostal que en La Casa de la Primavera (no es un coste específico de
-# ninguna de las dos, por eso no lleva prefijo PRIMAVERA_).
-PCT_COMISION_GESTION = 0.20
+# Comisión de gestión de Adrián/Ione sobre los ingresos brutos — distinta en
+# cada propiedad (corregido 19/09/2026: el Hostal es 15%, no 20% como
+# Primavera). Además, solo en el Hostal, comisión adicional de Blockademy SL.
+PRIMAVERA_PCT_COMISION_GESTION = 0.20
+HOSTAL_PCT_COMISION_GESTION = 0.15
+HOSTAL_PCT_COMISION_BLOCKADEMY = 0.05
 
 # Rentabilidad estimada del Hostal (pedido directamente por Adrián en esta
 # sesión, 18/09/2026 — sin recibos reales, son estimaciones a ajustar).
@@ -1690,7 +1692,7 @@ def mobile_finance():
 
     rentabilidad = None
     if property_id == PROPERTY_ID_CASA_PRIMAVERA:
-        comision_gestion = round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2)
+        comision_gestion = round(resumen["ingresos_brutos"] * PRIMAVERA_PCT_COMISION_GESTION, 2)
         costes_fijos = round(PRIMAVERA_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
         costes_limpieza = round(PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA * resumen["reservas"], 2)
         beneficio_antes_impuestos = round(
@@ -1699,6 +1701,7 @@ def mobile_finance():
         impuesto = round(max(0.0, beneficio_antes_impuestos) * PCT_IMPUESTO_SOCIEDADES, 2)
         rentabilidad = {
             "comision_gestion":          comision_gestion,
+            "comision_gestion_pct":      round(PRIMAVERA_PCT_COMISION_GESTION * 100),
             "costes_fijos":              costes_fijos,
             "costes_limpieza":           costes_limpieza,
             "beneficio_antes_impuestos": beneficio_antes_impuestos,
@@ -1706,16 +1709,20 @@ def mobile_finance():
             "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
         }
     elif property_id == PROPERTY_ID:
-        comision_gestion = round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2)
+        comision_gestion = round(resumen["ingresos_brutos"] * HOSTAL_PCT_COMISION_GESTION, 2)
+        comision_blockademy = round(resumen["ingresos_brutos"] * HOSTAL_PCT_COMISION_BLOCKADEMY, 2)
         costes_fijos = round(HOSTAL_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
         horas_limpieza_dia = HOSTAL_LIMPIEZA_HORAS_MIN + (HOSTAL_LIMPIEZA_HORAS_MAX - HOSTAL_LIMPIEZA_HORAS_MIN) * (ocupacion_total_pct / 100)
         costes_limpieza = round(horas_limpieza_dia * HOSTAL_COSTE_LIMPIEZA_EUR_HORA * dias_mes, 2)
         beneficio_antes_impuestos = round(
-            resumen["ingresos_netos"] - comision_gestion - costes_fijos - costes_limpieza, 2
+            resumen["ingresos_netos"] - comision_gestion - comision_blockademy - costes_fijos - costes_limpieza, 2
         )
         impuesto = round(max(0.0, beneficio_antes_impuestos) * PCT_IMPUESTO_SOCIEDADES, 2)
         rentabilidad = {
             "comision_gestion":          comision_gestion,
+            "comision_gestion_pct":      round(HOSTAL_PCT_COMISION_GESTION * 100),
+            "comision_blockademy":       comision_blockademy,
+            "comision_blockademy_pct":   round(HOSTAL_PCT_COMISION_BLOCKADEMY * 100),
             "costes_fijos":              costes_fijos,
             "costes_limpieza":           costes_limpieza,
             "beneficio_antes_impuestos": beneficio_antes_impuestos,
