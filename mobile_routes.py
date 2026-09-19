@@ -1442,6 +1442,49 @@ def _finance_channel_label(b):
     return FINANCE_CHANNEL_LABELS.get(channel, channel.capitalize())
 
 
+# Tasas de comisión de respaldo por portal, para cuando Beds24 no trae el
+# campo "commission" de la reserva (pasa con algunas reservas importadas —
+# no es que el portal no cobre nada, es que Beds24 no lo registró). Solo se
+# usan cuando la comisión real de Beds24 es 0/ausente; si Beds24 sí trae un
+# importe, ese manda siempre. Buscadas online el 19/09/2026 — son la tasa
+# "estándar"/más citada de cada portal, no una cifra contractual verificada
+# con Adrián, así que pueden no coincidir exactamente con lo que factura
+# cada portal en la práctica.
+#   - Booking.com: ~15% comisión base + cargo de pasarela de pago y de
+#     transferencia (Adrián confirma que existen esos cargos extra; 1,1–3,1%
+#     según país/moneda) → se usa un 17% combinado como estimación.
+#   - Airbnb: modelo "host-only" 2026, 15,5% (antes existía un modelo de
+#     comisión repartida con solo 3% para el host, en desuso desde 2026).
+#   - Vrbo/HomeAway: 5% conectando por PMS/channel manager (como Beds24),
+#     sin el 3% de procesamiento extra que se aplica reservando directo.
+#   - Holidu: 23% total, confirmado directamente por Adrián.
+#   - Expedia: ~18% (rango real muy amplio, 10-30% según acuerdo negociado).
+#   - Hostelworld: 17,7%, tasa efectiva media de Hostelworld en 2026.
+#   - Trip.com: ~18% (rango citado 15-20%).
+FINANCE_COMISION_FALLBACK_PCT = [
+    ("booking",     0.17),
+    ("airbnb",      0.155),
+    ("homeaway",    0.05),
+    ("vrbo",        0.05),
+    ("holidu",      0.23),
+    ("expedia",     0.18),
+    ("hostelworld", 0.177),
+    ("trip",        0.18),
+]
+
+
+def _finance_comision_fallback_pct(canal):
+    """% de comisión estimada por portal (FINANCE_COMISION_FALLBACK_PCT) según
+    el nombre de canal mostrado, buscando por subcadena para no depender de
+    la capitalización/formato exacto que use apiSource. 0.0 si no hay tasa
+    conocida (directo, desconocido, o un portal no listado)."""
+    c = (canal or "").strip().lower()
+    for clave, pct in FINANCE_COMISION_FALLBACK_PCT:
+        if clave in c:
+            return pct
+    return 0.0
+
+
 def _finance_tipo_habitacion(property_id, room_id):
     """Nombre del 'tipo' de habitación de una reserva, para el listado de
     Finanzas: en el hostal, el grupo (Deluxe/Doble/Individual) de
@@ -1616,10 +1659,16 @@ def mobile_finance():
 
         frac = nights_in_month / total_nights
         precio_prop = float(b.get("price") or 0) * frac
-        comision_prop = float(b.get("commission") or 0) * frac
+        canal = _finance_channel_label(b)
+        comision_real = float(b.get("commission") or 0)
+        if comision_real > 0:
+            comision_prop = comision_real * frac
+        else:
+            # Beds24 no trae comisión para esta reserva: se estima con la
+            # tasa de respaldo del portal (0 si es directo/desconocido).
+            comision_prop = precio_prop * _finance_comision_fallback_pct(canal)
         neto_prop = precio_prop - comision_prop
 
-        canal = _finance_channel_label(b)
         c = por_canal.setdefault(canal, {"reservas": 0, "ingresos_brutos": 0.0, "comisiones": 0.0, "ingresos_netos": 0.0})
         for acc in (c, resumen):
             acc["reservas"] += 1

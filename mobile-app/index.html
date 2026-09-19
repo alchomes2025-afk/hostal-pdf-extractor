@@ -2103,7 +2103,7 @@ function renderFinance(d) {
     html += `</tbody></table>`;
   }
 
-  html += `<div id="fin-note">Las reservas a caballo de dos meses se reparten por noches. Las comisiones de los portales son las que Beds24 tiene registradas — pueden faltar en alguna reserva importada sin ese dato.</div>`;
+  html += `<div id="fin-note">Las reservas a caballo de dos meses se reparten por noches. Las comisiones de los portales son las que Beds24 tiene registradas; cuando falta ese dato (p. ej. reservas importadas), se estima con la tasa típica de cada portal.</div>`;
   $("#fin-body").innerHTML = html;
 }
 
