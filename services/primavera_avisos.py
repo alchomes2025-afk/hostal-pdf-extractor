@@ -1,8 +1,10 @@
 """
 services/primavera_avisos.py — Aviso de WhatsApp para check-ins de ÚLTIMA
-HORA en La Casa de la Primavera (reservas que llegan después de que ya haya
-salido el resumen diario de la mañana, típicamente reservas de Booking.com
-hechas el mismo día).
+HORA, tanto en el Hostal como en La Casa de la Primavera (reservas que
+llegan después de que ya haya salido el resumen diario de la mañana,
+típicamente reservas hechas el mismo día). El nombre del módulo viene de
+cuando solo cubría Primavera; se mantiene para no tocar los imports de
+routes/watchdog.py y routes/resumen_routes.py.
 
 Lleva en Firestore (system_state/primavera_avisos) la lista de book_id de
 Beds24 ya anunciados HOY — tanto por el resumen diario (services/resumen.py
@@ -79,35 +81,44 @@ def _formatear_estancia(entrada):
 
 def comprobar_y_avisar_checkins_ultima_hora():
     """
-    Consulta los check-ins de HOY en La Casa de la Primavera directamente en
-    Beds24 y avisa por WhatsApp de cualquiera que no se haya anunciado
-    todavía (ni en el resumen diario ni en una llamada anterior a esta misma
-    función) — pensada para llamarse desde /watchdog, que ya corre cada 15
-    min, así que una reserva de última hora se detecta y avisa en <15 min en
-    vez de esperar al resumen de la noche.
+    Consulta los check-ins de HOY en TODAS las propiedades (hostal + La Casa
+    de la Primavera) directamente en Beds24 y avisa por WhatsApp de
+    cualquiera que no se haya anunciado todavía (ni en el resumen diario ni
+    en una llamada anterior a esta misma función) — pensada para llamarse
+    desde /watchdog, que ya corre cada 15 min, así que una reserva de última
+    hora se detecta y avisa en <15 min en vez de esperar al resumen de la
+    noche.
 
     No lanza excepción hacia arriba: cualquier fallo se loguea y no debe
     bloquear el resto del watchdog.
     """
     hoy_iso = date.today().isoformat()
     entradas = obtener_bookings_dia_beds24(hoy_iso, tipo="checkin")
-    entradas_primavera = [e for e in entradas if e.get("room_id") == ROOM_ID_PRIMAVERA]
-    if not entradas_primavera:
+    if not entradas:
         return
 
     anunciados = _leer_anunciados_hoy()
-    nuevas = [e for e in entradas_primavera if str(e.get("book_id")) not in anunciados]
+    nuevas = [e for e in entradas if str(e.get("book_id")) not in anunciados]
     if not nuevas:
         return
 
     for e in nuevas:
-        noches, salida_fmt = _formatear_estancia(e)
-        linea_estancia = f"{noches} noche{'s' if noches != 1 else ''}, sale {salida_fmt}" if noches is not None else f"Sale {salida_fmt}"
-        alerta(
-            "⚡ Check-in de última hora — La Casa de la Primavera",
-            f"Huésped: {e.get('huesped', '?')}\n{linea_estancia}\n\n"
-            f"(No estaba en el resumen diario — reserva de última hora.)",
-            nivel="info",
-        )
+        canal = e.get("canal", "Desconocido")
+        if e.get("room_id") == ROOM_ID_PRIMAVERA:
+            noches, salida_fmt = _formatear_estancia(e)
+            linea_estancia = f"{noches} noche{'s' if noches != 1 else ''}, sale {salida_fmt}" if noches is not None else f"Sale {salida_fmt}"
+            titulo = "⚡ Check-in de última hora — La Casa de la Primavera"
+            cuerpo = (
+                f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n{linea_estancia}\n\n"
+                f"(No estaba en el resumen diario — reserva de última hora.)"
+            )
+        else:
+            titulo = "⚡ Check-in de última hora — Hostal ALC Homes"
+            cuerpo = (
+                f"Habitación: {e.get('nombre_habitacion', '?')}\n"
+                f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n\n"
+                f"(No estaba en el resumen diario — reserva de última hora.)"
+            )
+        alerta(titulo, cuerpo, nivel="info")
 
     marcar_anunciados([e.get("book_id") for e in nuevas])

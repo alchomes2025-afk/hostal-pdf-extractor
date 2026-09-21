@@ -46,7 +46,7 @@ def resumen_whatsapp():
         return jsonify({"ok": False, "error": "No autorizado"}), 401
 
     try:
-        mensaje, primavera_book_ids_hoy = generar_mensaje_resumen(hora)
+        mensaje, book_ids_hoy = generar_mensaje_resumen(hora)
     except Exception as e:
         logger.error(f"Error generando resumen: {e}")
         return jsonify({"ok": False, "error": f"Error generando resumen: {e}"}), 500
@@ -58,11 +58,11 @@ def resumen_whatsapp():
             cb_resp = enviar_whatsapp_callmebot(mensaje)
             resultado["enviado"] = True
             resultado["callmebot_resp"] = cb_resp[:300]
-            # Solo tras confirmar el envío: las entradas de hoy en La Casa de
-            # la Primavera quedan "ya anunciadas" para que el chequeo de
+            # Solo tras confirmar el envío: las entradas de hoy (hostal +
+            # Primavera) quedan "ya anunciadas" para que el chequeo de
             # última hora (cada 15 min desde /watchdog) no vuelva a avisar de
             # ellas — ver services/primavera_avisos.py.
-            marcar_anunciados(primavera_book_ids_hoy)
+            marcar_anunciados(book_ids_hoy)
         except Exception as e:
             logger.error(f"Error enviando WhatsApp: {e}")
             resultado["enviado"] = False

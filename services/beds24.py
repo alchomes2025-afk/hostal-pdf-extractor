@@ -245,6 +245,33 @@ ROOM_ID_DISPLAY_NAME = {
 }
 
 
+CANAL_LABELS = {
+    "booking": "Booking.com",
+    "airbnb": "Airbnb",
+    "direct": "Directo",
+    "vrbo": "Vrbo",
+    "expedia": "Expedia",
+    "holidu": "Holidu",
+    "homeaway": "HomeAway",
+    "hostelworld": "Hostelworld",
+    "tripcom": "Trip.com",
+}
+
+
+def _canal_legible(booking):
+    """Nombre del canal de la reserva para mostrar en avisos de WhatsApp.
+    apiSource ya viene legible ('Booking.com', 'Direct'...) en la mayoría de
+    reservas; si falta, se cae a 'channel' (código corto tipo 'booking')
+    traducido con CANAL_LABELS."""
+    api_source = (booking.get("apiSource") or "").strip()
+    if api_source:
+        return api_source
+    channel = (booking.get("channel") or "").strip().lower()
+    if not channel:
+        return "Desconocido"
+    return CANAL_LABELS.get(channel, channel.capitalize())
+
+
 def _extraer_nombre_huesped_beds24(booking):
     """Beds24 puede devolver el nombre del huésped en distintos campos según
     la versión/canal. Probamos varias claves habituales antes de rendirnos."""
@@ -271,7 +298,8 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
     de la Primavera) — si solo se consultara BEDS24_PROPERTY_ID, el resumen
     diario nunca mostraría las entradas/salidas de la segunda propiedad.
 
-    Devuelve una lista de dicts: {room_id, nombre_habitacion, huesped, book_id}.
+    Devuelve una lista de dicts: {room_id, nombre_habitacion, huesped, book_id,
+    arrival, departure, canal}.
     Si falla la consulta (token, red, etc.) devuelve lista vacía y loguea el error,
     para no romper el resumen diario por un problema puntual de Beds24.
     """
@@ -324,6 +352,7 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
                 "book_id": b.get("id"),
                 "arrival": b.get("arrival"),
                 "departure": b.get("departure"),
+                "canal": _canal_legible(b),
             })
 
         if descartadas_por_fecha:

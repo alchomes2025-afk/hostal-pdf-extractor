@@ -263,7 +263,7 @@ def watchdog():
                 f"Firestore no responde: {e}",
                 "Verificar credenciales de servicio y permisos del proyecto en Firebase Console"))
 
-    # ── 9. Check-ins de última hora en La Casa de la Primavera ─────────────
+    # ── 9. Check-ins de última hora (hostal + La Casa de la Primavera) ─────
     # No es un chequeo de salud del sistema (no entra en `problemas`/dedupe
     # de watchdog): es un aviso de negocio aparte, con su propio dedupe por
     # book_id en Firestore. Se aprovecha esta ejecución cada 15 min para
@@ -271,7 +271,7 @@ def watchdog():
     try:
         comprobar_y_avisar_checkins_ultima_hora()
     except Exception as e:
-        logger.error(f"[watchdog] Error comprobando check-ins de última hora en Casa Primavera: {e}")
+        logger.error(f"[watchdog] Error comprobando check-ins de última hora: {e}")
 
     # ── Resumen y alerta WhatsApp (con deduplicación) ─────────────────────
     n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")

@@ -41,13 +41,15 @@ def generar_mensaje_resumen(hora_str=None):
       aporta tanto porque el huésped suele ver la duración a simple vista;
       en Primavera, al ser una vivienda completa reservada con más antelación
       y menos rotación visual, conviene dejarlo explícito).
+    - Cada entrada indica también el canal por el que llegó la reserva
+      (Booking.com, Airbnb, Directo...).
 
-    Devuelve (mensaje, primavera_book_ids_hoy): el segundo valor es la lista
-    de book_id de Beds24 de las entradas de hoy en La Casa de la Primavera,
+    Devuelve (mensaje, book_ids_hoy): el segundo valor es la lista de book_id
+    de Beds24 de TODAS las entradas de hoy (hostal + La Casa de la Primavera),
     para que el llamador las marque como "ya anunciadas" en
     services/primavera_avisos tras confirmar el envío — así el chequeo de
-    última hora (ver services/primavera_avisos.py) no vuelve a avisar de
-    ellas.
+    última hora (ver services/primavera_avisos.py, que ahora cubre ambas
+    propiedades) no vuelve a avisar de ninguna de ellas.
     """
     hoy = date.today()
     hoy_iso = hoy.isoformat()
@@ -79,12 +81,13 @@ def generar_mensaje_resumen(hora_str=None):
         for e in entradas_beds24:
             parte_ok = (e["room_id"], hoy_iso) in partes_recibidos
             estado = "📄 parte recibido" if parte_ok else "⚠️ parte PENDIENTE"
+            canal = e.get("canal", "Desconocido")
             if e["room_id"] == ROOM_ID_PRIMAVERA:
                 noches, salida_fmt = _formatear_estancia(e)
                 estancia = f"{noches} noche{'s' if noches != 1 else ''}, sale {salida_fmt}" if noches is not None else f"sale {salida_fmt}"
-                lineas.append(f"• {e['nombre_habitacion']} ({estado}) — {estancia}")
+                lineas.append(f"• {e['nombre_habitacion']} ({estado}) — {canal} — {estancia}")
             else:
-                lineas.append(f"• {e['nombre_habitacion']} ({estado})")
+                lineas.append(f"• {e['nombre_habitacion']} ({estado}) — {canal}")
     else:
         lineas.append("• (ninguna)")
 
@@ -95,5 +98,5 @@ def generar_mensaje_resumen(hora_str=None):
     else:
         lineas.append("• (ninguna)")
 
-    primavera_book_ids_hoy = [e["book_id"] for e in entradas_beds24 if e["room_id"] == ROOM_ID_PRIMAVERA]
-    return "\n".join(lineas), primavera_book_ids_hoy
+    book_ids_hoy = [e["book_id"] for e in entradas_beds24]
+    return "\n".join(lineas), book_ids_hoy
