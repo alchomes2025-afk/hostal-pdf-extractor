@@ -2458,6 +2458,55 @@ def fix_zero_prices():
     })
 
 
+@mobile_bp.route("/set-booking-price", methods=["POST"])
+def set_booking_price():
+    """
+    Fija el precio de una o varias reservas concretas en Beds24 por su id —
+    sin volver a escanear todo el histórico como /fix-zero-prices?apply=1
+    (mucho más ligero y rápido, útil una vez ya se sabe qué reservas y qué
+    precio hay que poner, sea porque lo calculó /fix-zero-prices o porque
+    Adrián lo ha dado a mano para una reserva que Beds24 no pudo reconstruir).
+
+    Body: { "pin": "...", "items": [{"bookingId": 123, "price": 55.0}, ...] }
+    Solo accesible con PIN admin.
+    """
+    if not _es_pin_admin():
+        return jsonify({"ok": False, "error": "Requiere PIN admin"}), 403
+
+    body = request.get_json(force=True, silent=True) or {}
+    items = body.get("items")
+    if not items or not isinstance(items, list):
+        return jsonify({"ok": False, "error": "Falta items (lista de {bookingId, price})"}), 400
+
+    try:
+        token = get_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error de autenticación: {e}"}), 500
+
+    resultados = []
+    for it in items:
+        booking_id = it.get("bookingId")
+        try:
+            price = float(it.get("price"))
+            if price <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            resultados.append({"bookingId": booking_id, "ok": False, "error": "Precio inválido"})
+            continue
+        try:
+            resp = b24_post(token, "/bookings", json_body=[{"id": int(booking_id), "price": price}])
+            resultados.append({
+                "bookingId": booking_id,
+                "price": price,
+                "ok": resp.ok,
+                "error": None if resp.ok else resp.text[:200],
+            })
+        except Exception as e:
+            resultados.append({"bookingId": booking_id, "ok": False, "error": str(e)})
+
+    return jsonify({"ok": True, "resultados": resultados})
+
+
 @mobile_bp.route("/block-dates", methods=["POST"])
 def block_dates():
     """
