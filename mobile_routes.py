@@ -2304,6 +2304,160 @@ def create_booking():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+def _precio_por_calendario(token, room_id, arrival, departure):
+    """
+    Suma el precio (price1) de cada noche de una reserva consultando el
+    calendario de Beds24 (GET /inventory/rooms/calendar) para esas fechas
+    concretas — a diferencia de _load_live_calendar() (que solo mira desde
+    hoy en adelante), aquí se piden explícitamente las fechas de la reserva,
+    sean pasadas o futuras, porque esto es para reconstruir precios de
+    reservas ya creadas (ver /fix-zero-prices).
+
+    Devuelve (precio_total, faltan_noches): faltan_noches es True si Beds24
+    no tiene precio guardado para alguna noche del rango (calendario vacío
+    para esa fecha) — en ese caso precio_total es la suma de lo que sí se
+    pudo encontrar, no un total fiable.
+    """
+    try:
+        resp = b24_get(token, "/inventory/rooms/calendar", params={
+            "roomId":          int(room_id),
+            "startDate":       arrival,
+            "endDate":         departure,
+            "includePrices":   "true",
+            "includeNumAvail": "false",
+        })
+    except Exception:
+        return 0.0, True
+    if not resp.ok:
+        return 0.0, True
+
+    precios_por_dia = {}
+    data = resp.json().get("data") or []
+    for entry in data:
+        cal = entry.get("calendar") if isinstance(entry, dict) else None
+        day_list = cal if cal is not None else [entry]
+        for day in day_list:
+            if not isinstance(day, dict):
+                continue
+            d_from = day.get("from") or day.get("date")
+            d_to = day.get("to") or d_from
+            price1 = day.get("price1")
+            if not d_from or price1 is None:
+                continue
+            d = datetime.strptime(d_from, "%Y-%m-%d").date()
+            d_end = datetime.strptime(d_to, "%Y-%m-%d").date()
+            while d <= d_end:
+                precios_por_dia[d.isoformat()] = price1
+                d += timedelta(days=1)
+
+    arrival_dt = datetime.strptime(arrival, "%Y-%m-%d").date()
+    departure_dt = datetime.strptime(departure, "%Y-%m-%d").date()
+    total = 0.0
+    faltan = False
+    d = arrival_dt
+    while d < departure_dt:
+        p = precios_por_dia.get(d.isoformat())
+        if p is None:
+            faltan = True
+        else:
+            total += float(p)
+        d += timedelta(days=1)
+    return round(total, 2), faltan
+
+
+@mobile_bp.route("/fix-zero-prices", methods=["GET"])
+def fix_zero_prices():
+    """
+    Diagnóstico/backfill para el bug corregido el 25/09/2026 (POST
+    /create-booking no enviaba precio a Beds24, así que toda reserva creada
+    desde la app quedaba a 0€). Busca reservas de canal "Directo" con precio
+    0 y reconstruye el precio consultando el calendario histórico de Beds24
+    para esas fechas.
+
+    GET /mobile/fix-zero-prices?pin=1379              → vista previa, NO escribe nada
+    GET /mobile/fix-zero-prices?pin=1379&apply=1       → aplica el precio calculado
+        en Beds24 para cada reserva donde se pudo reconstruir el precio completo
+        (ninguna noche con precio desconocido)
+
+    Solo accesible con PIN admin — toca datos reales de reservas.
+    """
+    if not _es_pin_admin():
+        return jsonify({"ok": False, "error": "Requiere PIN admin"}), 403
+
+    aplicar = request.args.get("apply") == "1"
+
+    try:
+        token = get_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Error de autenticación: {e}"}), 500
+
+    hoy = date.today()
+    desde = hoy - timedelta(days=730)
+    hasta = hoy + timedelta(days=60)
+
+    room_names = {str(r["id"]): r["name"] for r in ROOMS}
+    afectadas = []
+
+    for property_id in PROPERTY_IDS:
+        try:
+            raw, _chunks_fallidos = _fetch_bookings_finance(property_id, desde, hasta)
+        except Exception as e:
+            afectadas.append({"propertyId": property_id, "error": f"Error consultando Beds24: {e}"})
+            continue
+
+        for b in raw:
+            if str(b.get("status", "")).lower() == "cancelled":
+                continue
+            if _finance_es_bloqueo(b):
+                continue
+            if float(b.get("price") or 0) > 0:
+                continue  # ya tiene precio real, no es de las afectadas
+            canal = _finance_channel_label(b)
+            if "direct" not in canal.strip().lower():
+                continue  # solo nos interesan las creadas desde la app (canal Directo)
+
+            arrival = (b.get("arrival") or "")[:10]
+            departure = (b.get("departure") or "")[:10]
+            room_id = b.get("roomId")
+            if not arrival or not departure or not room_id:
+                continue
+
+            guest = b.get("guest") or {}
+            nombre = f"{guest.get('firstName') or b.get('firstName') or ''} {guest.get('lastName') or b.get('lastName') or ''}".strip()
+
+            precio_calc, faltan = _precio_por_calendario(token, room_id, arrival, departure)
+
+            item = {
+                "bookingId":  b.get("id"),
+                "propertyId": property_id,
+                "habitacion": room_names.get(str(room_id), f"Room {room_id}"),
+                "huesped":    nombre or "Desconocido",
+                "arrival":    arrival,
+                "departure":  departure,
+                "precio_calculado": precio_calc,
+                "precio_incompleto": faltan,
+            }
+
+            if aplicar and precio_calc > 0 and not faltan:
+                try:
+                    resp = b24_post(token, "/bookings", json_body=[{"id": int(b.get("id")), "price": precio_calc}])
+                    item["aplicado"] = resp.ok
+                    if not resp.ok:
+                        item["error_aplicar"] = resp.text[:200]
+                except Exception as e:
+                    item["aplicado"] = False
+                    item["error_aplicar"] = str(e)
+
+            afectadas.append(item)
+
+    return jsonify({
+        "ok": True,
+        "apply": aplicar,
+        "total_afectadas": len(afectadas),
+        "reservas": afectadas,
+    })
+
+
 @mobile_bp.route("/block-dates", methods=["POST"])
 def block_dates():
     """
