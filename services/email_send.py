@@ -1,43 +1,46 @@
 """
-services/email_send.py — Envío de email vía la API HTTP de SendGrid.
+services/email_send.py — Envío de email reutilizando el proyecto de Google
+Apps Script "ALC Homes — Identificación de reservas" (cuenta
+alchomes2025guest@gmail.com, ya autorizado con Gmail vía OAuth).
 
-Se usa HTTP (no SMTP) porque Render bloquea el tráfico SMTP saliente en los
-planes básicos — confirmado 25/09/2026 probando con Gmail SMTP directo
-(credenciales correctas, pero "Network is unreachable" al intentar conectar).
+No se usa SMTP directo (Render bloquea el tráfico saliente en planes
+básicos) ni SendGrid (exige verificar el remitente, daba problemas). En su
+lugar, ese script tiene un doPost(e) añadido que llama a
+GmailApp.sendEmail() — ver memoria [[apps-script-orquestador]].
 """
 import logging
 import requests
 
-from config import SENDGRID_API_KEY, SENDGRID_FROM_EMAIL
+from config import APPS_SCRIPT_EMAIL_URL, APPS_SCRIPT_EMAIL_SECRET
 
 logger = logging.getLogger(__name__)
-
-SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 
 def enviar_email(to, subject, body):
     """
-    Envía un email de texto plano vía SendGrid (SENDGRID_API_KEY en Render).
-    SENDGRID_FROM_EMAIL debe estar verificado en SendGrid como "Single
-    Sender" (Settings → Sender Authentication → Single Sender Verification).
+    Envía un email de texto plano pidiéndoselo al Web App de Apps Script
+    (APPS_SCRIPT_EMAIL_URL en Render). El secreto compartido
+    (APPS_SCRIPT_EMAIL_SECRET) debe coincidir con el SECRET_ESPERADO puesto
+    dentro del script — si no, el script responde {"ok": false}.
     """
-    if not SENDGRID_API_KEY:
-        raise Exception("SENDGRID_API_KEY no configurada en Render")
+    if not APPS_SCRIPT_EMAIL_URL:
+        raise Exception("APPS_SCRIPT_EMAIL_URL no configurada en Render")
 
     resp = requests.post(
-        SENDGRID_API_URL,
-        headers={
-            "Authorization": f"Bearer {SENDGRID_API_KEY}",
-            "Content-Type": "application/json",
-        },
+        APPS_SCRIPT_EMAIL_URL,
         json={
-            "personalizations": [{"to": [{"email": to}]}],
-            "from": {"email": SENDGRID_FROM_EMAIL},
+            "to": to,
             "subject": subject,
-            "content": [{"type": "text/plain", "value": body}],
+            "body": body,
+            "secret": APPS_SCRIPT_EMAIL_SECRET,
         },
         timeout=15,
     )
-    if not resp.ok:
-        raise Exception(f"SendGrid {resp.status_code}: {resp.text[:300]}")
+    try:
+        data = resp.json()
+    except Exception:
+        data = {}
+
+    if not resp.ok or not data.get("ok"):
+        raise Exception(f"Apps Script email {resp.status_code}: {resp.text[:300]}")
     logger.info(f"[email_send] Email enviado a {to}: {subject}")

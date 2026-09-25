@@ -1323,8 +1323,8 @@ def test_whatsapp():
 @mobile_bp.route("/test-email", methods=["GET"])
 def test_email():
     """
-    Envía un email de prueba, para comprobar que EMAIL_SMTP_USER /
-    EMAIL_SMTP_APP_PASSWORD están bien configurados en Render.
+    Envía un email de prueba, para comprobar que APPS_SCRIPT_EMAIL_URL /
+    APPS_SCRIPT_EMAIL_SECRET están bien configurados en Render.
     Uso: /mobile/test-email?pin=XXXX&to=correo@ejemplo.com
     """
     if not check_pin():
@@ -1334,7 +1334,7 @@ def test_email():
         return jsonify({"ok": False, "error": "Falta ?to=correo@ejemplo.com"}), 400
     from services.email_send import enviar_email
     try:
-        enviar_email(to, "Prueba — ALC Homes", "Si lees esto, el envío de email por SMTP funciona correctamente.")
+        enviar_email(to, "Prueba — ALC Homes", "Si lees esto, el envío de email vía Apps Script funciona correctamente.")
         return jsonify({"ok": True, "message": f"Email de prueba enviado a {to}"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
