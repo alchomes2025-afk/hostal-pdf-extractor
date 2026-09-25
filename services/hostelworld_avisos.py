@@ -133,7 +133,7 @@ def enviar_avisos_checkin_hostelworld():
         try:
             enviar_email(
                 to=email,
-                subject="Check-in online — ALC Homes",
+                subject="Gracias por reservar en ALC Homes / Thank you for your reservation with ALC Homes",
                 body=_cuerpo_email(),
             )
             _marcar_avisado(book_id)
