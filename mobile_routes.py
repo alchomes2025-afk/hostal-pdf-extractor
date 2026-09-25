@@ -2206,9 +2206,17 @@ def create_booking():
     room_id = body.get("roomId")
     arrival = body.get("arrival")
     departure = body.get("departure")
+    price = body.get("price")
 
-    if not all([name, phone, email, room_id, arrival, departure]):
+    if not all([name, phone, email, room_id, arrival, departure]) or price in (None, ""):
         return jsonify({"ok": False, "error": "Faltan campos requeridos"}), 400
+
+    try:
+        price = float(price)
+        if price <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Precio inválido"}), 400
 
     if not is_valid_email(email):
         return jsonify({"ok": False, "error": "Email inválido"}), 400
@@ -2243,6 +2251,7 @@ def create_booking():
             "lastName":  last,
             "email":     email,
             "phone":     phone,
+            "price":     price,
         }
 
         resp = b24_post(
@@ -2279,13 +2288,14 @@ def create_booking():
             "guestName": name,
             "phone":     phone,
             "email":     email,
+            "price":     price,
             "status":    "new",
         })
 
         log_action(body.get("userName"), body.get("deviceId"), "create_booking", {
             "bookingId": new_id, "roomId": room_id,
             "arrival": arrival, "departure": departure,
-            "guestName": name, "phone": phone, "email": email,
+            "guestName": name, "phone": phone, "email": email, "price": price,
         })
 
         return jsonify({"ok": True, "data": data, "bookingId": new_id})

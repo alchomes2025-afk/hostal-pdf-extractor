@@ -657,6 +657,10 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
         <input type="date" id="nb-departure" class="form-inp"/>
       </div>
     </div>
+    <div class="form-grp">
+      <label class="form-lbl">Precio total (€) *</label>
+      <input type="number" id="nb-price" class="form-inp" placeholder="Ej: 150" min="0" step="0.01"/>
+    </div>
     <button class="sh-submit" id="nb-save">Crear reserva</button>
   </div>
 
@@ -1503,8 +1507,10 @@ $("#nb-save").addEventListener("click", async () => {
   const roomId = $("#nb-room").value;
   const arrival = $("#nb-arrival").value;
   const departure = $("#nb-departure").value;
+  const priceRaw = ($("#nb-price").value || "").trim();
+  const price = parseFloat(priceRaw);
 
-  if (!name || !phone || !email || !roomId || !arrival || !departure) {
+  if (!name || !phone || !email || !roomId || !arrival || !departure || !priceRaw) {
     showAlert("#booking-alert","err","✗ Completa todos los campos"); return;
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -1513,6 +1519,9 @@ $("#nb-save").addEventListener("click", async () => {
   if (arrival >= departure) {
     showAlert("#booking-alert","err","✗ La salida debe ser posterior a la entrada"); return;
   }
+  if (isNaN(price) || price <= 0) {
+    showAlert("#booking-alert","err","✗ Introduce un precio válido"); return;
+  }
 
   const btn = $("#nb-save");
   btn.textContent = "Creando…"; btn.disabled = true;
@@ -1520,7 +1529,7 @@ $("#nb-save").addEventListener("click", async () => {
     const r = await fetch(`${API}/create-booking`, {
       method: "POST",
       headers: {"content-type":"application/json","x-app-pin":PIN},
-      body: JSON.stringify({name, phone, email, roomId: parseInt(roomId), arrival, departure, userName: USER_NAME, deviceId: DEVICE_ID})
+      body: JSON.stringify({name, phone, email, roomId: parseInt(roomId), arrival, departure, price, userName: USER_NAME, deviceId: DEVICE_ID})
     });
     const d = await r.json();
     if (d.ok) {
@@ -1533,9 +1542,10 @@ $("#nb-save").addEventListener("click", async () => {
         guestName: name,
         phone:     phone,
         email:     email,
+        price:     price,
         status:    "new",
       });
-      ["#nb-name","#nb-phone","#nb-email","#nb-arrival","#nb-departure"].forEach(s => $(s).value = "");
+      ["#nb-name","#nb-phone","#nb-email","#nb-arrival","#nb-departure","#nb-price"].forEach(s => $(s).value = "");
       setTimeout(() => { closeSheet(); renderCalendar(); }, 1000);
     } else {
       // d.error puede ser un objeto JSON de Beds24 — lo mostramos legible
