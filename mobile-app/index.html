@@ -658,8 +658,8 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
       </div>
     </div>
     <div class="form-grp">
-      <label class="form-lbl">Precio total (€) *</label>
-      <input type="number" id="nb-price" class="form-inp" placeholder="Ej: 150" min="0" step="0.01"/>
+      <label class="form-lbl">Precio total</label>
+      <div id="nb-price" class="form-inp" style="background:#f5f5f5;color:var(--muted);">—</div>
     </div>
     <button class="sh-submit" id="nb-save">Crear reserva</button>
   </div>
@@ -1284,6 +1284,7 @@ function openDaySheet(ds, room) {
       $("#nb-arrival").value = ds;
       $("#nb-departure").value = depDate;
       $("#nb-room").value = SEL_ROOM.id;
+      calcNewBookingPrice();
       clearAlert("#booking-alert");
       showPanel("panel-booking");
     });
@@ -1499,6 +1500,41 @@ $("#pr-save").addEventListener("click", async () => {
 });
 
 // ── CREATE BOOKING ─────────────────────────────────────
+// El precio se calcula SIEMPRE a partir de los precios ya cargados de
+// Beds24 (PRICES/OVERRIDES, los mismos que pinta el calendario) — nunca se
+// escribe a mano, para que no se desincronice de lo que hay realmente
+// configurado en Beds24.
+function calcNewBookingPrice() {
+  const roomId = $("#nb-room").value;
+  const arrival = $("#nb-arrival").value;
+  const departure = $("#nb-departure").value;
+  const disp = $("#nb-price");
+  if (!roomId || !arrival || !departure || arrival >= departure) {
+    disp.textContent = "—";
+    disp.dataset.total = "";
+    return;
+  }
+  let cur = arrival;
+  let total = 0;
+  let faltan = false;
+  while (cur < departure) {
+    const info = getDateInfo(roomId, cur);
+    if (info.price1 === null || info.price1 === undefined) faltan = true;
+    else total += Number(info.price1);
+    const next = new Date(cur + "T12:00:00");
+    next.setDate(next.getDate() + 1);
+    cur = localDateStr(next);
+  }
+  if (faltan) {
+    disp.textContent = "Falta precio para alguna noche en el calendario";
+    disp.dataset.total = "";
+  } else {
+    disp.textContent = `${total.toFixed(2)} €`;
+    disp.dataset.total = String(total);
+  }
+}
+["#nb-room","#nb-arrival","#nb-departure"].forEach(s => $(s).addEventListener("change", calcNewBookingPrice));
+
 $("#nb-save").addEventListener("click", async () => {
   clearAlert("#booking-alert");
   const name = ($("#nb-name").value || "").trim();
@@ -1507,10 +1543,10 @@ $("#nb-save").addEventListener("click", async () => {
   const roomId = $("#nb-room").value;
   const arrival = $("#nb-arrival").value;
   const departure = $("#nb-departure").value;
-  const priceRaw = ($("#nb-price").value || "").trim();
+  const priceRaw = $("#nb-price").dataset.total || "";
   const price = parseFloat(priceRaw);
 
-  if (!name || !phone || !email || !roomId || !arrival || !departure || !priceRaw) {
+  if (!name || !phone || !email || !roomId || !arrival || !departure) {
     showAlert("#booking-alert","err","✗ Completa todos los campos"); return;
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -1520,7 +1556,7 @@ $("#nb-save").addEventListener("click", async () => {
     showAlert("#booking-alert","err","✗ La salida debe ser posterior a la entrada"); return;
   }
   if (isNaN(price) || price <= 0) {
-    showAlert("#booking-alert","err","✗ Introduce un precio válido"); return;
+    showAlert("#booking-alert","err","✗ No se pudo calcular el precio — revisa que el calendario tenga precio puesto para esas fechas"); return;
   }
 
   const btn = $("#nb-save");
@@ -1545,7 +1581,8 @@ $("#nb-save").addEventListener("click", async () => {
         price:     price,
         status:    "new",
       });
-      ["#nb-name","#nb-phone","#nb-email","#nb-arrival","#nb-departure","#nb-price"].forEach(s => $(s).value = "");
+      ["#nb-name","#nb-phone","#nb-email","#nb-arrival","#nb-departure"].forEach(s => $(s).value = "");
+      calcNewBookingPrice();
       setTimeout(() => { closeSheet(); renderCalendar(); }, 1000);
     } else {
       // d.error puede ser un objeto JSON de Beds24 — lo mostramos legible
