@@ -19,6 +19,7 @@ from config import (
 from services.beds24 import get_beds24_access_token
 from services.whatsapp import alerta
 from services.primavera_avisos import comprobar_y_avisar_checkins_ultima_hora
+from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
 
 logger = logging.getLogger(__name__)
 watchdog_bp = Blueprint("watchdog", __name__)
@@ -272,6 +273,15 @@ def watchdog():
         comprobar_y_avisar_checkins_ultima_hora()
     except Exception as e:
         logger.error(f"[watchdog] Error comprobando check-ins de última hora: {e}")
+
+    # ── 10. Email de check-in para huéspedes de Hostelworld ────────────────
+    # Hostelworld no permite plantillas de mensaje preprogramadas en Beds24,
+    # así que sin esto esos huéspedes no reciben nunca el enlace de check-in.
+    # Se envía un día antes de la llegada; dedupe por book_id en Firestore.
+    try:
+        enviar_avisos_checkin_hostelworld()
+    except Exception as e:
+        logger.error(f"[watchdog] Error enviando avisos de check-in a Hostelworld: {e}")
 
     # ── Resumen y alerta WhatsApp (con deduplicación) ─────────────────────
     n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")

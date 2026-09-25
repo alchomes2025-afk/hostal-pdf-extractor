@@ -1320,6 +1320,26 @@ def test_whatsapp():
     return jsonify({"ok": True, "message": "Mensaje de prueba enviado (revisa WhatsApp en unos segundos)"})
 
 
+@mobile_bp.route("/test-email", methods=["GET"])
+def test_email():
+    """
+    Envía un email de prueba, para comprobar que EMAIL_SMTP_USER /
+    EMAIL_SMTP_APP_PASSWORD están bien configurados en Render.
+    Uso: /mobile/test-email?pin=XXXX&to=correo@ejemplo.com
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    to = request.args.get("to")
+    if not to:
+        return jsonify({"ok": False, "error": "Falta ?to=correo@ejemplo.com"}), 400
+    from services.email_send import enviar_email
+    try:
+        enviar_email(to, "Prueba — ALC Homes", "Si lees esto, el envío de email por SMTP funciona correctamente.")
+        return jsonify({"ok": True, "message": f"Email de prueba enviado a {to}"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @mobile_bp.route("/logs", methods=["GET"])
 def get_logs():
     """

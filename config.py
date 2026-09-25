@@ -121,6 +121,14 @@ GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL_PRI  = "openai/gpt-oss-120b"
 GROQ_MODEL_FALL = "openai/gpt-oss-20b"
 
+# ── Configuración: envío de email vía SMTP (Gmail) ────────────────────────
+# Para avisos que Beds24 no puede mandar automáticamente (Hostelworld no
+# soporta plantillas preprogramadas de mensajes) — ver services/email_send.py
+# y services/hostelworld_avisos.py. EMAIL_SMTP_APP_PASSWORD es una
+# "contraseña de aplicación" de Google, no la contraseña normal de la cuenta.
+EMAIL_SMTP_USER     = os.environ.get("EMAIL_SMTP_USER", "alchomes2025@gmail.com")
+EMAIL_SMTP_PASSWORD = os.environ.get("EMAIL_SMTP_APP_PASSWORD", "")
+
 # ── Reservas de prueba ficticias ─────────────────────────────────────────
 # Números que siempre devuelven un estado concreto para poder probar la web
 # sin depender de reservas reales ni del horario actual.

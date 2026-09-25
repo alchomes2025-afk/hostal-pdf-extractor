@@ -299,7 +299,7 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
     diario nunca mostraría las entradas/salidas de la segunda propiedad.
 
     Devuelve una lista de dicts: {room_id, nombre_habitacion, huesped, book_id,
-    arrival, departure, canal}.
+    arrival, departure, canal, email}.
     Si falla la consulta (token, red, etc.) devuelve lista vacía y loguea el error,
     para no romper el resumen diario por un problema puntual de Beds24.
     """
@@ -313,7 +313,7 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
 
     resultado = []
     for property_id in BEDS24_PROPERTY_IDS:
-        params = {"propertyId": property_id}
+        params = {"propertyId": property_id, "includePersonalInfo": "true"}
         if tipo == "checkin":
             params["arrivalFrom"] = fecha_iso
             params["arrivalTo"] = fecha_iso
@@ -345,6 +345,7 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
             room_id = str(b.get("roomId", ""))
             if not room_id:
                 continue
+            guest = b.get("guest") or {}
             resultado.append({
                 "room_id": room_id,
                 "nombre_habitacion": ROOM_ID_DISPLAY_NAME.get(room_id, ROOM_CONFIG.get(room_id, {}).get("nombre", f"Room {room_id}")),
@@ -353,6 +354,7 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
                 "arrival": b.get("arrival"),
                 "departure": b.get("departure"),
                 "canal": _canal_legible(b),
+                "email": guest.get("email") or b.get("email"),
             })
 
         if descartadas_por_fecha:
