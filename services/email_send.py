@@ -1,34 +1,43 @@
 """
-services/email_send.py — Envío de email vía SMTP (Gmail).
+services/email_send.py — Envío de email vía la API HTTP de SendGrid.
+
+Se usa HTTP (no SMTP) porque Render bloquea el tráfico SMTP saliente en los
+planes básicos — confirmado 25/09/2026 probando con Gmail SMTP directo
+(credenciales correctas, pero "Network is unreachable" al intentar conectar).
 """
 import logging
-import smtplib
-from email.mime.text import MIMEText
+import requests
 
-from config import EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD
+from config import SENDGRID_API_KEY, SENDGRID_FROM_EMAIL
 
 logger = logging.getLogger(__name__)
 
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
+SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 
 def enviar_email(to, subject, body):
     """
-    Envía un email de texto plano vía SMTP con la cuenta de Gmail configurada
-    (EMAIL_SMTP_USER / EMAIL_SMTP_APP_PASSWORD en Render — esta última es una
-    "contraseña de aplicación" de Google, no la contraseña normal).
+    Envía un email de texto plano vía SendGrid (SENDGRID_API_KEY en Render).
+    SENDGRID_FROM_EMAIL debe estar verificado en SendGrid como "Single
+    Sender" (Settings → Sender Authentication → Single Sender Verification).
     """
-    if not EMAIL_SMTP_USER or not EMAIL_SMTP_PASSWORD:
-        raise Exception("EMAIL_SMTP_USER / EMAIL_SMTP_APP_PASSWORD no configurados en Render")
+    if not SENDGRID_API_KEY:
+        raise Exception("SENDGRID_API_KEY no configurada en Render")
 
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = subject
-    msg["From"] = EMAIL_SMTP_USER
-    msg["To"] = to
-
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as server:
-        server.starttls()
-        server.login(EMAIL_SMTP_USER, EMAIL_SMTP_PASSWORD)
-        server.sendmail(EMAIL_SMTP_USER, [to], msg.as_string())
+    resp = requests.post(
+        SENDGRID_API_URL,
+        headers={
+            "Authorization": f"Bearer {SENDGRID_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "personalizations": [{"to": [{"email": to}]}],
+            "from": {"email": SENDGRID_FROM_EMAIL},
+            "subject": subject,
+            "content": [{"type": "text/plain", "value": body}],
+        },
+        timeout=15,
+    )
+    if not resp.ok:
+        raise Exception(f"SendGrid {resp.status_code}: {resp.text[:300]}")
     logger.info(f"[email_send] Email enviado a {to}: {subject}")

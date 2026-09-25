@@ -121,13 +121,17 @@ GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL_PRI  = "openai/gpt-oss-120b"
 GROQ_MODEL_FALL = "openai/gpt-oss-20b"
 
-# ── Configuración: envío de email vía SMTP (Gmail) ────────────────────────
+# ── Configuración: envío de email vía SendGrid ────────────────────────────
 # Para avisos que Beds24 no puede mandar automáticamente (Hostelworld no
 # soporta plantillas preprogramadas de mensajes) — ver services/email_send.py
-# y services/hostelworld_avisos.py. EMAIL_SMTP_APP_PASSWORD es una
-# "contraseña de aplicación" de Google, no la contraseña normal de la cuenta.
-EMAIL_SMTP_USER     = os.environ.get("EMAIL_SMTP_USER", "alchomes2025guest@gmail.com")
-EMAIL_SMTP_PASSWORD = os.environ.get("EMAIL_SMTP_APP_PASSWORD", "")
+# y services/hostelworld_avisos.py.
+# Se usa la API HTTP de SendGrid en vez de SMTP porque Render bloquea el
+# tráfico SMTP saliente en los planes básicos (confirmado 25/09/2026: SMTP a
+# Gmail daba "Network is unreachable" con las credenciales correctas puestas).
+# SENDGRID_FROM_EMAIL debe ser el email verificado en SendGrid como "Single
+# Sender" (sin dominio propio, no se puede verificar un dominio entero).
+SENDGRID_API_KEY    = os.environ.get("SENDGRID_API_KEY", "")
+SENDGRID_FROM_EMAIL = os.environ.get("SENDGRID_FROM_EMAIL", "alchomes2025guest@gmail.com")
 
 # ── Reservas de prueba ficticias ─────────────────────────────────────────
 # Números que siempre devuelven un estado concreto para poder probar la web
