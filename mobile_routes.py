@@ -2636,6 +2636,29 @@ def cancel_booking():
             if str(b.get("id", "")) != str(booking_id)
         ]
 
+        # Restaurar disponibilidad: crear una reserva reduce numAvail en
+        # Beds24, pero cancelarla NO lo restaura automáticamente — sin este
+        # paso, las fechas quedaban "bloqueadas" en el calendario aunque ya
+        # no hubiera ninguna reserva real ocupándolas.
+        if cancelled_bk and cancelled_bk.get("roomId") and cancelled_bk.get("arrival") and cancelled_bk.get("departure"):
+            try:
+                noche_final = date.fromisoformat(cancelled_bk["departure"]) - timedelta(days=1)
+                b24_post(
+                    token,
+                    "/inventory/rooms/calendar",
+                    json_body=[{
+                        "roomId": int(cancelled_bk["roomId"]),
+                        "calendar": [{
+                            "from":     cancelled_bk["arrival"],
+                            "to":       noche_final.isoformat(),
+                            "numAvail": 1,
+                        }],
+                    }],
+                )
+                _set_override(cancelled_bk["roomId"], cancelled_bk["arrival"], noche_final.isoformat(), num_avail=1)
+            except Exception as e:
+                print(f"[cancel_booking] No se pudo restaurar disponibilidad tras cancelar {booking_id}: {e}")
+
         log_action(body.get("userName"), body.get("deviceId"), "cancel_booking", {
             "bookingId": booking_id,
             "roomId": cancelled_bk.get("roomId") if cancelled_bk else None,
