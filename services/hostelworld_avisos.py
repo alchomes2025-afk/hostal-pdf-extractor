@@ -58,15 +58,50 @@ def _marcar_avisado(book_id):
         logger.error(f"[hostelworld_avisos] Error guardando estado en Firestore: {e}")
 
 
-def _cuerpo_email(nombre_habitacion):
+def _cuerpo_email():
     return (
-        f"¡Hola!\n\n"
-        f"Mañana es tu día de llegada a ALC Homes ({nombre_habitacion}).\n\n"
-        f"Por favor, completa tu registro de entrada online antes de llegar, "
-        f"en el siguiente enlace:\n\n"
+        "¡Gracias por reservar en ALC HOMES!\n\n"
+        "Es obligatorio hacer el check-in online en el siguiente enlace (recuerde que si son dos "
+        "personas, deben rellenar la documentación de ambos huéspedes). Una vez haya completado el "
+        "check-in online, en este mismo enlace encontrará también los códigos de acceso al "
+        "establecimiento, el nombre de su habitación y el código de entrada a ésta, así como un "
+        "asistente virtual que le ayudará en todo lo que necesite, tanto en el proceso de check-in "
+        "como a lo largo de su estancia. Por favor, asegúrese de haber preguntado primero al "
+        "asistente virtual antes de hacer uso del teléfono de información y asistencia:\n\n"
         f"{CHECKIN_URL}\n\n"
-        f"Introduce tu nombre completo (o el número de reserva) para acceder a tu reserva.\n\n"
-        f"¡Te esperamos!\nALC Homes"
+        "Si no puede ver el enlace, escríbanos a:\n\n"
+        "alchomes2025.guest@gmail.com\n\n"
+        "indicando en el asunto su nombre completo. En unos minutos le responderemos con el enlace "
+        "de la web.\n\n"
+        "Puede comunicarse con nosotros 24h, vía mensajes dentro de la plataforma de Booking, o por "
+        "el teléfono y WhatsApp que aparece en su reserva, en la plataforma de Booking y en el "
+        "enlace adjunto.\n\n"
+        "El horario de entrada es a partir de las 15h y el acceso al establecimiento es por "
+        "códigos, que tendrá a su disposición a partir de las 15:00 el día de su llegada en nuestra "
+        "web, una vez haya completado el check-in online.\n\n"
+        "Esperamos que sea todo de su agrado.\n\n"
+        "Por favor, indíquenos su hora de llegada estimada.\n\n"
+        "----------------------------------------------------------------------------\n\n"
+        "Thank you for booking with ALC HOMES!\n\n"
+        "Completing the online check-in at the following link is mandatory (please note that if "
+        "there are two guests, you must fill out the documentation for both). Once you have "
+        "completed the online check-in, this same link will also provide you with the property "
+        "access codes, your room name and door code, as well as a virtual assistant to help you "
+        "with anything you need — whether during the check-in process or throughout your stay. "
+        "Please make sure to consult the virtual assistant before using the information and "
+        "assistance phone line:\n\n"
+        f"{CHECKIN_URL}\n\n"
+        "If you can't see the link, please email us at:\n\n"
+        "alchomes2025.guest@gmail.com\n\n"
+        "With your full name in the subject line. We'll reply with the link in few minutes.\n\n"
+        "You can contact us 24 hours a day via messages on the Booking platform, or by phone and "
+        "WhatsApp using the number listed in your reservation, on the Booking platform, and in the "
+        "link above.\n\n"
+        "Check-in begins at 3:00 PM, and access to the property is via codes, which will be "
+        "available on our website from 3:00 PM on your arrival day, once you have completed the "
+        "online check-in.\n\n"
+        "We hope everything is to your liking.\n\n"
+        "Please let us know your estimated time of arrival."
     )
 
 
@@ -98,8 +133,8 @@ def enviar_avisos_checkin_hostelworld():
         try:
             enviar_email(
                 to=email,
-                subject="Tu check-in online — ALC Homes",
-                body=_cuerpo_email(e.get("nombre_habitacion", "tu habitación")),
+                subject="Check-in online — ALC Homes",
+                body=_cuerpo_email(),
             )
             _marcar_avisado(book_id)
         except Exception as ex:
