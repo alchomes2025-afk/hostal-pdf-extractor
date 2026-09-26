@@ -20,6 +20,7 @@ from services.beds24 import get_beds24_access_token
 from services.whatsapp import alerta
 from services.primavera_avisos import comprobar_y_avisar_checkins_ultima_hora
 from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
+from services.registro_completado_avisos import enviar_avisos_registro_completado
 
 logger = logging.getLogger(__name__)
 watchdog_bp = Blueprint("watchdog", __name__)
@@ -282,6 +283,15 @@ def watchdog():
         enviar_avisos_checkin_hostelworld()
     except Exception as e:
         logger.error(f"[watchdog] Error enviando avisos de check-in a Hostelworld: {e}")
+
+    # ── 11. Email de "registro completado" para TODOS los huéspedes ────────
+    # En cuanto el parte de viajero queda registrado en RPV para una reserva
+    # próxima (cualquier plataforma), se avisa de que ya puede volver a la
+    # web a por los códigos de acceso. Dedupe por book_id en Firestore.
+    try:
+        enviar_avisos_registro_completado()
+    except Exception as e:
+        logger.error(f"[watchdog] Error enviando avisos de registro completado: {e}")
 
     # ── Resumen y alerta WhatsApp (con deduplicación) ─────────────────────
     n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")

@@ -365,3 +365,74 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
                 f"coincidir la fecha exacta de '{campo_fecha}' (filtro de la API no fiable)."
             )
     return resultado
+
+
+def obtener_bookings_rango_beds24(fecha_desde_iso, fecha_hasta_iso, tipo="checkin"):
+    """
+    Como obtener_bookings_dia_beds24, pero para un RANGO de fechas en una
+    sola llamada por propiedad (2 llamadas a Beds24 en total, no una por
+    día) — pensada para escaneos periódicos de una ventana de varios días
+    (ver services/registro_completado_avisos.py) sin repetir el patrón de
+    demasiadas llamadas encadenadas que causó el incidente de "Credit limit
+    exceeded" de sep 2026 (ver memoria beds24-integracion).
+
+    Devuelve la misma forma de dict que obtener_bookings_dia_beds24:
+    {room_id, nombre_habitacion, huesped, book_id, arrival, departure,
+    canal, email, country}.
+    """
+    try:
+        access_token = get_beds24_access_token()
+    except Exception as e:
+        logger.error(f"[CONTROL] Beds24 auth falló al consultar rango de {tipo} ({fecha_desde_iso}→{fecha_hasta_iso}): {e}")
+        return []
+
+    campo_fecha = "arrival" if tipo == "checkin" else "departure"
+
+    resultado = []
+    for property_id in BEDS24_PROPERTY_IDS:
+        params = {"propertyId": property_id, "includePersonalInfo": "true"}
+        if tipo == "checkin":
+            params["arrivalFrom"] = fecha_desde_iso
+            params["arrivalTo"] = fecha_hasta_iso
+        else:
+            params["departureFrom"] = fecha_desde_iso
+            params["departureTo"] = fecha_hasta_iso
+
+        try:
+            resp = requests.get(
+                f"{BEDS24_API_BASE}/bookings",
+                headers={"token": access_token, "accept": "application/json"},
+                params=params,
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+        except Exception as e:
+            logger.error(f"[CONTROL] Error consultando rango de {tipo} ({fecha_desde_iso}→{fecha_hasta_iso}, property {property_id}): {e}")
+            continue
+
+        for b in data:
+            fecha_campo = b.get(campo_fecha)
+            # Filtrado explícito por rango — igual que en obtener_bookings_dia_beds24,
+            # no confiar en que la API ya haya filtrado bien.
+            if not fecha_campo or not (fecha_desde_iso <= fecha_campo <= fecha_hasta_iso):
+                continue
+            if str(b.get("status", "")).lower() == "cancelled":
+                continue
+            room_id = str(b.get("roomId", ""))
+            if not room_id:
+                continue
+            guest = b.get("guest") or {}
+            resultado.append({
+                "room_id": room_id,
+                "nombre_habitacion": ROOM_ID_DISPLAY_NAME.get(room_id, ROOM_CONFIG.get(room_id, {}).get("nombre", f"Room {room_id}")),
+                "huesped": _extraer_nombre_huesped_beds24(b),
+                "book_id": b.get("id"),
+                "arrival": b.get("arrival"),
+                "departure": b.get("departure"),
+                "canal": _canal_legible(b),
+                "email": guest.get("email") or b.get("email"),
+                "country": guest.get("country") or b.get("country"),
+            })
+
+    return resultado
