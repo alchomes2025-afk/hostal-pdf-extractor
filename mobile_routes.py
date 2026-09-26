@@ -1340,6 +1340,31 @@ def test_email():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@mobile_bp.route("/diag-registro-completado", methods=["GET"])
+def diag_registro_completado():
+    """
+    Diagnóstico de SOLO LECTURA para el aviso de "registro completado"
+    (services/registro_completado_avisos.py): muestra qué reservas
+    recibirían el email AHORA MISMO, sin enviar nada ni tocar Firestore.
+    Uso: /mobile/diag-registro-completado?pin=XXXX
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    from services.registro_completado_avisos import _candidatos_registro_completado
+    try:
+        candidatos = _candidatos_registro_completado()
+        return jsonify({
+            "ok": True,
+            "total": len(candidatos),
+            "candidatos": [
+                {k: v for k, v in c.items() if k != "body"}
+                for c in candidatos
+            ],
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @mobile_bp.route("/logs", methods=["GET"])
 def get_logs():
     """

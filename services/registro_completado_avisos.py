@@ -106,28 +106,28 @@ def _cuerpo_email_en(nombre, nombre_propiedad):
     )
 
 
-def enviar_avisos_registro_completado():
+def _candidatos_registro_completado():
     """
-    Consulta las llegadas de hoy a hoy+VENTANA_DIAS (todas las propiedades,
-    una sola llamada por propiedad) y, cruzando con los partes ya recibidos
-    en RPV, envía el aviso de "ya puede volver a la web a por sus códigos" a
-    las reservas que aún no lo hayan recibido.
+    Calcula qué reservas recibirían el aviso ahora mismo (parte recibido en
+    RPV + todavía no avisadas), sin enviar nada ni tocar Firestore. Separado
+    de enviar_avisos_registro_completado() para poder reutilizarlo también
+    desde un endpoint de diagnóstico de solo lectura.
 
-    Pensada para llamarse desde /watchdog (cada 15 min) — no lanza excepción
-    hacia arriba: cualquier fallo se loguea y no debe bloquear el resto del
-    watchdog.
+    Devuelve una lista de dicts: {book_id, room_id, arrival, email, idioma,
+    subject, body, huesped, nombre_propiedad}.
     """
     partes = obtener_partes_recibidos_hoy()
     if not partes:
-        return
+        return []
 
     hoy = date.today()
     hasta = hoy + timedelta(days=VENTANA_DIAS)
     entradas = obtener_bookings_rango_beds24(hoy.isoformat(), hasta.isoformat(), tipo="checkin")
     if not entradas:
-        return
+        return []
 
     avisados = _leer_avisados()
+    candidatos = []
     for e in entradas:
         room_id = e.get("room_id")
         arrival = e.get("arrival")
@@ -151,8 +151,28 @@ def enviar_avisos_registro_completado():
             subject = f"Registration complete — {nombre_propiedad}: return to our website for your codes"
             body = _cuerpo_email_en(nombre, nombre_propiedad)
 
+        candidatos.append({
+            "book_id": book_id, "room_id": room_id, "arrival": arrival,
+            "email": email, "huesped": nombre, "nombre_propiedad": nombre_propiedad,
+            "idioma": idioma, "subject": subject, "body": body,
+        })
+    return candidatos
+
+
+def enviar_avisos_registro_completado():
+    """
+    Consulta las llegadas de hoy a hoy+VENTANA_DIAS (todas las propiedades,
+    una sola llamada por propiedad) y, cruzando con los partes ya recibidos
+    en RPV, envía el aviso de "ya puede volver a la web a por sus códigos" a
+    las reservas que aún no lo hayan recibido.
+
+    Pensada para llamarse desde /watchdog (cada 15 min) — no lanza excepción
+    hacia arriba: cualquier fallo se loguea y no debe bloquear el resto del
+    watchdog.
+    """
+    for c in _candidatos_registro_completado():
         try:
-            enviar_email(to=email, subject=subject, body=body)
-            _marcar_avisado(book_id)
+            enviar_email(to=c["email"], subject=c["subject"], body=c["body"])
+            _marcar_avisado(c["book_id"])
         except Exception as ex:
-            logger.error(f"[registro_completado_avisos] Error enviando email a {email} (reserva {book_id}): {ex}")
+            logger.error(f"[registro_completado_avisos] Error enviando email a {c['email']} (reserva {c['book_id']}): {ex}")
