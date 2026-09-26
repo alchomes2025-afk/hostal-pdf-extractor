@@ -13,6 +13,10 @@ Lleva en Firestore (system_state/hostelworld_checkin_emails) el conjunto de
 book_id ya avisados — sin reinicio diario, porque a cada reserva solo le
 corresponde un único día de aviso (el anterior a su llegada), no hace falta
 volver a comprobarla una vez enviado.
+
+El email se envía en un único idioma (no bilingüe): castellano si el país
+del huésped es España o un país hispanohablante de Latinoamérica, inglés en
+cualquier otro caso (incluido cuando Beds24 no informa el país).
 """
 import logging
 from datetime import date, timedelta
@@ -24,6 +28,21 @@ from services.email_send import enviar_email
 logger = logging.getLogger(__name__)
 
 CHECKIN_URL = "https://alc-homes-checkin.web.app/"
+
+# País (código ISO 3166-1 alpha-2, tal como lo devuelve Beds24) → se envía en
+# castellano para España e Hispanoamérica, en inglés para el resto. Si el
+# país no viene informado, por defecto inglés (más seguro con audiencia
+# internacional que asumir español).
+PAISES_HISPANOHABLANTES = {
+    "ES", "MX", "AR", "CO", "PE", "VE", "CL", "EC", "GT", "CU", "BO",
+    "DO", "HN", "PY", "SV", "NI", "CR", "PA", "UY", "PR",
+}
+
+
+def _idioma_email(country):
+    if country and str(country).strip().upper() in PAISES_HISPANOHABLANTES:
+        return "es"
+    return "en"
 
 
 def _doc_ref():
@@ -58,7 +77,7 @@ def _marcar_avisado(book_id):
         logger.error(f"[hostelworld_avisos] Error guardando estado en Firestore: {e}")
 
 
-def _cuerpo_email():
+def _cuerpo_email_es():
     return (
         "¡Gracias por reservar en ALC HOMES!\n\n"
         "Es obligatorio hacer el check-in online en el siguiente enlace (recuerde que si son dos "
@@ -80,8 +99,12 @@ def _cuerpo_email():
         "códigos, que tendrá a su disposición a partir de las 15:00 el día de su llegada en nuestra "
         "web, una vez haya completado el check-in online.\n\n"
         "Esperamos que sea todo de su agrado.\n\n"
-        "Por favor, indíquenos su hora de llegada estimada.\n\n"
-        "----------------------------------------------------------------------------\n\n"
+        "Por favor, indíquenos su hora de llegada estimada."
+    )
+
+
+def _cuerpo_email_en():
+    return (
         "Thank you for booking with ALC HOMES!\n\n"
         "Completing the online check-in at the following link is mandatory (please note that if "
         "there are two guests, you must fill out the documentation for both). Once you have "
@@ -130,12 +153,15 @@ def enviar_avisos_checkin_hostelworld():
         if not email:
             logger.warning(f"[hostelworld_avisos] Reserva {book_id} (Hostelworld) sin email — no se puede avisar")
             continue
+        idioma = _idioma_email(e.get("country"))
+        if idioma == "es":
+            subject = "Gracias por reservar en ALC Homes"
+            body = _cuerpo_email_es()
+        else:
+            subject = "Thank you for your reservation with ALC Homes"
+            body = _cuerpo_email_en()
         try:
-            enviar_email(
-                to=email,
-                subject="Gracias por reservar en ALC Homes / Thank you for your reservation with ALC Homes",
-                body=_cuerpo_email(),
-            )
+            enviar_email(to=email, subject=subject, body=body)
             _marcar_avisado(book_id)
         except Exception as ex:
             logger.error(f"[hostelworld_avisos] Error enviando email a {email} (reserva {book_id}): {ex}")
