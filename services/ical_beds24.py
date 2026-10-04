@@ -39,7 +39,7 @@ _estado = {}  # url -> {"t": epoch de la última comprobación, "fallos": seguid
 
 
 def _urls():
-    return [u for u in re.split(r"[,\s]+", BEDS24_ICAL_URLS or "") if u.startswith("http")]
+    return [u for u in re.split(r"[,;\s]+", BEDS24_ICAL_URLS or "") if u.startswith("http")]
 
 
 def _nombre(url):
