@@ -11,7 +11,7 @@ Backend del sistema de self check-in automatizado para **dos propiedades**: el h
 ## Estructura del backend (modularizado, septiembre 2026)
 `app.py` es solo el punto de entrada (crea la app Flask y registra blueprints). Toda la lógica vive en:
 - `config.py` — env vars, `ROOM_CONFIG`, `BEDS24_PROPERTY_IDS`, RPV, Firestore, reservas de prueba (`TEST_BOOKINGS`)
-- `services/` — `whatsapp.py`, `beds24.py`, `rpv.py`, `resumen.py`, `checkins_ultima_hora.py`, `hostelworld_avisos.py`, `registro_completado_avisos.py`, `guest_match.py`, `fechas.py` (lógica de negocio, sin rutas)
+- `services/` — `whatsapp.py`, `beds24.py`, `rpv.py`, `resumen.py`, `resumen_programado.py`, `checkins_ultima_hora.py`, `hostelworld_avisos.py`, `registro_completado_avisos.py`, `guest_match.py`, `fechas.py` (lógica de negocio, sin rutas)
 - `routes/` — un Blueprint por grupo de endpoints (`checkin.py`, `chat.py`, `resumen_routes.py`, `historial.py`, `watchdog.py`, `debug_diag.py`, `misc.py`)
 
 ## Dos propiedades en Beds24
@@ -32,11 +32,16 @@ La Casa de la Primavera recibe reservas de Booking, Airbnb y Holidu — cada pla
 ## Fechas y zona horaria (octubre 2026)
 Render corre en UTC. **Nunca usar `date.today()` ni `datetime.now()` sin zona para el "hoy" de negocio**: usar `hoy_madrid()` / `ahora_madrid()` de `services/fechas.py`. Con `date.today()` el día cambiaba a las 02:00 de Madrid (01:00 en invierno), y eso provocaba un falso aviso de "check-in de última hora" cada madrugada a las 02:13 (primer `/watchdog` tras el cambio de día UTC). Los `datetime.utcnow()` de `mobile_routes.py` son marcas de tiempo en UTC a propósito (logs, token health, `modifiedFrom` de Beds24): no cambiarlos.
 
+## Resúmenes diarios por WhatsApp (octubre 2026)
+- Dos resúmenes, ambos con entradas y salidas de **las dos propiedades** y el canal de cada reserva: **08:00 → día de hoy**, **23:00 → día de mañana**.
+- Los envía **el propio backend desde `/watchdog`** (`services/resumen_programado.py`), en la primera pasada a partir de cada hora (≤15 min de retraso) y con reintento en la siguiente si falla. Dedupe en Firestore `system_state/resumenes_programados` (`{"manana": fecha, "noche": fecha}`). Sin Firestore no se envía (sin dedupe saldría cada 15 min).
+- Los triggers `ejecutarResumenDiario` del Apps Script "Orquestador" **ya no se usan** (se quitaron al pasar a este sistema; si siguieran, habría resúmenes duplicados). `GET /resumen` queda como herramienta manual: `?enviar=0` para verlo sin enviar, `&dia=manana` para el de las 23:00.
+
 ## Avisos de check-in de última hora
-- `services/checkins_ultima_hora.py` (antes `primavera_avisos.py`) cubre **las dos propiedades**. Lo llama `/watchdog` cada 15 min.
-- Solo avisa a partir de las **09:30 de Madrid** (`HORA_INICIO_AVISOS`), después del resumen diario de la mañana (lo lanza el Apps Script "Orquestador" en la franja ~8-9h; antes lo lanzaba Make.com). Antes de esa hora todas las llegadas del día parecerían "de última hora". Si se mueve la hora del resumen, mover también esta constante.
-- Si a partir de esa hora no consta el resumen de hoy (falló el trigger), avisa igualmente de las llegadas pero como "📋 Llegada de hoy … aviso de respaldo", no como "última hora". Para distinguirlo, `marcar_anunciados()` escribe la fecha del día aunque la lista de llegadas venga vacía.
-- El dedupe vive en Firestore en `system_state/primavera_avisos` — el nombre del documento se mantiene a propósito aunque el módulo se renombrara (cambiarlo perdería el estado del día al desplegar).
+- `services/checkins_ultima_hora.py` (antes `primavera_avisos.py`) cubre **las dos propiedades**. Lo llama `/watchdog` cada 15 min (después del paso de resúmenes), **a cualquier hora del día**.
+- "Última hora" = llegada de hoy que no estaba en ningún resumen que cubriera hoy (el de las 23:00 de ayer o el de las 08:00 de hoy). Cada resumen, tras enviarse, marca sus entradas para el día que cubre; el de las 23:00 deja preparado el día siguiente, así que desde las 00:00 ya se avisa.
+- Mientras ningún resumen haya cubierto el día de hoy no se avisa de nada: sin esa referencia todas las llegadas parecerían de última hora. Se resuelve solo cuando sale el de las 08:00, que se reintenta en cada watchdog.
+- El dedupe vive en Firestore en `system_state/primavera_avisos`, por fecha: `{"dias": {"YYYY-MM-DD": [book_id, ...]}}` (los días pasados se podan; se lee también el formato antiguo `{fecha, book_ids}`). El nombre del documento se mantiene a propósito aunque el módulo se renombrara (cambiarlo perdería el estado al desplegar).
 
 ## Infraestructura y cuentas
 - La clave de Groq API se movió a un proxy en el backend después de que GitHub auto-revocara una clave expuesta en el repo público — **nunca** hardcodear claves API en el código, aunque el repo sea privado.

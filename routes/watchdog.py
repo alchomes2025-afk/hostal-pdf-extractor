@@ -22,6 +22,7 @@ from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hor
 from services.fechas import hoy_madrid
 from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
 from services.registro_completado_avisos import enviar_avisos_registro_completado
+from services.resumen_programado import enviar_resumenes_programados
 
 logger = logging.getLogger(__name__)
 watchdog_bp = Blueprint("watchdog", __name__)
@@ -77,7 +78,9 @@ def watchdog():
     Verifica el estado de TODOS los servicios y variables del sistema.
     Envía alerta WhatsApp si detecta cualquier problema.
 
-    Llamar desde Make.com una vez al día (ej. 08:00h) o desde UptimeRobot.
+    Lo llama el Apps Script "Orquestador" cada 15 min. Además de los
+    chequeos de salud, envía los resúmenes diarios de las 08:00 y las 23:00
+    y los avisos de negocio (última hora, Hostelworld, registro completado).
 
     GET /watchdog?token=Alchomes2025
 
@@ -266,17 +269,27 @@ def watchdog():
                 f"Firestore no responde: {e}",
                 "Verificar credenciales de servicio y permisos del proyecto en Firebase Console"))
 
-    # ── 9. Check-ins de última hora (hostal + La Casa de la Primavera) ─────
+    # ── 9. Resúmenes diarios por WhatsApp (08:00 hoy / 23:00 mañana) ──────
+    # Va ANTES del paso 10: cuando sale un resumen, marca sus entradas como
+    # anunciadas y el chequeo de última hora de esta misma pasada ya no las
+    # repite. Dedupe propio en Firestore (system_state/resumenes_programados).
+    try:
+        enviar_resumenes_programados()
+    except Exception as e:
+        logger.error(f"[watchdog] Error enviando resúmenes programados: {e}")
+
+    # ── 10. Check-ins de última hora (hostal + La Casa de la Primavera) ────
     # No es un chequeo de salud del sistema (no entra en `problemas`/dedupe
     # de watchdog): es un aviso de negocio aparte, con su propio dedupe por
     # book_id en Firestore. Se aprovecha esta ejecución cada 15 min para
-    # detectar rápido una reserva que llega después del resumen de la mañana.
+    # detectar rápido, a cualquier hora, una reserva que no estaba en el
+    # resumen que cubría el día.
     try:
         comprobar_y_avisar_checkins_ultima_hora()
     except Exception as e:
         logger.error(f"[watchdog] Error comprobando check-ins de última hora: {e}")
 
-    # ── 10. Email de check-in para huéspedes de Hostelworld ────────────────
+    # ── 11. Email de check-in para huéspedes de Hostelworld ────────────────
     # Hostelworld no permite plantillas de mensaje preprogramadas en Beds24,
     # así que sin esto esos huéspedes no reciben nunca el enlace de check-in.
     # Se envía un día antes de la llegada; dedupe por book_id en Firestore.
@@ -285,7 +298,7 @@ def watchdog():
     except Exception as e:
         logger.error(f"[watchdog] Error enviando avisos de check-in a Hostelworld: {e}")
 
-    # ── 11. Email de "registro completado" para TODOS los huéspedes ────────
+    # ── 12. Email de "registro completado" para TODOS los huéspedes ────────
     # En cuanto el parte de viajero queda registrado en RPV para una reserva
     # próxima (cualquier plataforma), se avisa de que ya puede volver a la
     # web a por los códigos de acceso. Dedupe por book_id en Firestore.

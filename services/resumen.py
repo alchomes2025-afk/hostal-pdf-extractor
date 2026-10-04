@@ -28,32 +28,36 @@ def _formatear_estancia(entrada):
         return None, entrada.get("departure") or "?"
 
 
-def generar_mensaje_resumen(hora_str=None):
+def generar_mensaje_resumen(hora_str=None, dia=None):
     """
-    Genera el resumen diario para WhatsApp.
-    - ENTRADAS HOY y SALIDAS HOY se obtienen directamente de Beds24 (reservas
-      reales), no de los emails de partes recibidos — así el resumen refleja
-      quién debe entrar/salir hoy según la reserva, independientemente de si
-      ya ha rellenado el parte o no.
+    Genera el resumen para WhatsApp de las entradas y salidas de `dia` (por
+    defecto hoy, Madrid). Se usa para el resumen de las 8h (dia = hoy) y el de
+    las 23h (dia = mañana) — ver services/resumen_programado.py.
+    - ENTRADAS y SALIDAS se obtienen directamente de Beds24 (reservas
+      reales), de las dos propiedades, no de los partes recibidos — así el
+      resumen refleja quién entra/sale según la reserva, haya rellenado o no
+      el parte.
     - Para cada ENTRADA se indica además si el parte de viajero ya se ha
-      recibido (cruzando con los emails procesados) o si sigue pendiente.
+      recibido en RPV o si sigue pendiente.
     - Para las entradas de La Casa de la Primavera se añade además cuántas
       noches dura la reserva y la fecha de salida (en el hostal esto no
       aporta tanto porque el huésped suele ver la duración a simple vista;
       en Primavera, al ser una vivienda completa reservada con más antelación
       y menos rotación visual, conviene dejarlo explícito).
-    - Cada entrada indica también el canal por el que llegó la reserva
+    - Cada entrada y cada salida indica el canal por el que llegó la reserva
       (Booking.com, Airbnb, Directo...).
 
-    Devuelve (mensaje, book_ids_hoy): el segundo valor es la lista de book_id
-    de Beds24 de TODAS las entradas de hoy (hostal + La Casa de la Primavera),
-    para que el llamador las marque como "ya anunciadas" en
-    services/checkins_ultima_hora tras confirmar el envío — así el chequeo de
-    última hora (ver services/checkins_ultima_hora.py, que ahora cubre ambas
-    propiedades) no vuelve a avisar de ninguna de ellas.
+    Devuelve (mensaje, book_ids_entradas): el segundo valor es la lista de
+    book_id de Beds24 de TODAS las entradas de `dia`, para que el llamador las
+    marque como "ya anunciadas" para ese día (services/checkins_ultima_hora)
+    tras confirmar el envío — así el chequeo de última hora no vuelve a
+    avisar de ninguna de ellas.
     """
     hoy = hoy_madrid()
-    hoy_iso = hoy.isoformat()
+    dia = dia or hoy
+    dia_iso = dia.isoformat()
+    es_manana = dia > hoy
+    etiqueta = "MAÑANA" if es_manana else "HOY"
     if hora_str is None:
         hora_str = ahora_madrid().strftime("%H")
 
@@ -65,22 +69,25 @@ def generar_mensaje_resumen(hora_str=None):
     except Exception as e:
         avisar_error_critico(
             "Fallo de autenticación con Beds24 (resumen diario)",
-            f"No se pudo conectar con Beds24 para generar el resumen de hoy ({e}). "
+            f"No se pudo conectar con Beds24 para generar el resumen del {dia.strftime('%d/%m/%Y')} ({e}). "
             f"El resumen se enviará sin entradas/salidas hasta que se resuelva. "
             f"Revisa BEDS24_REFRESH_TOKEN en Render."
         )
 
-    entradas_beds24 = obtener_bookings_dia_beds24(hoy_iso, tipo="checkin")
-    salidas_beds24  = obtener_bookings_dia_beds24(hoy_iso, tipo="checkout")
+    entradas_beds24 = obtener_bookings_dia_beds24(dia_iso, tipo="checkin")
+    salidas_beds24  = obtener_bookings_dia_beds24(dia_iso, tipo="checkout")
     partes_recibidos = obtener_partes_recibidos_hoy()
 
-    hoy_fmt = hoy.strftime("%d/%m/%Y")
-    lineas = [f"🏨 ALCHOMES — {hoy_fmt} · {hora_str}:00h"]
+    dia_fmt = dia.strftime("%d/%m/%Y")
+    if es_manana:
+        lineas = [f"🌙 ALCHOMES — Resumen de MAÑANA {dia_fmt} · {hora_str}:00h"]
+    else:
+        lineas = [f"🏨 ALCHOMES — {dia_fmt} · {hora_str}:00h"]
 
-    lineas.append("\n✅ ENTRADAS HOY:")
+    lineas.append(f"\n✅ ENTRADAS {etiqueta}:")
     if entradas_beds24:
         for e in entradas_beds24:
-            parte_ok = (e["room_id"], hoy_iso) in partes_recibidos
+            parte_ok = (e["room_id"], dia_iso) in partes_recibidos
             estado = "📄 parte recibido" if parte_ok else "⚠️ parte PENDIENTE"
             canal = e.get("canal", "Desconocido")
             if e["room_id"] == ROOM_ID_PRIMAVERA:
@@ -92,12 +99,12 @@ def generar_mensaje_resumen(hora_str=None):
     else:
         lineas.append("• (ninguna)")
 
-    lineas.append("\n🚪 SALIDAS HOY:")
+    lineas.append(f"\n🚪 SALIDAS {etiqueta}:")
     if salidas_beds24:
         for s in salidas_beds24:
-            lineas.append(f"• {s['nombre_habitacion']}")
+            lineas.append(f"• {s['nombre_habitacion']} — {s.get('canal', 'Desconocido')}")
     else:
         lineas.append("• (ninguna)")
 
-    book_ids_hoy = [e["book_id"] for e in entradas_beds24]
-    return "\n".join(lineas), book_ids_hoy
+    book_ids_entradas = [e["book_id"] for e in entradas_beds24]
+    return "\n".join(lineas), book_ids_entradas

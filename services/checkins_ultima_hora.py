@@ -1,49 +1,38 @@
 """
 services/checkins_ultima_hora.py — Aviso de WhatsApp para check-ins de
-ÚLTIMA HORA, tanto en el Hostal como en La Casa de la Primavera (reservas que
-llegan después de que ya haya salido el resumen diario de la mañana,
-típicamente reservas hechas el mismo día). Antes se llamaba
-primavera_avisos.py, de cuando solo cubría La Casa de la Primavera.
+ÚLTIMA HORA, tanto en el Hostal como en La Casa de la Primavera: reservas con
+llegada HOY que no aparecían en ningún resumen de ese día (ni en el de las
+23h del día anterior ni en el de las 8h de hoy, ver
+services/resumen_programado.py). Funciona a cualquier hora del día. Antes se
+llamaba primavera_avisos.py, de cuando solo cubría La Casa de la Primavera.
 
-Lleva en Firestore la lista de book_id de Beds24 ya anunciados HOY — tanto
-por el resumen diario (routes/resumen_routes.py llama a marcar_anunciados()
-tras enviarlo) como por esta misma función — para no avisar dos veces de la
-misma reserva. El doc se "reinicia" solo cada día nuevo (se compara la fecha
-guardada, no hace falta borrarlo).
+Lleva en Firestore, por fecha, los book_id ya anunciados — por los resúmenes
+(llaman a marcar_anunciados() tras enviarse) y por esta misma función — para
+no avisar dos veces de la misma reserva:
+    {"dias": {"YYYY-MM-DD": [book_id, ...], ...}}
+Que una fecha esté en el mapa significa que algún resumen ya cubrió ese día;
+mientras no lo esté, no se avisa de nada (todas las llegadas parecerían "de
+última hora"). Los días pasados se podan al escribir.
 
 El documento de Firestore sigue llamándose system_state/primavera_avisos a
-propósito: cambiarle el nombre perdería el estado del día en curso al
-desplegar y provocaría avisos duplicados. No renombrarlo.
+propósito: cambiarle el nombre perdería el estado en curso al desplegar y
+provocaría avisos duplicados. No renombrarlo.
 
 "Hoy" es siempre el día de Madrid (services/fechas.py), no el del servidor
-(UTC). Con date.today() el día cambiaba a las 02:00 de Madrid, el estado se
-reiniciaba y el watchdog de las 02:13 avisaba de todas las llegadas del día
-como si fueran de última hora.
-
-Si a partir de HORA_INICIO_AVISOS no consta el resumen de hoy (falló el
-trigger), se avisa igualmente de las llegadas pendientes, pero etiquetadas
-como aviso de respaldo y no como "de última hora".
+(UTC). Con date.today() el día cambiaba a las 02:00 de Madrid y el watchdog de
+las 02:13 avisaba de todas las llegadas del día como si fueran de última hora.
 """
 import logging
-from datetime import date, time  # date: usado en _formatear_estancia
+from datetime import date
 
 import config
 from services.beds24 import obtener_bookings_dia_beds24
-from services.fechas import ahora_madrid, hoy_madrid
+from services.fechas import hoy_madrid
 from services.whatsapp import alerta
 
 logger = logging.getLogger(__name__)
 
 ROOM_ID_PRIMAVERA = "720841"
-
-# El aviso de última hora solo tiene sentido DESPUÉS del resumen de la mañana
-# (el Apps Script "Orquestador" lo lanza en la franja de ~8-9h, hora de
-# Madrid). Antes de esa hora el documento de "anunciados" de hoy está vacío y
-# todas las llegadas del día parecerían "de última hora". Se deja un margen de
-# 30 min para que el resumen termine de enviarse y marcar sus book_id. Las
-# reservas que entren de madrugada no se pierden: aparecen en el propio
-# resumen de la mañana.
-HORA_INICIO_AVISOS = time(9, 30)
 
 
 def _doc_ref():
@@ -52,42 +41,44 @@ def _doc_ref():
     return config.db.collection("system_state").document("primavera_avisos")
 
 
-def _leer_estado_hoy():
-    """(dia_registrado, book_ids_como_str) del día de hoy (Madrid).
-
-    dia_registrado es True si hoy ya se anunciaron las llegadas del día, por
-    el resumen de la mañana o por una pasada anterior de esta función. Es
-    False si Firestore no está disponible, si no hay doc, o si el doc
-    guardado es de un día anterior (se considera reiniciado, sin borrarlo)."""
+def _leer_dias():
+    """{fecha_iso: set(book_id como str)} de los días ya cubiertos por algún
+    resumen. None si Firestore no está disponible o falla la lectura (para no
+    confundirlo con "no hay nada anunciado")."""
     ref = _doc_ref()
     if ref is None:
-        return False, set()
+        return None
     try:
         doc = ref.get()
         if not doc.exists:
-            return False, set()
+            return {}
         data = doc.to_dict() or {}
-        if data.get("fecha") != hoy_madrid().isoformat():
-            return False, set()
-        return True, set(str(b) for b in data.get("book_ids", []))
+        if "dias" in data:
+            return {f: set(str(b) for b in ids) for f, ids in (data.get("dias") or {}).items()}
+        # Formato antiguo (hasta oct 2026): un único día {fecha, book_ids}.
+        if data.get("fecha"):
+            return {data["fecha"]: set(str(b) for b in data.get("book_ids", []))}
+        return {}
     except Exception as e:
         logger.error(f"[primavera_avisos] Error leyendo estado en Firestore: {e}")
-        return False, set()
+        return None
 
 
-def marcar_anunciados(book_ids):
-    """Añade estos book_id al conjunto de 'ya anunciados hoy', para que ni el
-    resumen de la tarde ni el chequeo de última hora vuelvan a avisar de
-    ellos. Escribe aunque la lista venga vacía: así queda constancia de que
-    hoy salió el resumen aunque no hubiera llegadas, y una reserva posterior
-    se etiqueta como "de última hora" y no como aviso de respaldo."""
-    book_ids = [str(b) for b in book_ids if b is not None]
+def marcar_anunciados(book_ids, dia=None):
+    """Añade estos book_id al conjunto de anunciados de `dia` (por defecto
+    hoy). Escribe aunque la lista venga vacía: que el día figure en el mapa es
+    lo que indica que ya lo cubrió un resumen y habilita los avisos de última
+    hora de ese día."""
     ref = _doc_ref()
-    if ref is None:
+    dias = _leer_dias()
+    if ref is None or dias is None:
         return
+    hoy_iso = hoy_madrid().isoformat()
+    dia_iso = (dia or hoy_madrid()).isoformat()
+    dias = {f: ids for f, ids in dias.items() if f >= hoy_iso}
+    dias[dia_iso] = dias.get(dia_iso, set()) | {str(b) for b in book_ids if b is not None}
     try:
-        nuevos = _leer_estado_hoy()[1] | set(book_ids)
-        ref.set({"fecha": hoy_madrid().isoformat(), "book_ids": sorted(nuevos)})
+        ref.set({"dias": {f: sorted(ids) for f, ids in dias.items()}})
     except Exception as e:
         logger.error(f"[primavera_avisos] Error guardando estado en Firestore: {e}")
 
@@ -108,54 +99,48 @@ def comprobar_y_avisar_checkins_ultima_hora():
     """
     Consulta los check-ins de HOY en TODAS las propiedades (hostal + La Casa
     de la Primavera) directamente en Beds24 y avisa por WhatsApp de
-    cualquiera que no se haya anunciado todavía (ni en el resumen diario ni
-    en una llamada anterior a esta misma función) — pensada para llamarse
-    desde /watchdog, que ya corre cada 15 min, así que una reserva de última
-    hora se detecta y avisa en <15 min en vez de esperar al resumen de la
-    noche.
+    cualquiera que no se haya anunciado todavía (ni en un resumen ni en una
+    llamada anterior a esta misma función) — pensada para llamarse desde
+    /watchdog, que ya corre cada 15 min, así que una reserva de última hora
+    se detecta y avisa en <15 min, a cualquier hora.
 
     No lanza excepción hacia arriba: cualquier fallo se loguea y no debe
     bloquear el resto del watchdog.
     """
-    if ahora_madrid().time() < HORA_INICIO_AVISOS:
+    hoy_iso = hoy_madrid().isoformat()
+    dias = _leer_dias()
+    if not dias or hoy_iso not in dias:
+        # Ningún resumen ha cubierto todavía el día de hoy (falló el de las
+        # 23h de ayer y aún no ha salido el de las 8h). Sin esa referencia,
+        # todas las llegadas parecerían de última hora. El resumen de las 8h
+        # se reintenta en cada watchdog, así que esto se resuelve solo.
         return
 
-    hoy_iso = hoy_madrid().isoformat()
     entradas = obtener_bookings_dia_beds24(hoy_iso, tipo="checkin")
     if not entradas:
         return
 
-    dia_registrado, anunciados = _leer_estado_hoy()
+    anunciados = dias[hoy_iso]
     nuevas = [e for e in entradas if str(e.get("book_id")) not in anunciados]
     if not nuevas:
         return
-
-    if dia_registrado:
-        tipo = "⚡ Check-in de última hora"
-        nota = "(No estaba en el resumen diario — reserva de última hora.)"
-    else:
-        # No consta el resumen de la mañana (el trigger de Apps Script falló o
-        # no llegó a enviarse): se avisa igualmente de las llegadas, pero sin
-        # presentarlas como "de última hora", porque casi seguro no lo son.
-        tipo = "📋 Llegada de hoy"
-        nota = "(No consta el resumen de la mañana — aviso de respaldo.)"
 
     for e in nuevas:
         canal = e.get("canal", "Desconocido")
         if e.get("room_id") == ROOM_ID_PRIMAVERA:
             noches, salida_fmt = _formatear_estancia(e)
             linea_estancia = f"{noches} noche{'s' if noches != 1 else ''}, sale {salida_fmt}" if noches is not None else f"Sale {salida_fmt}"
-            titulo = f"{tipo} — La Casa de la Primavera"
+            titulo = "⚡ Check-in de última hora — La Casa de la Primavera"
             cuerpo = (
                 f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n{linea_estancia}\n\n"
-                f"{nota}"
+                f"(No estaba en el resumen diario — reserva de última hora.)"
             )
         else:
-            titulo = f"{tipo} — Hostal ALC Homes"
+            titulo = "⚡ Check-in de última hora — Hostal ALC Homes"
             cuerpo = (
                 f"Habitación: {e.get('nombre_habitacion', '?')}\n"
                 f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n\n"
-                f"{nota}"
+                f"(No estaba en el resumen diario — reserva de última hora.)"
             )
         alerta(titulo, cuerpo, nivel="info")
 
