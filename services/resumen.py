@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime
 
 from services.beds24 import get_beds24_access_token, obtener_bookings_dia_beds24
-from services.rpv import obtener_partes_recibidos_hoy
+from services.rpv import obtener_partes_con_estado
 from services.whatsapp import avisar_error_critico
 from services.fechas import ahora_madrid, hoy_madrid
 
@@ -78,7 +78,7 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
     salidas_beds24  = obtener_bookings_dia_beds24(dia_iso, tipo="checkout")
     # Dato de RPV de hasta 5 min (no los ~30 de segundo plano): el resumen
     # sale 2 veces al día y el estado del parte debe estar al día.
-    partes_recibidos = obtener_partes_recibidos_hoy(max_age=5 * 60)
+    partes_recibidos, rpv_sin_verificar = obtener_partes_con_estado(max_age=5 * 60)
 
     dia_fmt = dia.strftime("%d/%m/%Y")
     if es_manana:
@@ -89,8 +89,12 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
     lineas.append(f"\n✅ ENTRADAS {etiqueta}:")
     if entradas_beds24:
         for e in entradas_beds24:
-            parte_ok = (e["room_id"], dia_iso) in partes_recibidos
-            estado = "📄 parte recibido" if parte_ok else "⚠️ parte PENDIENTE"
+            if (e["room_id"], dia_iso) in partes_recibidos:
+                estado = "📄 parte recibido"
+            elif e["room_id"] in rpv_sin_verificar:
+                estado = "❓ parte SIN VERIFICAR (RPV no responde)"
+            else:
+                estado = "⚠️ parte PENDIENTE"
             canal = e.get("canal", "Desconocido")
             if e["room_id"] == ROOM_ID_PRIMAVERA:
                 noches, salida_fmt = _formatear_estancia(e)

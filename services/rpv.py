@@ -125,21 +125,33 @@ def parte_recibido_para(room_id, fecha_entrada_iso):
     return False
 
 
-def obtener_partes_recibidos_hoy(max_age=TTL_SEGUNDO_PLANO):
+def obtener_partes_con_estado(max_age=TTL_SEGUNDO_PLANO):
     """
-    Devuelve un set de (room_id, fecha_entrada_iso) de los partes de viajeros
-    ya completados en RPV, para todas las habitaciones de RPV_PROPERTY_MAP.
-    Pese al nombre, incluye cualquier fecha que devuelva RPV, no solo hoy.
+    Devuelve (recibidos, sin_verificar):
+      - recibidos: set de (room_id, fecha_entrada_iso) de los partes ya
+        completados en RPV, de todas las habitaciones de RPV_PROPERTY_MAP.
+        Incluye cualquier fecha que devuelva RPV, no solo hoy.
+      - sin_verificar: set de room_id cuya consulta a RPV ha fallado (429,
+        caída...). Para esas habitaciones "no consta parte" NO significa
+        "pendiente": puede haberse enviado y no verse. Un parte que sí está
+        en `recibidos` sigue siendo válido aunque el dato sea algo antiguo.
     """
-    recibidos = set()
+    recibidos, sin_verificar = set(), set()
     if not RPV_API_KEY:
         logger.warning("[resumen] RPV_API_KEY no configurada — no se pueden verificar partes")
-        return recibidos
+        return recibidos, set(RPV_PROPERTY_MAP)
 
     for room_id in RPV_PROPERTY_MAP:
-        registros, _ = obtener_registros(room_id, max_age=max_age)
+        registros, error = obtener_registros(room_id, max_age=max_age)
+        if error is not None:
+            sin_verificar.add(room_id)
         for reg in registros:
             fecha = (reg.get("reserva") or {}).get("fecha_entrada", "")
             if fecha:
                 recibidos.add((room_id, fecha))
-    return recibidos
+    return recibidos, sin_verificar
+
+
+def obtener_partes_recibidos_hoy(max_age=TTL_SEGUNDO_PLANO):
+    """Solo el set de partes recibidos — ver obtener_partes_con_estado."""
+    return obtener_partes_con_estado(max_age)[0]
