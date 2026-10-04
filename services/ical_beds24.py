@@ -39,7 +39,9 @@ _estado = {}  # url -> {"t": epoch de la última comprobación, "fallos": seguid
 
 
 def _urls():
-    return [u for u in re.split(r"[,;\s]+", BEDS24_ICAL_URLS or "") if u.startswith("http")]
+    # Además de los separadores habituales, se corta siempre justo antes de cada
+    # "http": si se olvida un separador entre dos enlaces, no quedan pegados.
+    return [u for u in re.split(r"[,;\s]+|(?=https?://)", BEDS24_ICAL_URLS or "") if u.startswith("http")]
 
 
 def _nombre(url):
