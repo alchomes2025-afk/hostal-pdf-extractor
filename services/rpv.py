@@ -1,103 +1,145 @@
 """
 services/rpv.py — Consultas a la API de registroparteviajeros.com para
 verificar si el parte de viajero de una reserva ya fue completado.
+
+Todas las llamadas a RPV pasan por obtener_registros(), con una copia en
+memoria por propiedad (el backend corre con 1 worker de gunicorn, así que es
+compartida por todas las peticiones). Motivo: RPV respondió 429 (demasiadas
+peticiones) en oct 2026, cuando el watchdog le hacía 12 llamadas en ráfaga
+cada 15 min (chequeo de salud + aviso de registro completado) más las de la
+web de check-in. Con la copia:
+  - Las tareas de segundo plano (watchdog, resúmenes, registro completado)
+    aceptan datos de hasta TTL_SEGUNDO_PLANO → RPV se consulta como mucho
+    cada ~30 min desde el watchdog.
+  - La web de check-in acepta el dato en copia solo si dice "parte
+    recibido" (un parte enviado no desaparece); si no, vuelve a preguntar,
+    como mucho una vez por minuto y propiedad.
+  - Si una llamada falla, se usa la última copia buena aunque sea antigua,
+    para no dejar a un huésped sin sus códigos por un fallo puntual de RPV.
+  - Tras un 429 no se llama a RPV durante PAUSA_TRAS_429 (o lo que diga su
+    cabecera Retry-After), para no alargar el bloqueo.
 """
 import logging
+import time
+
 import requests
 
 from config import RPV_API_KEY, RPV_API_URL, RPV_PROPERTY_MAP, RPV_API_KEY_MAP
 
 logger = logging.getLogger(__name__)
 
+TTL_SEGUNDO_PLANO = 25 * 60
+TTL_CHECKIN = 60
+PAUSA_TRAS_429 = 10 * 60
 
-def _consultar_rpv_propiedad(prop_id, api_key=None):
+_copias = {}         # prop_id -> (epoch de la última llamada buena, registros)
+_pausa_hasta = 0.0   # epoch hasta el que no se llama a RPV tras un 429
+
+
+def _pedir_a_rpv(prop_id, key):
+    """Una llamada real a RPV. Devuelve la lista de registros o lanza una
+    excepción con un mensaje legible (los textos de 429 empiezan por "429"
+    para que el watchdog los distinga)."""
+    global _pausa_hasta
+    if time.time() < _pausa_hasta:
+        raise Exception("429 — en pausa tras límite de peticiones de RPV")
+    resp = requests.get(
+        RPV_API_URL,
+        headers={"Authorization": f"Bearer {key}", "accept": "application/json"},
+        params={"propiedad": prop_id},
+        timeout=10,
+    )
+    if resp.status_code == 429:
+        retry_after = resp.headers.get("Retry-After", "")
+        segundos = int(retry_after) if retry_after.isdigit() else PAUSA_TRAS_429
+        _pausa_hasta = time.time() + segundos
+        raise Exception(f"429 — límite de peticiones de RPV (pausa de {segundos // 60} min)")
+    if resp.status_code == 401:
+        raise Exception("API key inválida (401)")
+    if resp.status_code == 403:
+        raise Exception("Acceso denegado (403) — revisa que la API key usada tenga permiso sobre esta propiedad")
+    if resp.status_code == 404:
+        raise Exception(f"Propiedad no encontrada: {prop_id}")
+    resp.raise_for_status()
+    data = resp.json()
+    # La API puede devolver un dict único o una lista
+    return data if isinstance(data, list) else [data]
+
+
+def obtener_registros(room_id, max_age):
     """
-    Llama a la API de registroparteviajeros.com para una propiedad concreta.
-    Devuelve la lista de registros (cada uno con reserva + huespedes) o [].
+    Registros de RPV de la propiedad de esta habitación. Cada registro:
+      { "reserva": { "fecha_entrada": "YYYY-MM-DD", ... }, "huespedes": {...} }
 
-    api_key: clave de la cuenta de RPV a usar. Si no se indica, usa la
-    cuenta del hostal (RPV_API_KEY) por defecto — así el resto de llamadas
-    existentes en el código, que no pasan este parámetro, siguen funcionando
-    exactamente igual que antes.
+    max_age: segundos de antigüedad aceptables de la copia en memoria (0 =
+    preguntar siempre a RPV).
 
-    Estructura de respuesta:
-      [ { "reserva": { "fecha_entrada": "YYYY-MM-DD", "fecha_salida": "...", ... },
-          "huespedes": { "huesped": [...] } }, ... ]
+    Devuelve (registros, error): error es None si los datos son buenos y
+    recientes, o el texto del fallo si la llamada falló — en ese caso
+    registros es la última copia buena (o [] si no la hay).
     """
-    key = api_key or RPV_API_KEY
-    if not key or not prop_id:
-        return []
+    prop_id = RPV_PROPERTY_MAP.get(room_id)
+    key = RPV_API_KEY_MAP.get(room_id) or RPV_API_KEY
+    if not prop_id or not key:
+        return [], "sin prop_id o API key de RPV para esta habitación"
+
+    copia = _copias.get(prop_id)
+    if copia and time.time() - copia[0] < max_age:
+        return copia[1], None
     try:
-        resp = requests.get(
-            RPV_API_URL,
-            headers={"Authorization": f"Bearer {key}", "accept": "application/json"},
-            params={"propiedad": prop_id},
-            timeout=10,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        # La API puede devolver un dict único o una lista
-        return data if isinstance(data, list) else [data]
+        registros = _pedir_a_rpv(prop_id, key)
     except Exception as e:
-        logger.error(f"[RPV] Error consultando {prop_id}: {e}")
-        return []
+        logger.error(f"[RPV] Error consultando {prop_id} (room {room_id}): {e}")
+        return (copia[1] if copia else []), str(e)
+    _copias[prop_id] = (time.time(), registros)
+    return registros, None
+
+
+def _tiene_parte(registros, fecha_entrada_iso):
+    return any((r.get("reserva") or {}).get("fecha_entrada", "") == fecha_entrada_iso for r in registros)
 
 
 def parte_recibido_para(room_id, fecha_entrada_iso):
     """
-    Verifica si el parte de viajero fue completado para esta habitación
-    y fecha de entrada, consultando directamente la API de
-    registroparteviajeros.com (sin depender de Gmail).
-
-    La presencia de un registro con reserva.fecha_entrada coincidente
-    es suficiente para confirmar que el huésped completó el proceso.
+    True si el parte de viajero de esta habitación y fecha de entrada ya
+    está en RPV. Lo usa la web de check-in, así que un "no" se vuelve a
+    comprobar contra RPV (como mucho una vez por minuto), mientras que un
+    "sí" en la copia se da por bueno sin llamar.
 
     Usa la cuenta de RPV correcta para esa habitación (RPV_API_KEY_MAP),
     ya que algunas propiedades (ej. La Casa de la Primavera) tienen su
     propia cuenta de RPV, distinta de la del hostal.
     """
-    prop_id = RPV_PROPERTY_MAP.get(room_id)
-    if not prop_id:
+    if room_id not in RPV_PROPERTY_MAP:
         logger.warning(f"[check-in] room_id {room_id} no tiene prop_id en RPV_PROPERTY_MAP")
         return False
 
-    api_key = RPV_API_KEY_MAP.get(room_id)  # None → usa RPV_API_KEY por defecto
-    registros = _consultar_rpv_propiedad(prop_id, api_key=api_key)
-    for reg in registros:
-        reserva = reg.get("reserva", {})
-        if reserva.get("fecha_entrada", "") == fecha_entrada_iso:
-            logger.info(
-                f"[check-in] Parte RECIBIDO vía RPV API: "
-                f"room={room_id} fecha={fecha_entrada_iso}"
-            )
-            return True
+    registros, _ = obtener_registros(room_id, max_age=TTL_SEGUNDO_PLANO)
+    if not _tiene_parte(registros, fecha_entrada_iso):
+        registros, _ = obtener_registros(room_id, max_age=TTL_CHECKIN)
 
+    if _tiene_parte(registros, fecha_entrada_iso):
+        logger.info(f"[check-in] Parte RECIBIDO vía RPV API: room={room_id} fecha={fecha_entrada_iso}")
+        return True
     logger.info(f"[check-in] Parte PENDIENTE: room={room_id} fecha={fecha_entrada_iso}")
     return False
 
 
-def obtener_partes_recibidos_hoy():
+def obtener_partes_recibidos_hoy(max_age=TTL_SEGUNDO_PLANO):
     """
     Devuelve un set de (room_id, fecha_entrada_iso) de los partes de viajeros
-    ya completados, consultando directamente la API de registroparteviajeros.com
-    para las 5 habitaciones.
-
-    Reemplaza la versión anterior basada en Gmail (que requería
-    GOOGLE_REFRESH_TOKEN y caducaba con frecuencia).
+    ya completados en RPV, para todas las habitaciones de RPV_PROPERTY_MAP.
+    Pese al nombre, incluye cualquier fecha que devuelva RPV, no solo hoy.
     """
     recibidos = set()
     if not RPV_API_KEY:
         logger.warning("[resumen] RPV_API_KEY no configurada — no se pueden verificar partes")
         return recibidos
 
-    for room_id, prop_id in RPV_PROPERTY_MAP.items():
-        api_key = RPV_API_KEY_MAP.get(room_id)  # None → usa RPV_API_KEY por defecto
-        registros = _consultar_rpv_propiedad(prop_id, api_key=api_key)
+    for room_id in RPV_PROPERTY_MAP:
+        registros, _ = obtener_registros(room_id, max_age=max_age)
         for reg in registros:
-            reserva = reg.get("reserva", {})
-            fecha = reserva.get("fecha_entrada", "")
+            fecha = (reg.get("reserva") or {}).get("fecha_entrada", "")
             if fecha:
                 recibidos.add((room_id, fecha))
-                logger.info(f"[resumen] Parte recibido: room={room_id} fecha={fecha}")
-
     return recibidos

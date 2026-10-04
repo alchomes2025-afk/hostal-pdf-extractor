@@ -76,7 +76,9 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
 
     entradas_beds24 = obtener_bookings_dia_beds24(dia_iso, tipo="checkin")
     salidas_beds24  = obtener_bookings_dia_beds24(dia_iso, tipo="checkout")
-    partes_recibidos = obtener_partes_recibidos_hoy()
+    # Dato de RPV de hasta 5 min (no los ~30 de segundo plano): el resumen
+    # sale 2 veces al día y el estado del parte debe estar al día.
+    partes_recibidos = obtener_partes_recibidos_hoy(max_age=5 * 60)
 
     dia_fmt = dia.strftime("%d/%m/%Y")
     if es_manana:

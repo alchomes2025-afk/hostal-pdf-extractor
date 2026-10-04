@@ -17,6 +17,7 @@ from config import (
     GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI,
 )
 from services.beds24 import get_beds24_access_token
+from services.rpv import obtener_registros, TTL_SEGUNDO_PLANO
 from services.whatsapp import alerta
 from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hora
 from services.fechas import hoy_madrid
@@ -161,39 +162,38 @@ def watchdog():
             "Verificar BEDS24_REFRESH_TOKEN en Render — puede haber caducado"))
 
     # ── 3. RPV API (probar cada habitación) ───────────────────────────────
+    # Va por services/rpv.obtener_registros, con la misma copia en memoria que
+    # usan los avisos y resúmenes: RPV se consulta como mucho cada ~30 min
+    # desde aquí (antes, 12 llamadas en ráfaga cada 15 min provocaron un 429).
     rpv_ok = []
     rpv_fail = []
-    for room_id, prop_id in RPV_PROPERTY_MAP.items():
+    rpv_limitado = []
+    for room_id in RPV_PROPERTY_MAP:
         nombre = ROOM_CONFIG.get(room_id, {}).get("nombre", room_id)
-        # Usa la clave de RPV correcta para esta habitación (algunas propiedades
-        # tienen cuenta de RPV propia, distinta de la del hostal) — mismo criterio
-        # que ya usa parte_recibido_para().
-        api_key_usar = RPV_API_KEY_MAP.get(room_id) or RPV_API_KEY
-        try:
-            resp = requests.get(
-                RPV_API_URL,
-                headers={"Authorization": f"Bearer {api_key_usar}", "accept": "application/json"},
-                params={"propiedad": prop_id},
-                timeout=8,
-            )
-            if resp.status_code == 401:
-                raise Exception("API key inválida (401)")
-            if resp.status_code == 403:
-                raise Exception("Acceso denegado (403) — revisa que la API key usada tenga permiso sobre esta propiedad")
-            if resp.status_code == 404:
-                raise Exception(f"Propiedad no encontrada: {prop_id}")
-            resp.raise_for_status()
+        _, error = obtener_registros(room_id, max_age=TTL_SEGUNDO_PLANO)
+        if error is None:
             rpv_ok.append(nombre)
-        except Exception as e:
-            rpv_fail.append(f"{nombre}: {e}")
+        elif error.startswith("429"):
+            rpv_limitado.append(nombre)
+        else:
+            rpv_fail.append(f"{nombre}: {error}")
 
-    resultados["rpv_api"] = {"ok": len(rpv_fail) == 0, "ok_list": rpv_ok, "fail_list": rpv_fail}
+    resultados["rpv_api"] = {"ok": not rpv_fail and not rpv_limitado, "ok_list": rpv_ok,
+                             "fail_list": rpv_fail, "limitado_429": rpv_limitado}
     if rpv_fail:
         problemas.append(("critico",
             f"RPV API falla en {len(rpv_fail)} habitación(es): {'; '.join(rpv_fail)}",
             "Verificar en Render que RPV_API_KEY (hostal) y RPV_API_KEY_CASA_PRIMAVERA "
             "(si aplica) están configuradas y son correctas — puede haber caducado, "
             "cambiado, o faltar la variable de la propiedad afectada"))
+    if rpv_limitado:
+        # Texto fijo (sin lista de habitaciones): la firma de dedupe del
+        # watchdog depende de él, y si variara se repetiría el WhatsApp.
+        problemas.append(("warning",
+            "RPV API está limitando peticiones (429)",
+            "No hay que tocar nada: el backend deja de llamar unos minutos y "
+            "reintenta solo; mientras, la web de check-in usa el último dato "
+            "conocido. Si dura más de una hora, revisar el volumen de llamadas a RPV"))
 
     # ── 4. Groq API ───────────────────────────────────────────────────────
     if GROQ_API_KEY:
