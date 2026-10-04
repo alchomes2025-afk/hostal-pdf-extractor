@@ -11,7 +11,7 @@ Backend del sistema de self check-in automatizado para **dos propiedades**: el h
 ## Estructura del backend (modularizado, septiembre 2026)
 `app.py` es solo el punto de entrada (crea la app Flask y registra blueprints). Toda la lógica vive en:
 - `config.py` — env vars, `ROOM_CONFIG`, `BEDS24_PROPERTY_IDS`, RPV, Firestore, reservas de prueba (`TEST_BOOKINGS`)
-- `services/` — `whatsapp.py`, `beds24.py`, `rpv.py`, `resumen.py`, `resumen_programado.py`, `checkins_ultima_hora.py`, `hostelworld_avisos.py`, `registro_completado_avisos.py`, `guest_match.py`, `fechas.py` (lógica de negocio, sin rutas)
+- `services/` — `whatsapp.py`, `beds24.py`, `rpv.py`, `resumen.py`, `resumen_programado.py`, `checkins_ultima_hora.py`, `hostelworld_avisos.py`, `registro_completado_avisos.py`, `ical_beds24.py`, `guest_match.py`, `fechas.py` (lógica de negocio, sin rutas)
 - `routes/` — un Blueprint por grupo de endpoints (`checkin.py`, `chat.py`, `resumen_routes.py`, `historial.py`, `watchdog.py`, `debug_diag.py`, `misc.py`)
 
 ## Dos propiedades en Beds24
@@ -31,6 +31,12 @@ La Casa de la Primavera recibe reservas de Booking, Airbnb y Holidu — cada pla
 
 ## Fechas y zona horaria (octubre 2026)
 Render corre en UTC. **Nunca usar `date.today()` ni `datetime.now()` sin zona para el "hoy" de negocio**: usar `hoy_madrid()` / `ahora_madrid()` de `services/fechas.py`. Con `date.today()` el día cambiaba a las 02:00 de Madrid (01:00 en invierno), y eso provocaba un falso aviso de "check-in de última hora" cada madrugada a las 02:13 (primer `/watchdog` tras el cambio de día UTC). Los `datetime.utcnow()` de `mobile_routes.py` son marcas de tiempo en UTC a propósito (logs, token health, `modifiedFrom` de Beds24): no cambiarlos.
+
+## Vigilancia del iCal de Beds24 que importa RPV (octubre 2026)
+- RPV crea las reservas de su listado importando una vez al día el iCal de exportación de cada habitación (`api.beds24.com/ical/bookings.ics?roomid=…&token=…`, pegado en el campo "Calendario de Booking" de cada ficha de RPV). Si Beds24 lo deja de servir, RPV no importa nada nuevo, sigue poniendo "Sincronizado" y **no avisa**. Pasó el 2026-10-04: en Beds24 (SETTINGS → CHANNEL MANAGER → ICAL EXPORT) el ajuste "Export" estaba en "Disable" en todas las habitaciones y el enlace daba `Error: room synchroniser not enabled`.
+- `services/ical_beds24.py` abre los 6 enlaces desde `/watchdog` (paso 3b) y mete el fallo en `problemas` (WhatsApp con el dedupe habitual). Un fallo solo se confirma tras 2 pasadas seguidas (+1 reintento inmediato) y los OK se cachean 55 min. Los mensajes y logs **no incluyen nunca el enlace** (lleva el token).
+- Los enlaces van en la variable de entorno **`BEDS24_ICAL_URLS`** de Render (6 URLs separadas por comas, espacios o saltos de línea; son los mismos que están en las fichas de RPV, variante "Include Property and Room Description"). Si no está definida, el chequeo se omite sin avisar (`resultados.ical_beds24.configurado = false`). Si se regenera un token en Beds24, hay que cambiarlo en las 6 fichas de RPV **y** en esta variable.
+- "Export" debe estar en **solo reservas**: con "Bookings + Unavailable Dates" los bloqueos salen como eventos y RPV los importaría como reservas pendientes falsas.
 
 ## Resúmenes diarios por WhatsApp (octubre 2026)
 - Dos resúmenes, ambos con entradas y salidas de **las dos propiedades** y el canal de cada reserva: **08:00 → día de hoy**, **23:00 → día de mañana**.

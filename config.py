@@ -135,6 +135,12 @@ GROQ_MODEL_FALL = "openai/gpt-oss-20b"
 APPS_SCRIPT_EMAIL_URL    = os.environ.get("APPS_SCRIPT_EMAIL_URL", "")
 APPS_SCRIPT_EMAIL_SECRET = os.environ.get("APPS_SCRIPT_EMAIL_SECRET", "")
 
+# ── Calendarios iCal de Beds24 (los que importa RPV) ──────────────────────
+# Los 6 enlaces (uno por habitación) que están pegados en las fichas de RPV,
+# separados por comas, espacios o saltos de línea. Llevan un token: secreto,
+# solo en Render → Environment. Se vigilan desde /watchdog (services/ical_beds24.py).
+BEDS24_ICAL_URLS = os.environ.get("BEDS24_ICAL_URLS", "")
+
 # ── Reservas de prueba ficticias ─────────────────────────────────────────
 # Números que siempre devuelven un estado concreto para poder probar la web
 # sin depender de reservas reales ni del horario actual.

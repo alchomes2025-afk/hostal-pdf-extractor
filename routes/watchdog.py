@@ -18,6 +18,7 @@ from config import (
 )
 from services.beds24 import get_beds24_access_token
 from services.rpv import obtener_registros, TTL_SEGUNDO_PLANO
+from services.ical_beds24 import comprobar_feeds_ical
 from services.whatsapp import alerta
 from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hora
 from services.fechas import hoy_madrid
@@ -194,6 +195,22 @@ def watchdog():
             "No hay que tocar nada: el backend deja de llamar unos minutos y "
             "reintenta solo; mientras, la web de check-in usa el último dato "
             "conocido. Si dura más de una hora, revisar el volumen de llamadas a RPV"))
+
+    # ── 3b. Calendarios iCal de Beds24 (los que importa RPV) ──────────────
+    # RPV no avisa si deja de poder importarlos (sigue poniendo "Sincronizado"):
+    # sin esto, las reservas nuevas no llegan a RPV y nadie se entera.
+    ical = comprobar_feeds_ical()
+    if ical is None:
+        resultados["ical_beds24"] = {"configurado": False}
+    else:
+        resultados["ical_beds24"] = {"ok": not ical["fail"], "ok_list": ical["ok"], "fail_list": ical["fail"]}
+        if ical["fail"]:
+            problemas.append(("critico",
+                f"Calendario iCal de Beds24 falla en {len(ical['fail'])} habitación(es): {'; '.join(ical['fail'])}",
+                "RPV no importa reservas nuevas mientras falle (y sigue poniendo 'Sincronizado'). "
+                "En Beds24: SETTINGS → CHANNEL MANAGER → ICAL EXPORT, comprobar que 'Export' de esa "
+                "habitación no está en Disable (debe ser solo reservas) y que el enlace abre en el "
+                "navegador un texto que empieza por BEGIN:VCALENDAR"))
 
     # ── 4. Groq API ───────────────────────────────────────────────────────
     if GROQ_API_KEY:
