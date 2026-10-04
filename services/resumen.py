@@ -87,12 +87,20 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
         lineas = [f"🏨 ALCHOMES — {dia_fmt} · {hora_str}:00h"]
 
     lineas.append(f"\n✅ ENTRADAS {etiqueta}:")
+    hay_sin_verificar_futuro = False
     if entradas_beds24:
         for e in entradas_beds24:
             if (e["room_id"], dia_iso) in partes_recibidos:
                 estado = "📄 parte recibido"
             elif e["room_id"] in rpv_sin_verificar:
                 estado = "❓ parte SIN VERIFICAR (RPV no responde)"
+            elif es_manana:
+                # Verificado el 2026-10-04: la API de RPV solo devuelve los partes
+                # con entrada de HOY, aunque el huésped ya lo haya enviado con
+                # antelación (el panel de RPV lo muestra como completado). Para
+                # mañana "no consta" NO significa "pendiente".
+                estado = "❓ parte sin verificar"
+                hay_sin_verificar_futuro = True
             else:
                 estado = "⚠️ parte PENDIENTE"
             canal = e.get("canal", "Desconocido")
@@ -104,6 +112,8 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
                 lineas.append(f"• {e['nombre_habitacion']} ({estado}) — {canal}")
     else:
         lineas.append("• (ninguna)")
+    if hay_sin_verificar_futuro:
+        lineas.append("ℹ️ RPV no deja ver los partes de mañana hasta el día de la entrada: «sin verificar» puede ser pendiente o ya enviado.")
 
     lineas.append(f"\n🚪 SALIDAS {etiqueta}:")
     if salidas_beds24:
