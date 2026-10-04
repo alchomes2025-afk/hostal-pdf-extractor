@@ -9,6 +9,8 @@ from flask import Blueprint, request, jsonify
 from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
 from services.beds24 import get_beds24_access_token, _ref_en_booking
 from services.fechas import hoy_madrid
+from services.rpv import obtener_registros, TTL_SEGUNDO_PLANO
+from config import RPV_PROPERTY_MAP, ROOM_CONFIG
 
 logger = logging.getLogger(__name__)
 debug_bp = Blueprint("debug_diag", __name__)
@@ -45,6 +47,32 @@ def ver_mensajes_beds24():
         return jsonify({"ok": True, "book_id": book_id, "mensajes": resp.json()}), 200
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@debug_bp.route("/diag-rpv", methods=["GET"])
+def diag_rpv():
+    """
+    Diagnóstico de solo lectura: qué fechas de entrada devuelve la API de RPV
+    en cada habitación (sin datos personales de los huéspedes). Sirve para
+    saber si RPV incluye los partes enviados con antelación (fecha futura).
+    Usa la copia en memoria de services/rpv.py: no añade llamadas a RPV si
+    los datos tienen menos de ~25 min.
+
+    Uso: /diag-rpv?token=Alchomes2025
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+
+    habitaciones = {}
+    for room_id in RPV_PROPERTY_MAP:
+        registros, error = obtener_registros(room_id, max_age=TTL_SEGUNDO_PLANO)
+        fechas = sorted({(r.get("reserva") or {}).get("fecha_entrada", "?") for r in registros})
+        habitaciones[ROOM_CONFIG.get(room_id, {}).get("nombre", room_id)] = {
+            "fechas_entrada": fechas, "registros": len(registros), "error": error,
+        }
+    return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "habitaciones": habitaciones}), 200
 
 
 @debug_bp.route("/ver-booking-completo", methods=["GET"])
