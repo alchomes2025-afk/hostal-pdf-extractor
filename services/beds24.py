@@ -9,6 +9,7 @@ from datetime import date, timedelta
 from config import BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID, BEDS24_PROPERTY_IDS, ROOM_CONFIG
 from services.whatsapp import avisar_error_critico
 from services.guest_match import emparejar_nombre
+from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def buscar_booking_por_ref(booking_ref):
         logger.error(f"[check-in] Beds24 auth error en buscar_booking_por_ref: {e}")
         return None
 
-    hoy   = date.today()
+    hoy   = hoy_madrid()
     desde = (hoy - timedelta(days=5)).isoformat()
     hasta = (hoy + timedelta(days=180)).isoformat()
 
@@ -155,7 +156,7 @@ def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
         logger.error(f"[check-in] Beds24 auth error en buscar_booking_por_nombre: {e}")
         return None, False
 
-    hoy    = date.today()
+    hoy    = hoy_madrid()
     manana = hoy + timedelta(days=1)
     # arrivalFrom amplio para no perder a huéspedes ya alojados con una
     # estancia larga en curso; el filtro real de relevancia es en Python.

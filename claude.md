@@ -11,7 +11,7 @@ Backend del sistema de self check-in automatizado para **dos propiedades**: el h
 ## Estructura del backend (modularizado, septiembre 2026)
 `app.py` es solo el punto de entrada (crea la app Flask y registra blueprints). Toda la lógica vive en:
 - `config.py` — env vars, `ROOM_CONFIG`, `BEDS24_PROPERTY_IDS`, RPV, Firestore, reservas de prueba (`TEST_BOOKINGS`)
-- `services/` — `whatsapp.py`, `beds24.py`, `rpv.py`, `resumen.py` (lógica de negocio, sin rutas)
+- `services/` — `whatsapp.py`, `beds24.py`, `rpv.py`, `resumen.py`, `checkins_ultima_hora.py`, `hostelworld_avisos.py`, `registro_completado_avisos.py`, `guest_match.py`, `fechas.py` (lógica de negocio, sin rutas)
 - `routes/` — un Blueprint por grupo de endpoints (`checkin.py`, `chat.py`, `resumen_routes.py`, `historial.py`, `watchdog.py`, `debug_diag.py`, `misc.py`)
 
 ## Dos propiedades en Beds24
@@ -28,6 +28,14 @@ La Casa de la Primavera recibe reservas de Booking, Airbnb y Holidu — cada pla
 - `buscar_booking_por_nombre()` NO pide fecha al huésped — el sistema ya la sabe: solo considera candidatos con llegada **hoy o mañana** (el enlace se envía el día antes o el mismo día), o huéspedes **ya alojados** (llegada ≤ hoy ≤ salida). Evita comparar contra reservas de todo el año.
 - El emparejamiento en sí vive en **`services/guest_match.py`** (nuevo módulo, sin dependencia de Beds24): primero normalización determinista (mayúsculas/acentos/orden de palabras) — si hay una única coincidencia, responde al instante sin gastar Groq. Si hay cero o varias, le pasa a Groq (mismo `GROQ_API_KEY` que `/chat`) la lista corta de candidatos de esa ventana (nunca toda la base de datos) para que tolere erratas de escritura. Si Groq tampoco resuelve con confianza, `/check-in` responde `409 {"error": "nombre_ambiguo"}` pidiendo al huésped que contacte con recepción — nunca se adivina.
 - **Pipeline externo por email** (fuera de este repo, vive en Google Apps Script + Make.com): cuenta `alchomes2025guest@gmail.com` recibe correos de huéspedes que no pueden usar el enlace directo (algunas plataformas bloquean el link en el mensaje de bienvenida). Apps Script empuja cada correo nuevo a un Webhook de Make cada minuto; Make llama a Groq para extraer nombre/número/plataforma del asunto, consulta `GET /check-in?ref=...` (público, sin token) y responde al huésped con el enlace + el `book_id` de la respuesta. **`book_id` y el endpoint público `/check-in` son un contrato con ese pipeline — si se renombran o se protege el endpoint con token, avisar antes, se rompe silenciosamente sin que este repo lo note.**
+
+## Fechas y zona horaria (octubre 2026)
+Render corre en UTC. **Nunca usar `date.today()` ni `datetime.now()` sin zona para el "hoy" de negocio**: usar `hoy_madrid()` / `ahora_madrid()` de `services/fechas.py`. Con `date.today()` el día cambiaba a las 02:00 de Madrid (01:00 en invierno), y eso provocaba un falso aviso de "check-in de última hora" cada madrugada a las 02:13 (primer `/watchdog` tras el cambio de día UTC). Los `datetime.utcnow()` de `mobile_routes.py` son marcas de tiempo en UTC a propósito (logs, token health, `modifiedFrom` de Beds24): no cambiarlos.
+
+## Avisos de check-in de última hora
+- `services/checkins_ultima_hora.py` (antes `primavera_avisos.py`) cubre **las dos propiedades**. Lo llama `/watchdog` cada 15 min.
+- Solo avisa a partir de las **09:30 de Madrid** (`HORA_INICIO_AVISOS`), después del resumen diario de la mañana (lo lanza el Apps Script "Orquestador" en la franja ~8-9h; antes lo lanzaba Make.com). Antes de esa hora todas las llegadas del día parecerían "de última hora". Si se mueve la hora del resumen, mover también esta constante.
+- El dedupe vive en Firestore en `system_state/primavera_avisos` — el nombre del documento se mantiene a propósito aunque el módulo se renombrara (cambiarlo perdería el estado del día al desplegar).
 
 ## Infraestructura y cuentas
 - La clave de Groq API se movió a un proxy en el backend después de que GitHub auto-revocara una clave expuesta en el repo público — **nunca** hardcodear claves API en el código, aunque el repo sea privado.

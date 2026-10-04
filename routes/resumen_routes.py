@@ -7,7 +7,7 @@ from flask import Blueprint, request, jsonify
 from config import API_TOKEN, TEST_TOKEN
 from services.resumen import generar_mensaje_resumen
 from services.whatsapp import enviar_whatsapp_callmebot
-from services.primavera_avisos import marcar_anunciados
+from services.checkins_ultima_hora import marcar_anunciados
 
 logger = logging.getLogger(__name__)
 resumen_bp = Blueprint("resumen", __name__)
@@ -61,7 +61,7 @@ def resumen_whatsapp():
             # Solo tras confirmar el envío: las entradas de hoy (hostal +
             # Primavera) quedan "ya anunciadas" para que el chequeo de
             # última hora (cada 15 min desde /watchdog) no vuelva a avisar de
-            # ellas — ver services/primavera_avisos.py.
+            # ellas — ver services/checkins_ultima_hora.py.
             marcar_anunciados(book_ids_hoy)
         except Exception as e:
             logger.error(f"Error enviando WhatsApp: {e}")

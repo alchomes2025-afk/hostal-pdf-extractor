@@ -24,6 +24,7 @@ from datetime import date, timedelta
 import config
 from services.beds24 import obtener_bookings_dia_beds24
 from services.email_send import enviar_email
+from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ def enviar_avisos_checkin_hostelworld():
     hacia arriba: cualquier fallo se loguea y no debe bloquear el resto del
     watchdog.
     """
-    manana_iso = (date.today() + timedelta(days=1)).isoformat()
+    manana_iso = (hoy_madrid() + timedelta(days=1)).isoformat()
     entradas = obtener_bookings_dia_beds24(manana_iso, tipo="checkin")
     hostelworld = [e for e in entradas if "hostelworld" in (e.get("canal") or "").strip().lower()]
     if not hostelworld:

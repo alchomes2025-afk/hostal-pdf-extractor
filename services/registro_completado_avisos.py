@@ -27,6 +27,7 @@ import config
 from services.beds24 import obtener_bookings_rango_beds24
 from services.rpv import obtener_partes_recibidos_hoy
 from services.email_send import enviar_email
+from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ def _candidatos_registro_completado():
     if not partes:
         return []
 
-    hoy = date.today()
+    hoy = hoy_madrid()
     hasta = hoy + timedelta(days=VENTANA_DIAS)
     entradas = obtener_bookings_rango_beds24(hoy.isoformat(), hasta.isoformat(), tipo="checkin")
     if not entradas:

@@ -8,6 +8,7 @@ from datetime import date, datetime
 from services.beds24 import get_beds24_access_token, obtener_bookings_dia_beds24
 from services.rpv import obtener_partes_recibidos_hoy
 from services.whatsapp import avisar_error_critico
+from services.fechas import ahora_madrid, hoy_madrid
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +48,14 @@ def generar_mensaje_resumen(hora_str=None):
     Devuelve (mensaje, book_ids_hoy): el segundo valor es la lista de book_id
     de Beds24 de TODAS las entradas de hoy (hostal + La Casa de la Primavera),
     para que el llamador las marque como "ya anunciadas" en
-    services/primavera_avisos tras confirmar el envío — así el chequeo de
-    última hora (ver services/primavera_avisos.py, que ahora cubre ambas
+    services/checkins_ultima_hora tras confirmar el envío — así el chequeo de
+    última hora (ver services/checkins_ultima_hora.py, que ahora cubre ambas
     propiedades) no vuelve a avisar de ninguna de ellas.
     """
-    hoy = date.today()
+    hoy = hoy_madrid()
     hoy_iso = hoy.isoformat()
     if hora_str is None:
-        hora_str = datetime.now().strftime("%H")
+        hora_str = ahora_madrid().strftime("%H")
 
     # Punto de control: verificar autenticación con Beds24 antes de consultar
     # las reservas del día. Si falla, avisamos por WhatsApp además de que el

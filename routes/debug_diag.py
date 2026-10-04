@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify
 
 from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
 from services.beds24 import get_beds24_access_token, _ref_en_booking
+from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
 debug_bp = Blueprint("debug_diag", __name__)
@@ -78,7 +79,7 @@ def ver_booking_completo():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Beds24 auth: {e}"}), 500
 
-    hoy = date.today()
+    hoy = hoy_madrid()
     desde = (hoy - timedelta(days=5)).isoformat()
     hasta = (hoy + timedelta(days=180)).isoformat()
 
@@ -127,7 +128,7 @@ def ver_reservas_dia_beds24():
     if token not in tokens_validos:
         return jsonify({"ok": False, "error": "No autorizado"}), 401
 
-    fecha = request.args.get("fecha", date.today().isoformat())
+    fecha = request.args.get("fecha", hoy_madrid().isoformat())
     tipo = request.args.get("tipo", "checkin")
 
     try:

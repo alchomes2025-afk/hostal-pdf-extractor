@@ -1,27 +1,45 @@
 """
-services/primavera_avisos.py — Aviso de WhatsApp para check-ins de ÚLTIMA
-HORA, tanto en el Hostal como en La Casa de la Primavera (reservas que
+services/checkins_ultima_hora.py — Aviso de WhatsApp para check-ins de
+ÚLTIMA HORA, tanto en el Hostal como en La Casa de la Primavera (reservas que
 llegan después de que ya haya salido el resumen diario de la mañana,
-típicamente reservas hechas el mismo día). El nombre del módulo viene de
-cuando solo cubría Primavera; se mantiene para no tocar los imports de
-routes/watchdog.py y routes/resumen_routes.py.
+típicamente reservas hechas el mismo día). Antes se llamaba
+primavera_avisos.py, de cuando solo cubría La Casa de la Primavera.
 
-Lleva en Firestore (system_state/primavera_avisos) la lista de book_id de
-Beds24 ya anunciados HOY — tanto por el resumen diario (services/resumen.py
-marca los suyos tras enviarse) como por esta misma función — para no avisar
-dos veces de la misma reserva. El doc se "reinicia" solo cada día nuevo (se
-compara la fecha guardada, no hace falta borrarlo).
+Lleva en Firestore la lista de book_id de Beds24 ya anunciados HOY — tanto
+por el resumen diario (routes/resumen_routes.py llama a marcar_anunciados()
+tras enviarlo) como por esta misma función — para no avisar dos veces de la
+misma reserva. El doc se "reinicia" solo cada día nuevo (se compara la fecha
+guardada, no hace falta borrarlo).
+
+El documento de Firestore sigue llamándose system_state/primavera_avisos a
+propósito: cambiarle el nombre perdería el estado del día en curso al
+desplegar y provocaría avisos duplicados. No renombrarlo.
+
+"Hoy" es siempre el día de Madrid (services/fechas.py), no el del servidor
+(UTC). Con date.today() el día cambiaba a las 02:00 de Madrid, el estado se
+reiniciaba y el watchdog de las 02:13 avisaba de todas las llegadas del día
+como si fueran de última hora.
 """
 import logging
-from datetime import date
+from datetime import date, time  # date: usado en _formatear_estancia
 
 import config
 from services.beds24 import obtener_bookings_dia_beds24
+from services.fechas import ahora_madrid, hoy_madrid
 from services.whatsapp import alerta
 
 logger = logging.getLogger(__name__)
 
 ROOM_ID_PRIMAVERA = "720841"
+
+# El aviso de última hora solo tiene sentido DESPUÉS del resumen de la mañana
+# (el Apps Script "Orquestador" lo lanza en la franja de ~8-9h, hora de
+# Madrid). Antes de esa hora el documento de "anunciados" de hoy está vacío y
+# todas las llegadas del día parecerían "de última hora". Se deja un margen de
+# 30 min para que el resumen termine de enviarse y marcar sus book_id. Las
+# reservas que entren de madrugada no se pierden: aparecen en el propio
+# resumen de la mañana.
+HORA_INICIO_AVISOS = time(9, 30)
 
 
 def _doc_ref():
@@ -42,7 +60,7 @@ def _leer_anunciados_hoy():
         if not doc.exists:
             return set()
         data = doc.to_dict() or {}
-        if data.get("fecha") != date.today().isoformat():
+        if data.get("fecha") != hoy_madrid().isoformat():
             return set()
         return set(str(b) for b in data.get("book_ids", []))
     except Exception as e:
@@ -62,7 +80,7 @@ def marcar_anunciados(book_ids):
         return
     try:
         nuevos = _leer_anunciados_hoy() | set(book_ids)
-        ref.set({"fecha": date.today().isoformat(), "book_ids": sorted(nuevos)})
+        ref.set({"fecha": hoy_madrid().isoformat(), "book_ids": sorted(nuevos)})
     except Exception as e:
         logger.error(f"[primavera_avisos] Error guardando estado en Firestore: {e}")
 
@@ -92,7 +110,10 @@ def comprobar_y_avisar_checkins_ultima_hora():
     No lanza excepción hacia arriba: cualquier fallo se loguea y no debe
     bloquear el resto del watchdog.
     """
-    hoy_iso = date.today().isoformat()
+    if ahora_madrid().time() < HORA_INICIO_AVISOS:
+        return
+
+    hoy_iso = hoy_madrid().isoformat()
     entradas = obtener_bookings_dia_beds24(hoy_iso, tipo="checkin")
     if not entradas:
         return

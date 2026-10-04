@@ -18,7 +18,8 @@ from config import (
 )
 from services.beds24 import get_beds24_access_token
 from services.whatsapp import alerta
-from services.primavera_avisos import comprobar_y_avisar_checkins_ultima_hora
+from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hora
+from services.fechas import hoy_madrid
 from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
 from services.registro_completado_avisos import enviar_avisos_registro_completado
 
@@ -144,8 +145,8 @@ def watchdog():
         r = requests.get(
             f"{BEDS24_API_BASE}/bookings",
             headers={"token": tok, "accept": "application/json"},
-            params={"propertyId": BEDS24_PROPERTY_ID, "arrivalFrom": date.today().isoformat(),
-                    "arrivalTo": (date.today() + timedelta(days=1)).isoformat()},
+            params={"propertyId": BEDS24_PROPERTY_ID, "arrivalFrom": hoy_madrid().isoformat(),
+                    "arrivalTo": (hoy_madrid() + timedelta(days=1)).isoformat()},
             timeout=10,
         )
         r.raise_for_status()

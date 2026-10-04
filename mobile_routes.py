@@ -25,6 +25,7 @@ import json
 import uuid
 import requests
 from datetime import datetime, date, timedelta
+from services.fechas import hoy_madrid
 from flask import Blueprint, request, jsonify, Response
 import re
 
@@ -896,7 +897,7 @@ def _load_bookings():
     · Esta función solo se ejecuta al arrancar el servidor o en /reload.
     """
     token = get_access_token()
-    today = date.today()
+    today = hoy_madrid()
     window_from = today - timedelta(days=180)
     window_to   = today + timedelta(days=365)
 
@@ -992,7 +993,7 @@ def _load_live_calendar(token=None):
     """
     if token is None:
         token = get_access_token()
-    today = date.today()
+    today = hoy_madrid()
     window_from = today.strftime("%Y-%m-%d")
     window_to = (today + timedelta(days=365)).strftime("%Y-%m-%d")
 
@@ -1054,7 +1055,7 @@ def _load_overrides(token=None):
     """
     if token is None:
         token = get_access_token()
-    today = date.today()
+    today = hoy_madrid()
     window_from = (today - timedelta(days=30)).strftime("%Y-%m-%d")
     window_to   = (today + timedelta(days=365)).strftime("%Y-%m-%d")
 
@@ -1868,7 +1869,7 @@ def mobile_finance_chat():
     if property_id == PROPERTY_ID and not _es_pin_admin():
         return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
 
-    hoy = date.today()
+    hoy = hoy_madrid()
     desde = hoy - timedelta(days=FINANCE_CHAT_DIAS_ATRAS)
     hasta = hoy + timedelta(days=FINANCE_CHAT_DIAS_ADELANTE)
 
@@ -2436,7 +2437,7 @@ def fix_zero_prices():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Error de autenticación: {e}"}), 500
 
-    hoy = date.today()
+    hoy = hoy_madrid()
     desde = hoy - timedelta(days=730)
     hasta = hoy + timedelta(days=60)
 
@@ -2831,7 +2832,7 @@ def debug_overrides():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
     try:
         token = get_access_token()
-        today = date.today()
+        today = hoy_madrid()
 
         if request.args.get("probe"):
             room_id = int(request.args.get("roomId", 702395))
@@ -2932,7 +2933,7 @@ def debug_bookings():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
     try:
         token = get_access_token()
-        today = date.today()
+        today = hoy_madrid()
         results = {}
 
         # Test 1: sin filtro de habitación (todas las reservas, próximos 60 días),
@@ -3034,7 +3035,7 @@ def test_sync():
         # ── B) Llamada fresca a Beds24 en trozos de 60 días (mismo fix que _load_bookings:
         #      una consulta de rango completo -180/+365 pierde reservas silenciosamente) ──
         token = get_access_token()
-        today = date.today()
+        today = hoy_madrid()
         window_from = today - timedelta(days=180)
         window_to   = today + timedelta(days=365)
         rango_from = window_from.strftime("%Y-%m-%d")
