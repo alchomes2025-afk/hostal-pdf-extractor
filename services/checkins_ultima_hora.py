@@ -19,6 +19,10 @@ desplegar y provocaría avisos duplicados. No renombrarlo.
 (UTC). Con date.today() el día cambiaba a las 02:00 de Madrid, el estado se
 reiniciaba y el watchdog de las 02:13 avisaba de todas las llegadas del día
 como si fueran de última hora.
+
+Si a partir de HORA_INICIO_AVISOS no consta el resumen de hoy (falló el
+trigger), se avisa igualmente de las llegadas pendientes, pero etiquetadas
+como aviso de respaldo y no como "de última hora".
 """
 import logging
 from datetime import date, time  # date: usado en _formatear_estancia
@@ -48,38 +52,41 @@ def _doc_ref():
     return config.db.collection("system_state").document("primavera_avisos")
 
 
-def _leer_anunciados_hoy():
-    """book_id (como str) ya anunciados hoy. Vacío si Firestore no está
-    disponible, si no hay doc todavía, o si el doc guardado es de un día
-    anterior (se considera reiniciado, sin necesidad de borrarlo)."""
+def _leer_estado_hoy():
+    """(dia_registrado, book_ids_como_str) del día de hoy (Madrid).
+
+    dia_registrado es True si hoy ya se anunciaron las llegadas del día, por
+    el resumen de la mañana o por una pasada anterior de esta función. Es
+    False si Firestore no está disponible, si no hay doc, o si el doc
+    guardado es de un día anterior (se considera reiniciado, sin borrarlo)."""
     ref = _doc_ref()
     if ref is None:
-        return set()
+        return False, set()
     try:
         doc = ref.get()
         if not doc.exists:
-            return set()
+            return False, set()
         data = doc.to_dict() or {}
         if data.get("fecha") != hoy_madrid().isoformat():
-            return set()
-        return set(str(b) for b in data.get("book_ids", []))
+            return False, set()
+        return True, set(str(b) for b in data.get("book_ids", []))
     except Exception as e:
         logger.error(f"[primavera_avisos] Error leyendo estado en Firestore: {e}")
-        return set()
+        return False, set()
 
 
 def marcar_anunciados(book_ids):
-    """Añade estos book_id (de reservas de La Casa de la Primavera) al
-    conjunto de 'ya anunciados hoy', para que ni el resumen de la tarde ni
-    el chequeo de última hora vuelvan a avisar de ellos."""
+    """Añade estos book_id al conjunto de 'ya anunciados hoy', para que ni el
+    resumen de la tarde ni el chequeo de última hora vuelvan a avisar de
+    ellos. Escribe aunque la lista venga vacía: así queda constancia de que
+    hoy salió el resumen aunque no hubiera llegadas, y una reserva posterior
+    se etiqueta como "de última hora" y no como aviso de respaldo."""
     book_ids = [str(b) for b in book_ids if b is not None]
-    if not book_ids:
-        return
     ref = _doc_ref()
     if ref is None:
         return
     try:
-        nuevos = _leer_anunciados_hoy() | set(book_ids)
+        nuevos = _leer_estado_hoy()[1] | set(book_ids)
         ref.set({"fecha": hoy_madrid().isoformat(), "book_ids": sorted(nuevos)})
     except Exception as e:
         logger.error(f"[primavera_avisos] Error guardando estado en Firestore: {e}")
@@ -118,27 +125,37 @@ def comprobar_y_avisar_checkins_ultima_hora():
     if not entradas:
         return
 
-    anunciados = _leer_anunciados_hoy()
+    dia_registrado, anunciados = _leer_estado_hoy()
     nuevas = [e for e in entradas if str(e.get("book_id")) not in anunciados]
     if not nuevas:
         return
+
+    if dia_registrado:
+        tipo = "⚡ Check-in de última hora"
+        nota = "(No estaba en el resumen diario — reserva de última hora.)"
+    else:
+        # No consta el resumen de la mañana (el trigger de Apps Script falló o
+        # no llegó a enviarse): se avisa igualmente de las llegadas, pero sin
+        # presentarlas como "de última hora", porque casi seguro no lo son.
+        tipo = "📋 Llegada de hoy"
+        nota = "(No consta el resumen de la mañana — aviso de respaldo.)"
 
     for e in nuevas:
         canal = e.get("canal", "Desconocido")
         if e.get("room_id") == ROOM_ID_PRIMAVERA:
             noches, salida_fmt = _formatear_estancia(e)
             linea_estancia = f"{noches} noche{'s' if noches != 1 else ''}, sale {salida_fmt}" if noches is not None else f"Sale {salida_fmt}"
-            titulo = "⚡ Check-in de última hora — La Casa de la Primavera"
+            titulo = f"{tipo} — La Casa de la Primavera"
             cuerpo = (
                 f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n{linea_estancia}\n\n"
-                f"(No estaba en el resumen diario — reserva de última hora.)"
+                f"{nota}"
             )
         else:
-            titulo = "⚡ Check-in de última hora — Hostal ALC Homes"
+            titulo = f"{tipo} — Hostal ALC Homes"
             cuerpo = (
                 f"Habitación: {e.get('nombre_habitacion', '?')}\n"
                 f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n\n"
-                f"(No estaba en el resumen diario — reserva de última hora.)"
+                f"{nota}"
             )
         alerta(titulo, cuerpo, nivel="info")
 

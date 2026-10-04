@@ -35,6 +35,7 @@ Render corre en UTC. **Nunca usar `date.today()` ni `datetime.now()` sin zona pa
 ## Avisos de check-in de última hora
 - `services/checkins_ultima_hora.py` (antes `primavera_avisos.py`) cubre **las dos propiedades**. Lo llama `/watchdog` cada 15 min.
 - Solo avisa a partir de las **09:30 de Madrid** (`HORA_INICIO_AVISOS`), después del resumen diario de la mañana (lo lanza el Apps Script "Orquestador" en la franja ~8-9h; antes lo lanzaba Make.com). Antes de esa hora todas las llegadas del día parecerían "de última hora". Si se mueve la hora del resumen, mover también esta constante.
+- Si a partir de esa hora no consta el resumen de hoy (falló el trigger), avisa igualmente de las llegadas pero como "📋 Llegada de hoy … aviso de respaldo", no como "última hora". Para distinguirlo, `marcar_anunciados()` escribe la fecha del día aunque la lista de llegadas venga vacía.
 - El dedupe vive en Firestore en `system_state/primavera_avisos` — el nombre del documento se mantiene a propósito aunque el módulo se renombrara (cambiarlo perdería el estado del día al desplegar).
 
 ## Infraestructura y cuentas
