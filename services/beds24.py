@@ -7,7 +7,6 @@ import requests
 from datetime import date, timedelta
 
 from config import BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID, BEDS24_PROPERTY_IDS, ROOM_CONFIG
-from services.whatsapp import avisar_error_critico
 from services.guest_match import emparejar_nombre
 from services.fechas import hoy_madrid
 

@@ -3,7 +3,7 @@ routes/debug_diag.py — Endpoints de diagnóstico manual contra Beds24.
 """
 import logging
 import requests
-from datetime import date, timedelta
+from datetime import timedelta
 from flask import Blueprint, request, jsonify
 
 from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
@@ -87,7 +87,7 @@ def ver_booking_completo():
     la MISMA función de búsqueda recursiva que usa /check-in
     (_ref_en_booking) y dice en qué campo encontró coincidencia, o si no
     encontró ninguna — para depurar por qué un ref concreto falla o
-    funciona sin tener que pasar por Make ni por la web.
+    funciona sin tener que pasar por la web.
 
     Uso:
         /ver-booking-completo?token=Alchomes2025&id=91615325

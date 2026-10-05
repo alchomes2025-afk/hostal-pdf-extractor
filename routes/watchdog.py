@@ -4,7 +4,7 @@ entorno, Beds24, RPV, Groq, Firebase, CallMeBot y Firestore.
 """
 import logging
 import requests
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from flask import Blueprint, request, jsonify
 
@@ -12,7 +12,7 @@ import config
 from config import (
     API_TOKEN, TEST_TOKEN, ROOM_CONFIG, TEST_BOOKINGS,
     BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID,
-    RPV_API_KEY, RPV_API_URL, RPV_PROPERTY_MAP, RPV_API_KEY_MAP,
+    RPV_API_KEY, RPV_PROPERTY_MAP,
     CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
     GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI,
 )
