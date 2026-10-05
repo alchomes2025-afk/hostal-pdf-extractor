@@ -24,7 +24,7 @@ def ver_mensajes_beds24():
     realmente (y ver el estado que reporta el canal).
 
     Uso:
-        /ver-mensajes-beds24?token=Alchomes2025&book_id=89432182
+        /ver-mensajes-beds24?token=<TOKEN>&book_id=89432182
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -58,7 +58,7 @@ def diag_rpv():
     Usa la copia en memoria de services/rpv.py: no añade llamadas a RPV si
     los datos tienen menos de ~25 min.
 
-    Uso: /diag-rpv?token=Alchomes2025
+    Uso: /diag-rpv?token=<TOKEN>
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -90,8 +90,8 @@ def ver_booking_completo():
     funciona sin tener que pasar por la web.
 
     Uso:
-        /ver-booking-completo?token=Alchomes2025&id=91615325
-        /ver-booking-completo?token=Alchomes2025&id=91615325&test_ref=6166763556
+        /ver-booking-completo?token=<TOKEN>&id=91615325
+        /ver-booking-completo?token=<TOKEN>&id=91615325&test_ref=6166763556
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -149,7 +149,7 @@ def ver_reservas_dia_beds24():
     duplicados/excesivos (posible problema con el filtro de fechas o paginación).
 
     Uso:
-        /ver-reservas-dia-beds24?token=Alchomes2025&fecha=2026-07-08&tipo=checkin
+        /ver-reservas-dia-beds24?token=<TOKEN>&fecha=2026-07-08&tipo=checkin
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]

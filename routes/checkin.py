@@ -176,7 +176,7 @@ def diagnostico_checkin():
     """
     Devuelve hasta 3 números de reserva reales para probar la web de check-in.
 
-    GET /diagnostico?token=Alchomes2025
+    GET /diagnostico?token=<TOKEN>
 
     Los 3 estados buscados son exactamente:
       1. sin_parte     → parte NO enviado (pendiente de registro)

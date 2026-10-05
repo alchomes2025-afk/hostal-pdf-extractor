@@ -84,7 +84,7 @@ def watchdog():
     chequeos de salud, envía los resúmenes diarios de las 08:00 y las 23:00
     y los avisos de negocio (última hora, Hostelworld, registro completado).
 
-    GET /watchdog?token=Alchomes2025
+    GET /watchdog?token=<TOKEN>
 
     Puntos de control:
       ✓ Variables de entorno críticas (tokens, PINs, credenciales)

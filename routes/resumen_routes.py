@@ -24,12 +24,12 @@ def resumen_whatsapp():
     mañana) los envía solo /watchdog — ver services/resumen_programado.py.
 
     GET:
-        /resumen?token=Alchomes2025&enviar=0              (ver el de hoy, sin enviar)
-        /resumen?token=Alchomes2025&enviar=0&dia=manana   (ver el de mañana, sin enviar)
-        /resumen?token=Alchomes2025&enviar=1&hora=09      (enviarlo)
+        /resumen?token=<TOKEN>&enviar=0              (ver el de hoy, sin enviar)
+        /resumen?token=<TOKEN>&enviar=0&dia=manana   (ver el de mañana, sin enviar)
+        /resumen?token=<TOKEN>&enviar=1&hora=09      (enviarlo)
 
     POST:
-        { "token": "Alchomes2025", "hora": "09", "dia": "manana" }
+        { "token": "<TOKEN>", "hora": "09", "dia": "manana" }
 
     Respuesta:
         { "ok": true, "mensaje": "...", "enviado": true/false,
@@ -47,7 +47,7 @@ def resumen_whatsapp():
         hora   = request.args.get("hora")
         dia_param = request.args.get("dia", "")
 
-    # Acepta API_TOKEN (Alchomes2025) o TEST_TOKEN (test1234)
+    # Acepta API_TOKEN o TEST_TOKEN (test1234)
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
     if token not in tokens_validos:
         return jsonify({"ok": False, "error": "No autorizado"}), 401
