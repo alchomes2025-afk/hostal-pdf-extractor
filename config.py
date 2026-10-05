@@ -64,23 +64,21 @@ PIN_DOBLE        = os.environ.get("PIN_DOBLE", "")         # Playa de la Fossá
 PIN_DELUXE       = os.environ.get("PIN_DELUXE", "")        # Cala Coveta Fumá
 PIN_CASA_PRIMAVERA = os.environ.get("PIN_CASA_PRIMAVERA", "2486")  # Código del cajetín de llaves
 
-# Configuración de las 5 habitaciones: roomId de Beds24 → nombre + PIN + palabras clave
-# para detectar a qué habitación corresponde un parte de viajero (buscando en el
-# nombre del archivo y en el texto extraído del PDF, sin acentos gracias a normalizar()).
+# Configuración de las habitaciones: roomId de Beds24 → nombre + PIN.
 ROOM_CONFIG = {
-    "702397": {"nombre": "Playa Lanuza",       "pin": None,             "keywords": ["lanuza"]},
-    "702398": {"nombre": "Playa del Albir",    "pin": PIN_HABITACION_2, "keywords": ["albir"]},
-    "702399": {"nombre": "Cala del Moraig",    "pin": PIN_HABITACION_3, "keywords": ["moraig"]},
+    "702397": {"nombre": "Playa Lanuza",       "pin": None},
+    "702398": {"nombre": "Playa del Albir",    "pin": PIN_HABITACION_2},
+    "702399": {"nombre": "Cala del Moraig",    "pin": PIN_HABITACION_3},
     # Cerradura electrónica averiada (sep 2026) — pin a None a propósito, igual
     # que Playa Lanuza, para que la web de check-in muestre el aviso de "código
     # no funciona, la habitación estará abierta" en vez de un código inválido.
     # PIN_DOBLE se deja sin usar aquí (no se borra) por si se repara y hay que
     # volver a activarlo sin más que restaurar esta línea a "pin": PIN_DOBLE.
-    "702396": {"nombre": "Playa de la Fossá",  "pin": None,             "keywords": ["fossa"]},
-    "702395": {"nombre": "Cala Coveta Fumá",   "pin": PIN_DELUXE,       "keywords": ["coveta", "fuma"]},
+    "702396": {"nombre": "Playa de la Fossá",  "pin": None},
+    "702395": {"nombre": "Cala Coveta Fumá",   "pin": PIN_DELUXE},
     # La Casa de la Primavera — Gran Alacant (propiedad Beds24 349341).
     # "pin" aquí es el código del cajetín de llaves (no una cerradura electrónica).
-    "720841": {"nombre": "La Casa de la Primavera", "pin": PIN_CASA_PRIMAVERA, "keywords": ["primavera"]},
+    "720841": {"nombre": "La Casa de la Primavera", "pin": PIN_CASA_PRIMAVERA},
 }
 
 # ── Links de registroparteviajeros.com por room_id de Beds24 ─────────────
@@ -125,9 +123,8 @@ GROQ_MODEL_FALL = "openai/gpt-oss-20b"
 # Para avisos que Beds24 no puede mandar automáticamente (Hostelworld no
 # soporta plantillas preprogramadas de mensajes) — ver services/email_send.py
 # y services/hostelworld_avisos.py.
-# No se usa SMTP (Render bloquea el tráfico saliente en planes básicos) ni
-# SendGrid (exige verificar el remitente, daba problemas). En su lugar se
-# reutiliza el proyecto de Apps Script "ALC Homes — Identificación de
+# No se usa SMTP directo (Render bloquea el tráfico saliente en planes
+# básicos): se reutiliza el proyecto de Apps Script "ALC Homes — Identificación de
 # reservas" (cuenta alchomes2025guest@gmail.com, ya autorizado con Gmail),
 # al que se le añadió un doPost(e) que llama a GmailApp.sendEmail — ver
 # [[apps-script-orquestador]] en memoria. APPS_SCRIPT_EMAIL_SECRET debe

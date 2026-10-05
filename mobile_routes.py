@@ -22,7 +22,6 @@ Variables de entorno en Render:
 import os
 import time
 import json
-import uuid
 import requests
 from datetime import datetime, date, timedelta
 from services.fechas import hoy_madrid

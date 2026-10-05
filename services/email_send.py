@@ -4,8 +4,7 @@ Apps Script "ALC Homes — Identificación de reservas" (cuenta
 alchomes2025guest@gmail.com, ya autorizado con Gmail vía OAuth).
 
 No se usa SMTP directo (Render bloquea el tráfico saliente en planes
-básicos) ni SendGrid (exige verificar el remitente, daba problemas). En su
-lugar, ese script tiene un doPost(e) añadido que llama a
+básicos): ese script tiene un doPost(e) añadido que llama a
 GmailApp.sendEmail() — ver memoria [[apps-script-orquestador]].
 """
 import logging

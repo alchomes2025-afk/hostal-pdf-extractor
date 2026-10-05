@@ -77,7 +77,7 @@ def historial_lista():
     Devuelve el listado de reservas con interacción registrada,
     ordenadas de la más reciente a la más antigua.
 
-    GET /historial?token=Alchomes2025
+    GET /historial?token=<TOKEN>
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -119,7 +119,7 @@ def historial_detalle(ref):
     """
     Devuelve el histórico completo de eventos y mensajes de una reserva.
 
-    GET /historial/9999000001?token=Alchomes2025
+    GET /historial/9999000001?token=<TOKEN>
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]

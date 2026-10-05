@@ -21,7 +21,7 @@ criterio que hostelworld_avisos.py (España/Hispanoamérica → castellano,
 resto → inglés).
 """
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
 
 import config
 from services.beds24 import obtener_bookings_rango_beds24

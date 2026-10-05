@@ -19,7 +19,7 @@ del huésped es España o un país hispanohablante de Latinoamérica, inglés en
 cualquier otro caso (incluido cuando Beds24 no informa el país).
 """
 import logging
-from datetime import date, timedelta
+from datetime import timedelta
 
 import config
 from services.beds24 import obtener_bookings_dia_beds24
