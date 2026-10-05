@@ -32,8 +32,18 @@ TTL_SEGUNDO_PLANO = 25 * 60
 TTL_CHECKIN = 60
 PAUSA_TRAS_429 = 10 * 60
 
-_copias = {}         # prop_id -> (epoch de la última llamada buena, registros)
-_pausa_hasta = 0.0   # epoch hasta el que no se llama a RPV tras un 429
+# RPV confirmó el 2026-10-05 que el límite es de 10 peticiones por minuto (y
+# que lo ampliarían si hace falta). Nos quedamos por debajo: si ya hemos hecho
+# LLAMADAS_POR_MINUTO en el último minuto, no se llama y se usa la última copia.
+LLAMADAS_POR_MINUTO = 8
+
+_copias = {}              # prop_id -> (epoch de la última llamada buena, registros)
+_pausa_hasta = 0.0        # epoch hasta el que no se llama a RPV tras un 429
+_llamadas_recientes = []  # epoch de las últimas llamadas reales a RPV
+
+
+class _LimiteLocal(Exception):
+    pass
 
 
 def _pedir_a_rpv(prop_id, key):
@@ -41,8 +51,13 @@ def _pedir_a_rpv(prop_id, key):
     excepción con un mensaje legible (los textos de 429 empiezan por "429"
     para que el watchdog los distinga)."""
     global _pausa_hasta
-    if time.time() < _pausa_hasta:
+    ahora = time.time()
+    if ahora < _pausa_hasta:
         raise Exception("429 — en pausa tras límite de peticiones de RPV")
+    _llamadas_recientes[:] = [t for t in _llamadas_recientes if ahora - t < 60]
+    if len(_llamadas_recientes) >= LLAMADAS_POR_MINUTO:
+        raise _LimiteLocal("429 — límite local de peticiones a RPV (máx. 10/min); se reintenta en un minuto")
+    _llamadas_recientes.append(ahora)
     resp = requests.get(
         RPV_API_URL,
         headers={"Authorization": f"Bearer {key}", "accept": "application/json"},
@@ -88,6 +103,13 @@ def obtener_registros(room_id, max_age):
         return copia[1], None
     try:
         registros = _pedir_a_rpv(prop_id, key)
+    except _LimiteLocal as e:
+        # No es un fallo de RPV: solo hemos frenado nosotros. Con copia (aunque
+        # sea más vieja que max_age) se usa tal cual y sin error; sin copia, se
+        # devuelve el motivo.
+        if copia:
+            return copia[1], None
+        return [], str(e)
     except Exception as e:
         logger.error(f"[RPV] Error consultando {prop_id} (room {room_id}): {e}")
         return (copia[1] if copia else []), str(e)
