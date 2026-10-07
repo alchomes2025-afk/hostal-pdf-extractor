@@ -26,7 +26,7 @@ from datetime import timedelta
 import config
 from services.beds24 import obtener_bookings_rango_beds24
 from services.rpv import obtener_estado_partes
-from services.email_send import enviar_email
+from services.email_send import enviar_email, es_email_relay_ota
 from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,10 @@ def _candidatos_registro_completado():
         email = e.get("email")
         if not email:
             logger.warning(f"[registro_completado_avisos] Reserva {book_id} sin email — no se puede avisar")
+            continue
+        if es_email_relay_ota(email):
+            # Booking/Airbnb rechazan el correo (ver services/email_send.py): no se envía
+            # ni se marca como avisado, por si más adelante se avisa por su mensajería.
             continue
 
         nombre = e.get("huesped") or "Huésped"

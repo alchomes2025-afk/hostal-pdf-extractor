@@ -23,7 +23,7 @@ from datetime import timedelta
 
 import config
 from services.beds24 import obtener_bookings_dia_beds24
-from services.email_send import enviar_email
+from services.email_send import enviar_email, es_email_relay_ota
 from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
@@ -154,6 +154,8 @@ def enviar_avisos_checkin_hostelworld():
         if not email:
             logger.warning(f"[hostelworld_avisos] Reserva {book_id} (Hostelworld) sin email — no se puede avisar")
             continue
+        if es_email_relay_ota(email):
+            continue  # alias de Booking/Airbnb: el correo rebotaría (ver services/email_send.py)
         idioma = _idioma_email(e.get("country"))
         if idioma == "es":
             subject = "Gracias por reservar en ALC Homes"
