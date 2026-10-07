@@ -12,12 +12,12 @@ import config
 from config import (
     API_TOKEN, TEST_TOKEN, ROOM_CONFIG, TEST_BOOKINGS,
     BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID,
-    RPV_API_KEY, RPV_PROPERTY_MAP,
+    RPV_API_KEY,
     CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
     GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI,
 )
 from services.beds24 import get_beds24_access_token
-from services.rpv import obtener_registros, TTL_SEGUNDO_PLANO
+from services.rpv import comprobar_cuentas, TTL_SEGUNDO_PLANO
 from services.ical_beds24 import comprobar_feeds_ical
 from services.whatsapp import alerta
 from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hora
@@ -162,28 +162,26 @@ def watchdog():
             f"Beds24 no responde: {e}",
             "Verificar BEDS24_REFRESH_TOKEN en Render — puede haber caducado"))
 
-    # ── 3. RPV API (probar cada habitación) ───────────────────────────────
-    # Va por services/rpv.obtener_registros, con la misma copia en memoria que
-    # usan los avisos y resúmenes: RPV se consulta como mucho cada ~30 min
-    # desde aquí (antes, 12 llamadas en ráfaga cada 15 min provocaron un 429).
+    # ── 3. RPV API (una consulta por cuenta de RPV) ───────────────────────
+    # Va por services/rpv.comprobar_cuentas, con la misma copia en memoria que
+    # usan los avisos y resúmenes: son 2 llamadas (hostal y Primavera) como
+    # mucho cada 10 min (antes, 12 en ráfaga cada 15 min provocaron un 429).
     rpv_ok = []
     rpv_fail = []
     rpv_limitado = []
-    for room_id in RPV_PROPERTY_MAP:
-        nombre = ROOM_CONFIG.get(room_id, {}).get("nombre", room_id)
-        _, error = obtener_registros(room_id, max_age=TTL_SEGUNDO_PLANO)
+    for etiqueta, error in comprobar_cuentas(TTL_SEGUNDO_PLANO):
         if error is None:
-            rpv_ok.append(nombre)
+            rpv_ok.append(etiqueta)
         elif error.startswith("429"):
-            rpv_limitado.append(nombre)
+            rpv_limitado.append(etiqueta)
         else:
-            rpv_fail.append(f"{nombre}: {error}")
+            rpv_fail.append(f"{etiqueta}: {error}")
 
     resultados["rpv_api"] = {"ok": not rpv_fail and not rpv_limitado, "ok_list": rpv_ok,
                              "fail_list": rpv_fail, "limitado_429": rpv_limitado}
     if rpv_fail:
         problemas.append(("critico",
-            f"RPV API falla en {len(rpv_fail)} habitación(es): {'; '.join(rpv_fail)}",
+            f"RPV API falla en {len(rpv_fail)} cuenta(s): {'; '.join(rpv_fail)}",
             "Verificar en Render que RPV_API_KEY (hostal) y RPV_API_KEY_CASA_PRIMAVERA "
             "(si aplica) están configuradas y son correctas — puede haber caducado, "
             "cambiado, o faltar la variable de la propiedad afectada"))

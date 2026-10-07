@@ -6,7 +6,7 @@ import logging
 from datetime import date, datetime
 
 from services.beds24 import get_beds24_access_token, obtener_bookings_dia_beds24
-from services.rpv import obtener_partes_con_estado
+from services.rpv import obtener_estado_partes
 from services.whatsapp import avisar_error_critico
 from services.fechas import ahora_madrid, hoy_madrid
 
@@ -37,8 +37,10 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
       reales), de las dos propiedades, no de los partes recibidos — así el
       resumen refleja quién entra/sale según la reserva, haya rellenado o no
       el parte.
-    - Para cada ENTRADA se indica además si el parte de viajero ya se ha
-      recibido en RPV o si sigue pendiente.
+    - Para cada ENTRADA se indica además el estado real del parte en RPV
+      (también para mañana): recibido (y si ya está comunicado), incompleto
+      (faltan huéspedes), pendiente, "no consta en RPV" o "sin verificar" si
+      RPV no responde.
     - Para las entradas de La Casa de la Primavera se añade además cuántas
       noches dura la reserva y la fecha de salida (en el hostal esto no
       aporta tanto porque el huésped suele ver la duración a simple vista;
@@ -76,9 +78,9 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
 
     entradas_beds24 = obtener_bookings_dia_beds24(dia_iso, tipo="checkin")
     salidas_beds24  = obtener_bookings_dia_beds24(dia_iso, tipo="checkout")
-    # Dato de RPV de hasta 5 min (no los ~30 de segundo plano): el resumen
-    # sale 2 veces al día y el estado del parte debe estar al día.
-    partes_recibidos, rpv_sin_verificar = obtener_partes_con_estado(max_age=5 * 60)
+    # Dato de RPV de hasta 1 min: el resumen sale 2 veces al día y el estado del
+    # parte debe estar al día (son 2 llamadas, una por cuenta de RPV).
+    estados_rpv, rpv_sin_verificar = obtener_estado_partes(max_age=60)
 
     dia_fmt = dia.strftime("%d/%m/%Y")
     if es_manana:
@@ -87,22 +89,22 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
         lineas = [f"🏨 ALCHOMES — {dia_fmt} · {hora_str}:00h"]
 
     lineas.append(f"\n✅ ENTRADAS {etiqueta}:")
-    hay_sin_verificar_futuro = False
     if entradas_beds24:
         for e in entradas_beds24:
-            if (e["room_id"], dia_iso) in partes_recibidos:
-                estado = "📄 parte recibido"
+            est = estados_rpv.get((e["room_id"], dia_iso))
+            if est and est["completado"]:
+                estado = "📄 parte recibido y comunicado" if est["comunicado"] else "📄 parte recibido"
             elif e["room_id"] in rpv_sin_verificar:
+                # Si RPV no responde, "no consta" no significa "pendiente".
                 estado = "❓ parte SIN VERIFICAR (RPV no responde)"
-            elif es_manana:
-                # Verificado el 2026-10-04: la API de RPV solo devuelve los partes
-                # con entrada de HOY, aunque el huésped ya lo haya enviado con
-                # antelación (el panel de RPV lo muestra como completado). Para
-                # mañana "no consta" NO significa "pendiente".
-                estado = "❓ parte sin verificar"
-                hay_sin_verificar_futuro = True
-            else:
+            elif est and est["estado"] == "parcial":
+                estado = "🟡 parte INCOMPLETO (faltan huéspedes)"
+            elif est:
                 estado = "⚠️ parte PENDIENTE"
+            else:
+                # RPV importa las reservas del iCal de Beds24 una vez al día: una reserva
+                # reciente puede no estar todavía, y entonces conviene crearla a mano.
+                estado = "⚠️ parte PENDIENTE (no consta en RPV)"
             canal = e.get("canal", "Desconocido")
             if e["room_id"] == ROOM_ID_PRIMAVERA:
                 noches, salida_fmt = _formatear_estancia(e)
@@ -112,8 +114,6 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
                 lineas.append(f"• {e['nombre_habitacion']} ({estado}) — {canal}")
     else:
         lineas.append("• (ninguna)")
-    if hay_sin_verificar_futuro:
-        lineas.append("ℹ️ RPV no deja ver los partes de mañana hasta el día de la entrada: «sin verificar» puede ser pendiente o ya enviado.")
 
     lineas.append(f"\n🚪 SALIDAS {etiqueta}:")
     if salidas_beds24:

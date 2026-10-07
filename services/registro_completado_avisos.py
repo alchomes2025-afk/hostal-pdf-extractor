@@ -25,7 +25,7 @@ from datetime import timedelta
 
 import config
 from services.beds24 import obtener_bookings_rango_beds24
-from services.rpv import obtener_partes_recibidos_hoy
+from services.rpv import obtener_estado_partes
 from services.email_send import enviar_email
 from services.fechas import hoy_madrid
 
@@ -117,8 +117,9 @@ def _candidatos_registro_completado():
     Devuelve una lista de dicts: {book_id, room_id, arrival, email, idioma,
     subject, body, huesped, nombre_propiedad}.
     """
-    partes = obtener_partes_recibidos_hoy()
-    if not partes:
+    estados, _ = obtener_estado_partes(max_age=10 * 60)
+    completados = {k for k, v in estados.items() if v["completado"]}
+    if not completados:
         return []
 
     hoy = hoy_madrid()
@@ -132,7 +133,7 @@ def _candidatos_registro_completado():
     for e in entradas:
         room_id = e.get("room_id")
         arrival = e.get("arrival")
-        if (room_id, arrival) not in partes:
+        if (room_id, arrival) not in completados:
             continue
         book_id = str(e.get("book_id"))
         if not book_id or book_id in avisados:

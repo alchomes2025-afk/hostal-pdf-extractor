@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify
 from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
 from services.beds24 import get_beds24_access_token, _ref_en_booking
 from services.fechas import hoy_madrid
-from services.rpv_partes import diagnostico as diagnostico_rpv
+from services.rpv import diagnostico as diagnostico_rpv
 
 logger = logging.getLogger(__name__)
 debug_bp = Blueprint("debug_diag", __name__)
