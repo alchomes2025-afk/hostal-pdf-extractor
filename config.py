@@ -95,6 +95,9 @@ RPV_LINKS = {
 RPV_API_KEY = os.environ.get("RPV_API_KEY", "")  # Cuenta RPV del hostal (ALC Homes San Blas)
 RPV_API_KEY_CASA_PRIMAVERA = os.environ.get("RPV_API_KEY_CASA_PRIMAVERA", "")  # Cuenta RPV distinta, propia de La Casa de la Primavera
 RPV_API_URL = "https://app.registroparteviajeros.com/api/v1/usuarios"
+# Estado del parte por rango de fechas de entrada (incluidas las futuras), sin datos
+# personales: es el endpoint que usa el backend desde 2026-10-07 (services/rpv.py).
+RPV_PARTES_URL = RPV_API_URL.rsplit("/", 1)[0] + "/partes"
 
 # Mapeo: room_id de Beds24 → prop_id real de registroparteviajeros
 # (se obtiene de la sección API → Código de Propiedad del panel de RPV)
