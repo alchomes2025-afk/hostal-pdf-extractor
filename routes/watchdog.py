@@ -24,6 +24,7 @@ from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hor
 from services.fechas import hoy_madrid
 from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
 from services.registro_completado_avisos import enviar_avisos_registro_completado
+from services.rpv_sin_importar import avisar_reservas_sin_importar
 from services.resumen_programado import enviar_resumenes_programados
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ def watchdog():
 
     Lo llama el Apps Script "Orquestador" cada 15 min. Además de los
     chequeos de salud, envía los resúmenes diarios de las 08:00 y las 23:00
-    y los avisos de negocio (última hora, Hostelworld, registro completado).
+    y los avisos de negocio (última hora, reservas sin importar en RPV, Hostelworld, registro completado).
 
     GET /watchdog?token=<TOKEN>
 
@@ -303,6 +304,15 @@ def watchdog():
         comprobar_y_avisar_checkins_ultima_hora()
     except Exception as e:
         logger.error(f"[watchdog] Error comprobando check-ins de última hora: {e}")
+
+    # ── 10b. Reservas que RPV no ha importado a tiempo ─────────────────────
+    # Aviso de negocio aparte (dedupe propio por book_id en Firestore): una
+    # reserva de Beds24 que lleva más de HORAS_NORMALES_SIN_RPV sin constar en
+    # RPV indica que algo falla en la importación, aunque RPV responda bien.
+    try:
+        avisar_reservas_sin_importar()
+    except Exception as e:
+        logger.error(f"[watchdog] Error comprobando reservas sin importar en RPV: {e}")
 
     # ── 11. Email de check-in para huéspedes de Hostelworld ────────────────
     # Hostelworld no permite plantillas de mensaje preprogramadas en Beds24,

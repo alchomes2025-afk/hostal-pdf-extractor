@@ -102,8 +102,8 @@ def mensaje_aviso(nuevas):
         llegada = datetime.fromisoformat(c["arrival"]).strftime("%d/%m")
         lineas.append(f"• {c['nombre_habitacion']} · {c['huesped']} · {c['canal']} · llega el {llegada} · sin cambios desde hace {_antiguedad(c['horas'])}")
     lineas += ["",
-               f"{'No constan' if plural else 'No consta'} en RPV pasadas más de {HORAS_NORMALES_SIN_RPV} h, lo normal es que ya estén. "
-               f"Mientras no estén, {'esos huéspedes no pueden' if plural else 'ese huésped no puede'} hacer el parte.",
+               f"{'No constan' if plural else 'No consta'} en RPV pasadas más de {HORAS_NORMALES_SIN_RPV} h; lo normal es que ya {'estén' if plural else 'esté'}. "
+               "Conviene revisarlo antes de que llegue.",
                "Qué hacer: mirar si hay otro aviso del watchdog (iCal o RPV caído); si no, revisar la integración en RPV o crear la reserva a mano allí."]
     return "\n".join(lineas)
 
