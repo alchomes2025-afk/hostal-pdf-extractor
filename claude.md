@@ -81,6 +81,8 @@ Los emails de "registro completado" que se enviaban a huéspedes de Booking sal�
 - **Logging**: actividad registrada en Firestore. Página de diagnóstico en `/test-sync`.
 - **IMPORTANTE**: `MOBILE_BEDS24_TOKEN` y `BEDS24_REFRESH_TOKEN` están separados a propósito, tras un incidente en el que intercambiarlos rompió el sistema de check-in principal. Nunca unificarlos ni reutilizar uno para el otro.
 
+- **Chat de Finanzas (`/mobile/finance-chat`)**: manda a Groq un resumen por canal y habitación de TODAS las reservas del rango (con la más reciente de cada una) más el detalle de las `FINANCE_CHAT_MAX_RESERVAS` (250) más recientes, en líneas `checkin;checkout;habitacion;huesped;canal;precio`. Si Groq responde 413 (petición demasiado grande para su plan) reintenta con menos reservas (`FINANCE_CHAT_TRAMOS`); antes mandaba 400 reservas en JSON y fallaba con «413 Payload Too Large» (2026-10-08).
+
 ## Frontend de check-in (por qué Firebase y no Vercel)
 Se eligió Firebase Hosting sobre Vercel por compatibilidad con el filtro de seguridad de URLs de Booking.com. No migrar a otro hosting sin verificar ese requisito primero.
 - Multilenguaje: ES/EN/FR/DE/VAL

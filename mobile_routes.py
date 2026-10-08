@@ -19,6 +19,7 @@ Variables de entorno en Render:
   MOBILE_APP_PIN       -> PIN numérico de 4 dígitos
 """
 
+import logging
 import os
 import time
 import json
@@ -31,6 +32,8 @@ import re
 from config import GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI, GROQ_MODEL_FALL
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
+
+logger = logging.getLogger(__name__)
 
 BEDS24_API = "https://beds24.com/api/v2"
 BEDS24_REFRESH_TOKEN = (
@@ -1835,14 +1838,55 @@ def mobile_finance():
 
 FINANCE_CHAT_DIAS_ATRAS = 400   # igual que /finance, cubre historial largo del hostal
 FINANCE_CHAT_DIAS_ADELANTE = 60
-FINANCE_CHAT_MAX_RESERVAS = 400  # tope de reservas pasadas al modelo, las más recientes primero
+FINANCE_CHAT_MAX_RESERVAS = 250  # reservas en el detalle que se pasa al modelo, las más recientes primero
+# Groq rechaza con 413 las peticiones que superan el límite de tamaño/tokens de su plan: si ocurre se
+# reintenta con menos reservas en el detalle (el resumen de TODO el rango va siempre completo).
+FINANCE_CHAT_TRAMOS = (FINANCE_CHAT_MAX_RESERVAS, 120, 50)
 
-FINANCE_CHAT_SYSTEM = """Eres un asistente que responde preguntas sobre el histórico de reservas de {propiedad} a partir ÚNICAMENTE de los datos JSON que se te dan a continuación (no inventes nada que no esté ahí). Cada reserva tiene: checkin, checkout, habitacion, huesped, canal, precio (precio total de la reserva en euros). Están ordenadas de más reciente a más antigua por checkin. Responde en español, de forma breve y directa. Si la pregunta no se puede responder con estos datos (p.ej. pide algo fuera del rango de fechas cubierto, o un dato que no se incluye), dilo con claridad en vez de inventar.
+FINANCE_CHAT_SYSTEM = """Eres un asistente que responde preguntas sobre el histórico de reservas de {propiedad} a partir ÚNICAMENTE de los datos que se te dan a continuación (no inventes nada que no esté ahí). Responde en español, de forma breve y directa. Si la pregunta no se puede responder con estos datos (p.ej. pide algo fuera del rango de fechas cubierto, o un dato que no se incluye), dilo con claridad en vez de inventar.
 
-Rango de fechas cubierto: {desde} a {hasta}.
+Rango de fechas cubierto (por fecha de entrada): {desde} a {hasta}. Hay {total} reservas en total en ese rango.
 
-Reservas (JSON):
+RESUMEN DE TODAS LAS RESERVAS DEL RANGO (calculado sobre el total; úsalo para totales, recuentos y «la última reserva de…». La más reciente es la de checkin más reciente, que puede ser futura). Cada reserva va como checkin;checkout;habitacion;huesped;canal;precio (euros):
+{resumen}
+
+DETALLE: {n_detalle} reservas, de más reciente a más antigua por checkin, una por línea, con los mismos campos separados por «;»:
 {datos}"""
+
+
+def _finance_chat_fila(r):
+    return f"{r['checkin']};{r['checkout']};{r['habitacion']};{r['huesped']};{r['canal']};{r['precio']:g}"
+
+
+def _finance_chat_resumen(reservas):
+    """Resumen por canal y por habitación de TODAS las reservas (ordenadas de más reciente a más
+    antigua): recuento, total y la reserva más reciente de cada uno. Es pequeño y no depende de
+    cuántas reservas quepan en el detalle."""
+    por_canal, por_hab = {}, {}
+    for r in reservas:
+        c = por_canal.setdefault(r["canal"], {"n": 0, "total": 0.0, "ultima": r})
+        c["n"] += 1
+        c["total"] += r["precio"]
+        h = por_hab.setdefault(r["habitacion"], {"n": 0, "ultima": r})
+        h["n"] += 1
+    lineas = ["Por canal:"]
+    lineas += [f"- {canal}: {c['n']} reservas, {c['total']:.2f} € en total; más reciente: {_finance_chat_fila(c['ultima'])}"
+               for canal, c in sorted(por_canal.items(), key=lambda kv: -kv[1]["n"])]
+    lineas.append("Por habitación:")
+    lineas += [f"- {hab}: {h['n']} reservas; más reciente: {_finance_chat_fila(h['ultima'])}"
+               for hab, h in sorted(por_hab.items())]
+    return "\n".join(lineas)
+
+
+def _finance_chat_system(propiedad, desde, hasta, reservas, n_detalle):
+    system = FINANCE_CHAT_SYSTEM.format(
+        propiedad=propiedad, desde=desde.isoformat(), hasta=hasta.isoformat(), total=len(reservas),
+        resumen=_finance_chat_resumen(reservas), n_detalle=min(n_detalle, len(reservas)),
+        datos="\n".join(_finance_chat_fila(r) for r in reservas[:n_detalle]),
+    )
+    if len(reservas) > n_detalle:
+        system += f"\n\n(El detalle solo incluye las {n_detalle} más recientes de {len(reservas)}; para totales, recuentos y últimas reservas usa el resumen.)"
+    return system
 
 
 @mobile_bp.route("/finance-chat", methods=["POST"])
@@ -1895,25 +1939,10 @@ def mobile_finance_chat():
             "precio":     round(float(b.get("price") or 0), 2),
         })
     reservas.sort(key=lambda r: r["checkin"], reverse=True)
-    total_reservas = len(reservas)
-    reservas = reservas[:FINANCE_CHAT_MAX_RESERVAS]
 
     propiedad_nombre = "La Casa de la Primavera" if property_id == PROPERTY_ID_CASA_PRIMAVERA else "el Hostal ALC Homes San Blas"
-    system = FINANCE_CHAT_SYSTEM.format(
-        propiedad=propiedad_nombre,
-        desde=desde.isoformat(),
-        hasta=hasta.isoformat(),
-        datos=json.dumps(reservas, ensure_ascii=False),
-    )
-    if total_reservas > len(reservas):
-        system += f"\n\n(Aviso: hay {total_reservas} reservas en total en el rango de fechas, mostrando solo las {len(reservas)} más recientes.)"
 
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": pregunta},
-    ]
-
-    def llamar_groq(model):
+    def llamar_groq(model, messages):
         return requests.post(
             GROQ_API_URL,
             headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
@@ -1921,14 +1950,24 @@ def mobile_finance_chat():
             timeout=30,
         )
 
+    resp = None
     try:
-        resp = llamar_groq(GROQ_MODEL_PRI)
-        if resp.status_code in (429, 503):
-            resp = llamar_groq(GROQ_MODEL_FALL)
+        for n_detalle in FINANCE_CHAT_TRAMOS:
+            messages = [
+                {"role": "system", "content": _finance_chat_system(propiedad_nombre, desde, hasta, reservas, n_detalle)},
+                {"role": "user", "content": pregunta},
+            ]
+            resp = llamar_groq(GROQ_MODEL_PRI, messages)
+            if resp.status_code in (429, 503):
+                resp = llamar_groq(GROQ_MODEL_FALL, messages)
+            if resp.status_code != 413:
+                break
+            logger.warning(f"[finance-chat] Groq 413 con {n_detalle} reservas en el detalle: {resp.text[:300]}")
         resp.raise_for_status()
         respuesta = resp.json()["choices"][0]["message"]["content"].strip()
         return jsonify({"ok": True, "respuesta": respuesta})
     except Exception as e:
+        logger.error(f"[finance-chat] Error consultando Groq: {e} {resp.text[:300] if resp is not None else ''}")
         return jsonify({"ok": False, "error": f"Error consultando el asistente: {e}"}), 500
 
 
