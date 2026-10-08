@@ -29,7 +29,8 @@ from services.fechas import hoy_madrid
 from flask import Blueprint, request, jsonify, Response
 import re
 
-from config import GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI, GROQ_MODEL_FALL
+from config import GROQ_API_KEY
+from mobile_asistente import responder as asistente_responder
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
 
@@ -1635,35 +1636,26 @@ def _fetch_bookings_finance(property_id, arrival_from, arrival_to):
     return all_raw, chunks_fallidos
 
 
-@mobile_bp.route("/finance", methods=["GET"])
-def mobile_finance():
+class InformeError(Exception):
+    """Fallo al calcular el informe financiero; `status` es el código HTTP que le corresponde."""
+    def __init__(self, mensaje, status):
+        super().__init__(mensaje)
+        self.status = status
+
+
+def _informe_financiero(property_id, month_str):
     """
-    Informe financiero mensual de una propiedad: número de reservas,
-    ingresos brutos/comisiones/netos, y el mismo desglose por canal.
-
-    Una reserva que abarca dos meses se reparte proporcionalmente por
-    noches entre ambos (una estancia de 10 noches con 3 en septiembre y 7
-    en octubre aporta el 30% de su precio y comisión a septiembre).
-
-    GET /mobile/finance?pin=1234&propertyId=339751&month=2026-09
+    Calcula el informe financiero mensual de una propiedad (lo que devuelve
+    /finance, sin las comprobaciones de PIN): resumen, por canal, ocupación,
+    rentabilidad y detalle de reservas. Lanza InformeError si el mes no es
+    válido o Beds24 falla. Lo usa también el asistente (mobile_asistente.py).
     """
-    if not check_pin():
-        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
-
-    property_id = request.args.get("propertyId")
-    month_str = request.args.get("month")
-    if not property_id or not month_str:
-        return jsonify({"ok": False, "error": "Faltan propertyId o month"}), 400
-
-    if property_id == PROPERTY_ID and not _es_pin_admin():
-        return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
-
     try:
         year_s, month_s = month_str.split("-")
         year, month = int(year_s), int(month_s)
         month_start = date(year, month, 1)
     except Exception:
-        return jsonify({"ok": False, "error": "month debe tener formato YYYY-MM"}), 400
+        raise InformeError("month debe tener formato YYYY-MM", 400)
     month_end_exclusive = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
 
     # Rango amplio hacia atrás para capturar reservas que empezaron en un mes
@@ -1674,7 +1666,7 @@ def mobile_finance():
     try:
         raw, chunks_fallidos = _fetch_bookings_finance(property_id, arrival_from, arrival_to)
     except Exception as e:
-        return jsonify({"ok": False, "error": f"Error consultando Beds24: {e}"}), 500
+        raise InformeError(f"Error consultando Beds24: {e}", 500)
 
     resumen = {"reservas": 0, "ingresos_brutos": 0.0, "comisiones": 0.0, "ingresos_netos": 0.0}
     por_canal = {}
@@ -1817,7 +1809,7 @@ def mobile_finance():
             "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
         }
 
-    return jsonify({
+    return {
         "ok":         True,
         "propertyId": property_id,
         "mes":        month_str,
@@ -1833,71 +1825,49 @@ def mobile_finance():
             f"intentos — estos números pueden estar incompletos. Vuelve a intentarlo en "
             f"un momento."
         ) if chunks_fallidos else None,
-    })
+    }
 
 
-FINANCE_CHAT_DIAS_ATRAS = 400   # igual que /finance, cubre historial largo del hostal
-FINANCE_CHAT_DIAS_ADELANTE = 60
-FINANCE_CHAT_MAX_RESERVAS = 250  # reservas en el detalle que se pasa al modelo, las más recientes primero
-# Groq rechaza con 413 las peticiones que superan el límite de tamaño/tokens de su plan: si ocurre se
-# reintenta con menos reservas en el detalle (el resumen de TODO el rango va siempre completo).
-FINANCE_CHAT_TRAMOS = (FINANCE_CHAT_MAX_RESERVAS, 120, 50)
-
-FINANCE_CHAT_SYSTEM = """Eres un asistente que responde preguntas sobre el histórico de reservas de {propiedad} a partir ÚNICAMENTE de los datos que se te dan a continuación (no inventes nada que no esté ahí). Responde en español, de forma breve y directa. Si la pregunta no se puede responder con estos datos (p.ej. pide algo fuera del rango de fechas cubierto, o un dato que no se incluye), dilo con claridad en vez de inventar.
-
-Rango de fechas cubierto (por fecha de entrada): {desde} a {hasta}. Hay {total} reservas en total en ese rango.
-
-RESUMEN DE TODAS LAS RESERVAS DEL RANGO (calculado sobre el total; úsalo para totales, recuentos y «la última reserva de…». La más reciente es la de checkin más reciente, que puede ser futura). Cada reserva va como checkin;checkout;habitacion;huesped;canal;precio (euros):
-{resumen}
-
-DETALLE: {n_detalle} reservas, de más reciente a más antigua por checkin, una por línea, con los mismos campos separados por «;»:
-{datos}"""
-
-
-def _finance_chat_fila(r):
-    return f"{r['checkin']};{r['checkout']};{r['habitacion']};{r['huesped']};{r['canal']};{r['precio']:g}"
-
-
-def _finance_chat_resumen(reservas):
-    """Resumen por canal y por habitación de TODAS las reservas (ordenadas de más reciente a más
-    antigua): recuento, total y la reserva más reciente de cada uno. Es pequeño y no depende de
-    cuántas reservas quepan en el detalle."""
-    por_canal, por_hab = {}, {}
-    for r in reservas:
-        c = por_canal.setdefault(r["canal"], {"n": 0, "total": 0.0, "ultima": r})
-        c["n"] += 1
-        c["total"] += r["precio"]
-        h = por_hab.setdefault(r["habitacion"], {"n": 0, "ultima": r})
-        h["n"] += 1
-    lineas = ["Por canal:"]
-    lineas += [f"- {canal}: {c['n']} reservas, {c['total']:.2f} € en total; más reciente: {_finance_chat_fila(c['ultima'])}"
-               for canal, c in sorted(por_canal.items(), key=lambda kv: -kv[1]["n"])]
-    lineas.append("Por habitación:")
-    lineas += [f"- {hab}: {h['n']} reservas; más reciente: {_finance_chat_fila(h['ultima'])}"
-               for hab, h in sorted(por_hab.items())]
-    return "\n".join(lineas)
-
-
-def _finance_chat_system(propiedad, desde, hasta, reservas, n_detalle):
-    system = FINANCE_CHAT_SYSTEM.format(
-        propiedad=propiedad, desde=desde.isoformat(), hasta=hasta.isoformat(), total=len(reservas),
-        resumen=_finance_chat_resumen(reservas), n_detalle=min(n_detalle, len(reservas)),
-        datos="\n".join(_finance_chat_fila(r) for r in reservas[:n_detalle]),
-    )
-    if len(reservas) > n_detalle:
-        system += f"\n\n(El detalle solo incluye las {n_detalle} más recientes de {len(reservas)}; para totales, recuentos y últimas reservas usa el resumen.)"
-    return system
-
-
-@mobile_bp.route("/finance-chat", methods=["POST"])
-def mobile_finance_chat():
+@mobile_bp.route("/finance", methods=["GET"])
+def mobile_finance():
     """
-    Asistente virtual de la pestaña Finanzas: responde preguntas en lenguaje
-    natural sobre el histórico de reservas de una propiedad (ej. "¿quién se
-    alojó por última vez en la Deluxe?"), usando Groq con los datos de
-    reservas como contexto — nunca acepta el system prompt del cliente
-    (a diferencia de /chat, público para la web de check-in): aquí los datos
-    se arman en el servidor a partir del PIN ya autenticado.
+    Informe financiero mensual de una propiedad: número de reservas,
+    ingresos brutos/comisiones/netos, y el mismo desglose por canal.
+
+    Una reserva que abarca dos meses se reparte proporcionalmente por
+    noches entre ambos (una estancia de 10 noches con 3 en septiembre y 7
+    en octubre aporta el 30% de su precio y comisión a septiembre).
+
+    GET /mobile/finance?pin=1234&propertyId=339751&month=2026-09
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+
+    property_id = request.args.get("propertyId")
+    month_str = request.args.get("month")
+    if not property_id or not month_str:
+        return jsonify({"ok": False, "error": "Faltan propertyId o month"}), 400
+
+    if property_id == PROPERTY_ID and not _es_pin_admin():
+        return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
+
+    try:
+        return jsonify(_informe_financiero(property_id, month_str))
+    except InformeError as e:
+        return jsonify({"ok": False, "error": str(e)}), e.status
+
+
+@mobile_bp.route("/assistant", methods=["POST"])
+@mobile_bp.route("/finance-chat", methods=["POST"])  # nombre antiguo: lo siguen usando las copias de la app ya instaladas
+def mobile_assistant():
+    """
+    Asistente de la app (reservas, ocupación y finanzas, con gráficos). Ver mobile_asistente.py.
+
+    Cuerpo: {"mensajes": [{"role": "user"|"assistant", "content": "..."}], "finanzas": bool}
+    (la app manda la conversación entera en cada turno; "finanzas" indica que tiene la pestaña
+    Finanzas desbloqueada). El formato antiguo {"pregunta": "..."} también vale: venía siempre de
+    la pestaña Finanzas, así que cuenta como desbloqueada.
+    Respuesta: {"ok": true, "respuesta": "...", "graficos": [{tipo, titulo, unidad, etiquetas, valores}]}.
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
@@ -1905,70 +1875,13 @@ def mobile_finance_chat():
         return jsonify({"ok": False, "error": "GROQ_API_KEY no configurada en Render"}), 500
 
     data = request.get_json(force=True) or {}
-    property_id = str(data.get("propertyId") or "")
-    pregunta = (data.get("pregunta") or "").strip()
-    if not property_id or not pregunta:
-        return jsonify({"ok": False, "error": "Faltan propertyId o pregunta"}), 400
-    if property_id == PROPERTY_ID and not _es_pin_admin():
-        return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
-
-    hoy = hoy_madrid()
-    desde = hoy - timedelta(days=FINANCE_CHAT_DIAS_ATRAS)
-    hasta = hoy + timedelta(days=FINANCE_CHAT_DIAS_ADELANTE)
-
-    try:
-        raw, _chunks_fallidos = _fetch_bookings_finance(property_id, desde, hasta)
-    except Exception as e:
-        return jsonify({"ok": False, "error": f"Error consultando Beds24: {e}"}), 500
-
-    room_names = {str(r["id"]): r["name"] for r in ROOMS}
-    reservas = []
-    for b in raw:
-        if str(b.get("status", "")).lower() == "cancelled":
-            continue
-        if _finance_es_bloqueo(b):
-            continue
-        guest = b.get("guest") or {}
-        nombre = f"{guest.get('firstName') or b.get('firstName') or ''} {guest.get('lastName') or b.get('lastName') or ''}".strip()
-        reservas.append({
-            "checkin":    (b.get("arrival") or "")[:10],
-            "checkout":   (b.get("departure") or "")[:10],
-            "habitacion": room_names.get(str(b.get("roomId") or ""), "Desconocida"),
-            "huesped":    nombre or "Desconocido",
-            "canal":      _finance_channel_label(b),
-            "precio":     round(float(b.get("price") or 0), 2),
-        })
-    reservas.sort(key=lambda r: r["checkin"], reverse=True)
-
-    propiedad_nombre = "La Casa de la Primavera" if property_id == PROPERTY_ID_CASA_PRIMAVERA else "el Hostal ALC Homes San Blas"
-
-    def llamar_groq(model, messages):
-        return requests.post(
-            GROQ_API_URL,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={"model": model, "messages": messages, "max_tokens": 500, "temperature": 0.2},
-            timeout=30,
-        )
-
-    resp = None
-    try:
-        for n_detalle in FINANCE_CHAT_TRAMOS:
-            messages = [
-                {"role": "system", "content": _finance_chat_system(propiedad_nombre, desde, hasta, reservas, n_detalle)},
-                {"role": "user", "content": pregunta},
-            ]
-            resp = llamar_groq(GROQ_MODEL_PRI, messages)
-            if resp.status_code in (429, 503):
-                resp = llamar_groq(GROQ_MODEL_FALL, messages)
-            if resp.status_code != 413:
-                break
-            logger.warning(f"[finance-chat] Groq 413 con {n_detalle} reservas en el detalle: {resp.text[:300]}")
-        resp.raise_for_status()
-        respuesta = resp.json()["choices"][0]["message"]["content"].strip()
-        return jsonify({"ok": True, "respuesta": respuesta})
-    except Exception as e:
-        logger.error(f"[finance-chat] Error consultando Groq: {e} {resp.text[:300] if resp is not None else ''}")
-        return jsonify({"ok": False, "error": f"Error consultando el asistente: {e}"}), 500
+    mensajes = data.get("mensajes")
+    finanzas = bool(data.get("finanzas"))
+    if mensajes is None:
+        mensajes = [{"role": "user", "content": str(data.get("pregunta") or "")}]
+        finanzas = True
+    resultado, status = asistente_responder(mensajes, {"es_admin": _es_pin_admin(), "finanzas": finanzas})
+    return jsonify(resultado), status
 
 
 @mobile_bp.route("/all-data", methods=["GET"])

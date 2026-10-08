@@ -209,32 +209,47 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fin-days-card .fin-label{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px}
 .fin-days-card .fin-value{font-size:20px;font-weight:800;color:var(--ink)}
 
-/* Asistente de Finanzas */
-#fin-chat-toggle{
-  display:block;width:calc(100% - 28px);margin:0 14px 10px;
-  background:var(--bk2);color:#fff;border:none;border-radius:10px;
-  padding:10px;font-size:13px;font-weight:700;cursor:pointer;
+/* Asistente */
+#as-fab{
+  position:fixed;bottom:18px;right:max(16px,calc(50% - 244px));z-index:35;
+  width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
+  background:var(--acc);color:#fff;font-size:24px;box-shadow:0 4px 14px rgba(0,0,0,.28);
 }
-#fin-chat-panel{
-  margin:0 14px 14px;background:#fff;border:1.5px solid var(--border);
-  border-radius:var(--radius);padding:12px;display:none;flex-direction:column;
+#as-panel{
+  position:fixed;left:0;right:0;bottom:0;z-index:45;margin:0 auto;width:100%;max-width:520px;
+  height:82vh;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.25);
+  display:none;flex-direction:column;
 }
-#fin-chat-messages{max-height:260px;overflow-y:auto;display:flex;flex-direction:column;margin-bottom:10px}
-.fin-chat-msg{padding:8px 12px;border-radius:10px;margin-bottom:8px;font-size:12.5px;line-height:1.45;max-width:88%}
-.fin-chat-msg.user{background:var(--bk2);color:#fff;margin-left:auto;text-align:right}
-.fin-chat-msg.bot{background:#fdf1f8;color:var(--ink);border:1px solid var(--border)}
-.fin-chat-msg.loading{opacity:.65;font-style:italic}
-.fin-chat-msg.error{background:var(--blocked-bg);color:var(--blocked);border:1px solid var(--blocked)}
-#fin-chat-empty{font-size:11.5px;color:var(--muted);text-align:center;padding:6px 0 10px}
-#fin-chat-inputrow{display:flex;gap:8px}
-#fin-chat-input{
-  flex:1;border:1.5px solid var(--border);border-radius:10px;padding:9px 12px;
-  font-size:13px;font-family:inherit;
+#as-head{
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+  padding:12px 14px;border-bottom:1.5px solid var(--border);font-weight:800;font-size:14px;
 }
-#fin-chat-send{
-  background:var(--bk2);color:#fff;border:none;border-radius:10px;
-  width:40px;font-size:16px;cursor:pointer;flex-shrink:0;
-}
+#as-head button{background:none;border:none;font-size:17px;cursor:pointer;padding:2px 8px;color:var(--muted)}
+#as-messages{flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.as-msg{padding:9px 12px;border-radius:12px;font-size:13px;line-height:1.45;max-width:90%;white-space:pre-wrap;overflow-wrap:anywhere}
+.as-msg.user{background:var(--bk2);color:#fff;align-self:flex-end}
+.as-msg.bot{background:#fdf1f8;color:var(--ink);border:1px solid var(--border);align-self:flex-start}
+.as-msg.loading{opacity:.65;font-style:italic;align-self:flex-start;background:#fdf1f8;border:1px solid var(--border)}
+.as-msg.error{background:var(--blocked-bg);color:var(--blocked);border:1px solid var(--blocked);align-self:flex-start}
+#as-empty{font-size:12px;color:var(--muted);text-align:center;padding:10px 6px 4px}
+#as-chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:center;padding:6px 0}
+.as-chip{background:#fdf1f8;border:1.5px solid var(--border);color:var(--ink);border-radius:16px;padding:7px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+#as-inputrow{display:flex;gap:8px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));border-top:1.5px solid var(--border);flex-shrink:0}
+#as-input{flex:1;border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;font-size:16px;font-family:inherit}
+#as-send{background:var(--bk2);color:#fff;border:none;border-radius:10px;width:44px;font-size:17px;cursor:pointer;flex-shrink:0}
+#as-send:disabled{opacity:.5}
+.as-chart{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;align-self:stretch}
+.as-chart-title{font-weight:800;font-size:12.5px;margin-bottom:10px}
+.as-legend{display:flex;flex-direction:column;gap:5px;margin-top:10px;font-size:12px}
+.as-legend-row{display:flex;align-items:center;gap:7px}
+.as-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
+.as-legend-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.as-legend-val{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.as-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:7px;font-size:12px}
+.as-bar-label{width:34%;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.as-bar-track{flex:1;height:16px;background:var(--border);border-radius:5px;overflow:hidden}
+.as-bar-fill{height:100%;border-radius:5px}
+.as-bar-val{min-width:58px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
 
 /* Calendar table */
 #cal{border-collapse:collapse;table-layout:fixed}
@@ -556,17 +571,22 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
       <span id="fin-month-text">—</span>
       <button class="fin-nav-btn" onclick="shiftFinanceMonth(1)">›</button>
     </div>
-    <div id="fin-chat-panel">
-      <div id="fin-chat-messages">
-        <div id="fin-chat-empty">Pregunta lo que quieras sobre el histórico de reservas, ej. "¿quién se alojó por última vez en la Deluxe?"</div>
-      </div>
-      <div id="fin-chat-inputrow">
-        <input type="text" id="fin-chat-input" placeholder="Escribe tu pregunta…">
-        <button type="button" id="fin-chat-send" onclick="sendFinChat()">➤</button>
+    <div id="fin-body"><div id="fin-loading">Cargando…</div></div>
+  </div>
+  <button type="button" id="as-fab" title="Preguntar al asistente" onclick="toggleAsistente()">💬</button>
+  <div id="as-panel">
+    <div id="as-head">
+      <span>🤖 Asistente</span>
+      <div>
+        <button type="button" title="Nueva conversación" onclick="resetAsistente()">🗑</button>
+        <button type="button" title="Cerrar" onclick="toggleAsistente()">✕</button>
       </div>
     </div>
-    <button type="button" id="fin-chat-toggle" onclick="toggleFinChat()">💬 Preguntar al asistente</button>
-    <div id="fin-body"><div id="fin-loading">Cargando…</div></div>
+    <div id="as-messages"></div>
+    <div id="as-inputrow">
+      <input type="text" id="as-input" placeholder="Pregunta lo que quieras…" enterkeyhint="send" autocomplete="off">
+      <button type="button" id="as-send" onclick="sendAsistente()">➤</button>
+    </div>
   </div>
 </div>
 
@@ -1941,7 +1961,6 @@ function setFinanceProperty(propId) {
   FIN_PROPERTY = propId;
   $("#fin-prop-hostal").classList.toggle("active", propId === 339751);
   $("#fin-prop-primavera").classList.toggle("active", propId === 349341);
-  resetFinChat();
   loadFinance();
 }
 
@@ -1952,52 +1971,225 @@ function shiftFinanceMonth(delta) {
   loadFinance();
 }
 
-// ── Asistente de Finanzas ───────────────────────────────
-function toggleFinChat() {
-  const panel = $("#fin-chat-panel");
+// ── Asistente ───────────────────────────────────────────
+// Conversación con el asistente del servidor (/assistant): se manda el historial entero en cada
+// turno y la respuesta puede traer gráficos ya calculados que se dibujan aquí.
+const AS_CHIPS = [
+  "¿Quién llega mañana?",
+  "Ocupación de este mes",
+  "Ingresos por canal este mes",
+  "Gráfico de ingresos por habitación",
+];
+const AS_COLORS = ["#e0629e", "#d9b8f5", "#4caf7d", "#f2a65a", "#6aa7e0", "#c94f8f", "#8a7690", "#7bc4b8", "#e0a0c4", "#b0903d"];
+let AS_HISTORY = [];
+let AS_BUSY = false;
+
+function toggleAsistente() {
+  const panel = $("#as-panel");
   const opening = panel.style.display !== "flex";
   panel.style.display = opening ? "flex" : "none";
-  if (opening) setTimeout(() => $("#fin-chat-input").focus(), 100);
+  $("#as-fab").style.display = opening ? "none" : "block";
+  if (opening) {
+    if (!$("#as-messages").children.length) resetAsistente();
+    setTimeout(() => $("#as-input").focus(), 100);
+  }
 }
-function resetFinChat() {
-  $("#fin-chat-messages").innerHTML = `<div id="fin-chat-empty">Pregunta lo que quieras sobre el histórico de reservas, ej. "¿quién se alojó por última vez en la Deluxe?"</div>`;
-  $("#fin-chat-panel").style.display = "none";
+
+function resetAsistente() {
+  AS_HISTORY = [];
+  const wrap = $("#as-messages");
+  wrap.innerHTML = "";
+  const empty = document.createElement("div");
+  empty.id = "as-empty";
+  empty.textContent = "Pregunta lo que necesites sobre reservas, ocupación y finanzas. También puedo dibujarte gráficos.";
+  wrap.appendChild(empty);
+  const chips = document.createElement("div");
+  chips.id = "as-chips";
+  AS_CHIPS.forEach(texto => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "as-chip";
+    b.textContent = texto;
+    b.addEventListener("click", () => { $("#as-input").value = texto; sendAsistente(); });
+    chips.appendChild(b);
+  });
+  wrap.appendChild(chips);
 }
-function appendFinChatMsg(cls, text) {
-  const empty = $("#fin-chat-empty");
-  if (empty) empty.remove();
-  const wrap = $("#fin-chat-messages");
+
+function asAppend(cls, text) {
+  const wrap = $("#as-messages");
+  ["#as-empty", "#as-chips"].forEach(s => { const el = $(s); if (el) el.remove(); });
   const el = document.createElement("div");
-  el.className = "fin-chat-msg " + cls;
+  el.className = "as-msg " + cls;
   el.textContent = text;
   wrap.appendChild(el);
   wrap.scrollTop = wrap.scrollHeight;
   return el;
 }
-async function sendFinChat() {
-  const input = $("#fin-chat-input");
+
+function asFmt(v, unidad) {
+  if (unidad === "eur") return fmtEUR(v);
+  if (unidad === "%") return v.toLocaleString("es-ES", {maximumFractionDigits: 1}) + "%";
+  return v.toLocaleString("es-ES", {maximumFractionDigits: 0});
+}
+
+function asLabel(l) {
+  const m = /^(\d{4})-(\d{2})$/.exec(l);
+  return m ? `${MONTHS_SHORT[+m[2] - 1]} ${m[1].slice(2)}` : l;
+}
+
+function asSvg(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+
+function asPie(spec) {
+  const total = spec.valores.reduce((a, b) => a + b, 0);
+  const box = document.createElement("div");
+  const svg = asSvg("svg", {viewBox: "0 0 120 120", width: "150", height: "150", role: "img"});
+  svg.style.cssText = "display:block;margin:0 auto";
+  const R = 56, c = 60;
+  const pt = a => [c + R * Math.sin(a), c - R * Math.cos(a)];
+  let ang = 0;
+  spec.valores.forEach((v, i) => {
+    const color = AS_COLORS[i % AS_COLORS.length];
+    const frac = total ? v / total : 0;
+    if (frac >= 0.9999) { svg.appendChild(asSvg("circle", {cx: c, cy: c, r: R, fill: color})); return; }
+    if (frac <= 0) return;
+    const [x0, y0] = pt(ang), [x1, y1] = pt(ang + frac * 2 * Math.PI);
+    svg.appendChild(asSvg("path", {d: `M${c} ${c} L${x0} ${y0} A${R} ${R} 0 ${frac > 0.5 ? 1 : 0} 1 ${x1} ${y1} Z`, fill: color}));
+    ang += frac * 2 * Math.PI;
+  });
+  svg.appendChild(asSvg("circle", {cx: c, cy: c, r: R * 0.52, fill: "#fff"}));
+  box.appendChild(svg);
+  const legend = document.createElement("div");
+  legend.className = "as-legend";
+  spec.etiquetas.forEach((et, i) => {
+    const row = document.createElement("div");
+    row.className = "as-legend-row";
+    const dot = document.createElement("span");
+    dot.className = "as-dot";
+    dot.style.background = AS_COLORS[i % AS_COLORS.length];
+    const lab = document.createElement("span");
+    lab.className = "as-legend-label";
+    lab.textContent = asLabel(et);
+    const val = document.createElement("span");
+    val.className = "as-legend-val";
+    val.textContent = `${asFmt(spec.valores[i], spec.unidad)} · ${total ? Math.round(100 * spec.valores[i] / total) : 0}%`;
+    row.append(dot, lab, val);
+    legend.appendChild(row);
+  });
+  box.appendChild(legend);
+  return box;
+}
+
+function asBars(spec) {
+  const max = Math.max(...spec.valores, 0) || 1;
+  const box = document.createElement("div");
+  spec.etiquetas.forEach((et, i) => {
+    const row = document.createElement("div");
+    row.className = "as-bar-row";
+    const lab = document.createElement("span");
+    lab.className = "as-bar-label";
+    lab.textContent = asLabel(et);
+    const track = document.createElement("div");
+    track.className = "as-bar-track";
+    const fill = document.createElement("div");
+    fill.className = "as-bar-fill";
+    fill.style.width = Math.max(0, 100 * spec.valores[i] / max) + "%";
+    fill.style.background = AS_COLORS[0];
+    track.appendChild(fill);
+    const val = document.createElement("span");
+    val.className = "as-bar-val";
+    val.textContent = asFmt(spec.valores[i], spec.unidad);
+    row.append(lab, track, val);
+    box.appendChild(row);
+  });
+  return box;
+}
+
+function asLine(spec) {
+  const W = 300, H = 150, L = 24, Rr = 24, T = 18, B = 26;
+  const max = Math.max(...spec.valores, 0) || 1;
+  const n = spec.valores.length;
+  const x = i => n === 1 ? W / 2 : L + (W - L - Rr) * i / (n - 1);
+  const y = v => T + (H - T - B) * (1 - v / max);
+  const svg = asSvg("svg", {viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img"});
+  svg.appendChild(asSvg("line", {x1: L, y1: y(0), x2: W - Rr, y2: y(0), stroke: "#f0dceb", "stroke-width": 1}));
+  svg.appendChild(asSvg("polyline", {points: spec.valores.map((v, i) => `${x(i)},${y(v)}`).join(" "), fill: "none", stroke: AS_COLORS[0], "stroke-width": 2.5, "stroke-linejoin": "round"}));
+  spec.valores.forEach((v, i) => {
+    svg.appendChild(asSvg("circle", {cx: x(i), cy: y(v), r: 3.5, fill: AS_COLORS[0]}));
+    if (n <= 8) {
+      const val = asSvg("text", {x: x(i), y: y(v) - 7, "text-anchor": "middle", "font-size": 9, fill: "#4a2c40", "font-weight": 700});
+      val.textContent = asFmt(v, spec.unidad);
+      svg.appendChild(val);
+    }
+    if (n <= 12 || i % Math.ceil(n / 12) === 0) {
+      const lab = asSvg("text", {x: x(i), y: H - 8, "text-anchor": "middle", "font-size": 9, fill: "#8a7690"});
+      lab.textContent = asLabel(spec.etiquetas[i]);
+      svg.appendChild(lab);
+    }
+  });
+  return svg;
+}
+
+function asChart(spec) {
+  const card = document.createElement("div");
+  card.className = "as-chart";
+  if (spec.titulo) {
+    const title = document.createElement("div");
+    title.className = "as-chart-title";
+    title.textContent = spec.titulo;
+    card.appendChild(title);
+  }
+  card.appendChild(spec.tipo === "tarta" ? asPie(spec) : spec.tipo === "linea" ? asLine(spec) : asBars(spec));
+  return card;
+}
+
+async function sendAsistente() {
+  if (AS_BUSY) return;
+  const input = $("#as-input");
   const pregunta = input.value.trim();
   if (!pregunta) return;
   input.value = "";
-  appendFinChatMsg("user", pregunta);
-  const loadingEl = appendFinChatMsg("bot loading", "Consultando el histórico de reservas…");
+  AS_BUSY = true;
+  $("#as-send").disabled = true;
+  asAppend("user", pregunta);
+  AS_HISTORY.push({role: "user", content: pregunta});
+  const loadingEl = asAppend("loading", "Consultando…");
+  let fallo = null;
   try {
-    const r = await fetch(`${API}/finance-chat`, {
+    const r = await fetch(`${API}/assistant`, {
       method: "POST",
       headers: {"x-app-pin": PIN, "content-type": "application/json"},
-      body: JSON.stringify({propertyId: FIN_PROPERTY, pregunta, pin: PIN}),
+      body: JSON.stringify({mensajes: AS_HISTORY.slice(-12), finanzas: IS_ADMIN || FIN_UNLOCKED, pin: PIN}),
     });
     const d = await r.json();
     loadingEl.remove();
-    if (d.ok) appendFinChatMsg("bot", d.respuesta);
-    else appendFinChatMsg("bot error", d.error || "No se pudo responder.");
+    if (d.ok) {
+      AS_HISTORY.push({role: "assistant", content: d.respuesta});
+      asAppend("bot", d.respuesta);
+      (d.graficos || []).forEach(g => { $("#as-messages").appendChild(asChart(g)); });
+      $("#as-messages").scrollTop = $("#as-messages").scrollHeight;
+    } else {
+      fallo = d.error || "No se pudo responder.";
+    }
   } catch (e) {
     loadingEl.remove();
-    appendFinChatMsg("bot error", "Error de conexión, inténtalo de nuevo.");
+    fallo = "Error de conexión, inténtalo de nuevo.";
   }
+  if (fallo) {
+    AS_HISTORY.pop();            // la pregunta no se contestó: se devuelve al cuadro para reenviarla
+    input.value = pregunta;
+    asAppend("error", fallo);
+  }
+  AS_BUSY = false;
+  $("#as-send").disabled = false;
+  input.focus();
 }
-$("#fin-chat-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); sendFinChat(); }
+$("#as-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); sendAsistente(); }
 });
 
 function fmtEUR(n) {
