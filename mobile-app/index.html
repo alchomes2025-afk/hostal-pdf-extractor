@@ -1975,7 +1975,9 @@ function shiftFinanceMonth(delta) {
 // Conversación con el asistente del servidor (/assistant): se manda el historial entero en cada
 // turno y la respuesta puede traer gráficos ya calculados que se dibujan aquí.
 const AS_CHIPS = [
-  "¿Quién llega mañana?",
+  "¿Qué entra y sale hoy?",
+  "¿Faltan partes de viajeros?",
+  "Noches libres este mes",
   "Ocupación de este mes",
   "Ingresos por canal este mes",
   "Gráfico de ingresos por habitación",
@@ -2001,7 +2003,7 @@ function resetAsistente() {
   wrap.innerHTML = "";
   const empty = document.createElement("div");
   empty.id = "as-empty";
-  empty.textContent = "Pregunta lo que necesites sobre reservas, ocupación y finanzas. También puedo dibujarte gráficos.";
+  empty.textContent = "Pregunta lo que necesites sobre reservas, llegadas, partes de viajeros, disponibilidad, ocupación y finanzas. También puedo compararte periodos y dibujarte gráficos.";
   wrap.appendChild(empty);
   const chips = document.createElement("div");
   chips.id = "as-chips";
@@ -2028,9 +2030,10 @@ function asAppend(cls, text) {
 }
 
 function asFmt(v, unidad) {
-  if (unidad === "eur") return fmtEUR(v);
-  if (unidad === "%") return v.toLocaleString("es-ES", {maximumFractionDigits: 1}) + "%";
-  return v.toLocaleString("es-ES", {maximumFractionDigits: 0});
+  if (unidad === "eur") return v.toLocaleString("es-ES", {style: "currency", currency: "EUR", minimumFractionDigits: 0, maximumFractionDigits: v >= 1000 ? 0 : 2});
+  const n = v.toLocaleString("es-ES", {maximumFractionDigits: 1});
+  if (unidad === "%") return n + "%";
+  return unidad === "noches" || unidad === "días" ? `${n} ${unidad}` : n;
 }
 
 function asLabel(l) {
