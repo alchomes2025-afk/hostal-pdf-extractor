@@ -28,8 +28,6 @@ from datetime import date
 import config
 from services.beds24 import obtener_bookings_dia_beds24
 from services.fechas import hoy_madrid
-from services.resumen import texto_estado_parte
-from services.rpv import obtener_estado_partes
 from services.whatsapp import alerta
 
 logger = logging.getLogger(__name__)
@@ -127,35 +125,21 @@ def comprobar_y_avisar_checkins_ultima_hora():
     if not nuevas:
         return
 
-    # Estado del parte en RPV para incluirlo en el mismo aviso. Si RPV falla, el aviso
-    # sale igualmente (sin esa línea): nunca debe bloquearlo.
-    try:
-        estados_rpv, rpv_sin_verificar = obtener_estado_partes(max_age=60)
-    except Exception as ex:
-        logger.error(f"[primavera_avisos] No se pudo consultar el estado del parte en RPV: {ex}")
-        estados_rpv, rpv_sin_verificar = None, None
-
     for e in nuevas:
         canal = e.get("canal", "Desconocido")
-        linea_parte = ""
-        if estados_rpv is not None:
-            texto = texto_estado_parte(e, hoy_iso, estados_rpv, rpv_sin_verificar)
-            if texto.startswith("🕐"):
-                texto += " — el huésped puede hacerlo desde la web de check-in"
-            linea_parte = f"Parte: {texto}\n"
         if e.get("room_id") == ROOM_ID_PRIMAVERA:
             noches, salida_fmt = _formatear_estancia(e)
             linea_estancia = f"{noches} noche{'s' if noches != 1 else ''}, sale {salida_fmt}" if noches is not None else f"Sale {salida_fmt}"
             titulo = "⚡ Check-in de última hora — La Casa de la Primavera"
             cuerpo = (
-                f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n{linea_estancia}\n{linea_parte}\n"
+                f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n{linea_estancia}\n\n"
                 f"(No estaba en el resumen diario — reserva de última hora.)"
             )
         else:
             titulo = "⚡ Check-in de última hora — Hostal ALC Homes"
             cuerpo = (
                 f"Habitación: {e.get('nombre_habitacion', '?')}\n"
-                f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n{linea_parte}\n"
+                f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n\n"
                 f"(No estaba en el resumen diario — reserva de última hora.)"
             )
         alerta(titulo, cuerpo, nivel="info")
