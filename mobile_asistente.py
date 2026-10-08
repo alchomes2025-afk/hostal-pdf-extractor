@@ -606,7 +606,7 @@ def _t_parte_huesped(a, ctx):
     for clave, r in coincidencias[:5]:
         edad = rpv_latencia.edad_min(r["creada"], ahora)
         consejo, anomala = _consejo_parte(r, hoy, estados, sin_verificar, edad, stats)
-        filas.append({"propiedad": clave, "huesped": r["huesped"], "habitacion": r["habitacion"], "llegada": r["checkin"].isoformat(), "canal": r["canal"],
+        filas.append({"propiedad": clave, "huesped": r["huesped"], "habitacion": r["habitacion"], "llegada": r["checkin"].isoformat(), "canal": r["canal"], "numero_reserva_beds24": r["id"],
                       "reserva_creada_hace": rpv_latencia.formato_min(edad) if edad is not None else None,
                       "estado_parte": _parte(r, r["checkin"], estados, sin_verificar, hoy), "que_decir_al_huesped": consejo, "anomalia": anomala})
     return {"total_coincidencias": len(coincidencias), "coincidencias": filas}
