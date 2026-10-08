@@ -10,6 +10,7 @@ from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
 from services.beds24 import get_beds24_access_token, _ref_en_booking
 from services.fechas import hoy_madrid
 from services.rpv import diagnostico as diagnostico_rpv
+from services.rpv_sin_importar import candidatas_sin_importar
 
 logger = logging.getLogger(__name__)
 debug_bp = Blueprint("debug_diag", __name__)
@@ -68,6 +69,23 @@ def diag_rpv():
     entorno = "pre" if request.args.get("entorno") == "pre" else "real"
     return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "entorno": entorno,
                     "cuentas": diagnostico_rpv(entorno)}), 200
+
+
+@debug_bp.route("/diag-sin-importar", methods=["GET"])
+def diag_sin_importar():
+    """
+    Diagnóstico de solo lectura: reservas que el aviso de "RPV no ha importado" avisaría
+    ahora mismo (no consta en RPV pasadas HORAS_NORMALES_SIN_RPV h). No envía nada ni toca
+    Firestore. Sin datos personales (habitación, canal, llegada, antigüedad).
+
+    Uso: /diag-sin-importar?token=<TOKEN>
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    candidatas = [{k: v for k, v in c.items() if k != "huesped"} for c in candidatas_sin_importar()]
+    return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "candidatas": candidatas}), 200
 
 
 @debug_bp.route("/ver-booking-completo", methods=["GET"])

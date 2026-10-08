@@ -64,6 +64,12 @@ def _cuentas():
     return cuentas
 
 
+def habitaciones_cubiertas():
+    """Habitaciones que tienen cuenta de RPV (con API key): las únicas cuyas reservas
+    debe conocer RPV."""
+    return {r for rooms in _cuentas().values() for r in rooms}
+
+
 def _etiqueta(rooms):
     nombres = [ROOM_CONFIG.get(r, {}).get("nombre", r) for r in rooms]
     return nombres[0] if len(nombres) == 1 else f"{nombres[0]} y {len(nombres) - 1} más"

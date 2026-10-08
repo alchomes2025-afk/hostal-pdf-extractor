@@ -435,6 +435,8 @@ def obtener_bookings_rango_beds24(fecha_desde_iso, fecha_hasta_iso, tipo="checki
                 "email": guest.get("email") or b.get("email"),
                 "country": guest.get("country") or b.get("country"),
                 "creada": b.get("bookingTime"),
+                "modificada": b.get("modifiedTime"),
+                "status": b.get("status"),
             })
 
     return resultado
