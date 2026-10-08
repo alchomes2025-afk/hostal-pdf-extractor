@@ -87,7 +87,7 @@ def candidatas_sin_importar(ahora_utc=None):
             continue
         candidatas.append({"book_id": str(e.get("book_id")), "nombre_habitacion": e["nombre_habitacion"],
                            "huesped": e.get("huesped", "?"), "canal": e.get("canal", "Desconocido"),
-                           "arrival": e["arrival"], "horas": horas})
+                           "arrival": e["arrival"], "departure": e.get("departure"), "horas": horas})
     return sorted(candidatas, key=lambda c: (c["arrival"], c["nombre_habitacion"]))
 
 
@@ -95,16 +95,38 @@ def _antiguedad(horas):
     return f"{horas} h" if horas < 48 else f"{horas // 24} días"
 
 
+def _fecha_corta(iso):
+    try:
+        return datetime.fromisoformat(iso).strftime("%d/%m")
+    except Exception:
+        return iso or "?"
+
+
 def mensaje_aviso(nuevas):
+    """Texto pensado para quien no conoce el sistema (también lo recibe la persona
+    encargada de las reservas): qué pasa, por qué importa y qué hacer, sin jerga."""
     plural = len(nuevas) > 1
-    lineas = [f"⚠️ ALCHOMES — {'Reservas' if plural else 'Reserva'} que RPV no ha importado", ""]
+    lineas = [f"⚠️ ALCHOMES — {'Reservas que no han llegado' if plural else 'Una reserva no ha llegado'} a RPV", ""]
+    lineas.append(
+        f"{'Estas reservas llevan' if plural else 'Esta reserva lleva'} más de {HORAS_NORMALES_SIN_RPV} h en Beds24 (nuestro gestor de reservas) "
+        f"y todavía no {'aparecen' if plural else 'aparece'} en RPV, la web donde se hace el registro oficial de viajeros. "
+        f"Lo normal es que {'lleguen' if plural else 'llegue'} sola{'s' if plural else ''} en menos de un día.")
+    lineas.append("")
     for c in nuevas:
-        llegada = datetime.fromisoformat(c["arrival"]).strftime("%d/%m")
-        lineas.append(f"• {c['nombre_habitacion']} · {c['huesped']} · {c['canal']} · llega el {llegada} · sin cambios desde hace {_antiguedad(c['horas'])}")
-    lineas += ["",
-               f"{'No constan' if plural else 'No consta'} en RPV pasadas más de {HORAS_NORMALES_SIN_RPV} h; lo normal es que ya {'estén' if plural else 'esté'}. "
-               "Conviene revisarlo antes de que llegue.",
-               "Qué hacer: mirar si hay otro aviso del watchdog (iCal o RPV caído); si no, revisar la integración en RPV o crear la reserva a mano allí."]
+        salida = f" · sale el {_fecha_corta(c['departure'])}" if c.get("departure") else ""
+        lineas.append(f"• {c['nombre_habitacion']} · {c['huesped']} · {c['canal']} · llega el {_fecha_corta(c['arrival'])}{salida} · lleva {_antiguedad(c['horas'])} sin llegar a RPV")
+    lineas += [
+        "",
+        f"Por qué importa: si no {'están' if plural else 'está'} en RPV, {'esos huéspedes pueden' if plural else 'el huésped puede'} tener problemas para registrarse y recibir {'sus' if plural else 'su'} código{'s' if plural else ''} de entrada.",
+        "",
+        "Qué hacer:",
+        f"1. Entra en RPV y busca {'cada reserva' if plural else 'la reserva'} por el nombre o la fecha de llegada.",
+        f"2. Si ya {'aparecen' if plural else 'aparece'}, no hagas nada: llegó después de este aviso.",
+        f"3. Si no {'aparecen' if plural else 'aparece'}, {'créalas' if plural else 'créala'} a mano en RPV con los datos de arriba.",
+        "4. Si no sabes cómo hacerlo, o si te llegan varios avisos seguidos, avisa a Adrián: puede que se haya roto la conexión entre Beds24 y RPV.",
+        "",
+        "Este aviso no se repetirá para " + ("estas reservas." if plural else "esta reserva."),
+    ]
     return "\n".join(lineas)
 
 
