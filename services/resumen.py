@@ -3,7 +3,7 @@ services/resumen.py — Generación del resumen diario para WhatsApp
 (entradas/salidas de hoy según Beds24, cruzadas con los partes de RPV).
 """
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from services.beds24 import get_beds24_access_token, obtener_bookings_dia_beds24
 from services.rpv import obtener_estado_partes
@@ -20,6 +20,19 @@ ROOM_ID_PRIMAVERA = "720841"
 # de estas horas que aún no está en RPV es lo normal; pasado ese tiempo ya es
 # una anomalía que conviene revisar.
 HORAS_NORMALES_SIN_RPV = 24
+# Si el huésped llega hoy o mañana va a necesitar el parte enseguida (puede hacerlo desde el día anterior),
+# así que ahí se da por anómalo antes. Valor provisional: se ajustará con la medición de services/rpv_latencia.py.
+HORAS_NORMALES_SIN_RPV_INMINENTE = 6
+
+
+def horas_normales_sin_rpv(llegada_iso, hoy=None):
+    """Horas que se consideran normales sin que una reserva conste en RPV, según lo cerca que esté la llegada."""
+    hoy = hoy or hoy_madrid()
+    try:
+        inminente = date.fromisoformat(str(llegada_iso)[:10]) <= hoy + timedelta(days=1)
+    except ValueError:
+        inminente = False
+    return HORAS_NORMALES_SIN_RPV_INMINENTE if inminente else HORAS_NORMALES_SIN_RPV
 
 
 def _hace(creada_iso, ahora_utc):
@@ -55,7 +68,7 @@ def texto_estado_parte(entrada, dia_iso, estados_rpv, rpv_sin_verificar, ahora_u
     horas = _hace(entrada.get("creada"), ahora_utc)
     if horas is None:
         return "⚠️ parte pendiente · aún no consta en RPV"
-    if horas < HORAS_NORMALES_SIN_RPV:
+    if horas < horas_normales_sin_rpv(dia_iso):
         return "🕐 parte pendiente · reserva reciente, RPV aún no la ha importado"
     antiguedad = f"{horas} h" if horas < 48 else f"{horas // 24} días"
     return f"⚠️ parte pendiente · lleva {antiguedad} sin aparecer en RPV: revisar"

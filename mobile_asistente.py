@@ -29,12 +29,13 @@ import json
 import logging
 import time
 import unicodedata
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import requests
 
 from config import GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
 from services.fechas import hoy_madrid
+from services import rpv_latencia
 from services.resumen import texto_estado_parte
 from services.rpv import VENTANA_DIAS as VENTANA_RPV_DIAS, obtener_estado_partes
 
@@ -567,6 +568,60 @@ def _t_partes(a, ctx):
     return resultado
 
 
+def _consejo_parte(r, hoy, estados, sin_verificar, edad, stats):
+    """Qué decirle al huésped de la reserva `r` sobre su parte de viajeros: (texto, anomalía)."""
+    llegada = r["checkin"]
+    est = estados.get((r["room_id"], llegada.isoformat()))
+    if llegada < hoy:
+        return "RPV solo informa de las entradas de hoy en adelante: para una estancia ya empezada hay que mirarlo directamente en RPV.", False
+    if est and est["completado"]:
+        return "El parte ya está completado: el huésped no tiene que hacer nada más. Puede entrar ya en la web de check-in a por sus códigos.", False
+    if sin_verificar is None or r["room_id"] in sin_verificar:
+        return "Ahora mismo no puedo comprobarlo en RPV (no responde). Pídale que lo intente de nuevo dentro de unos 10 minutos.", False
+    if llegada > hoy + timedelta(days=1):
+        return f"Todavía no puede hacerlo: el parte se puede rellenar desde el día anterior a la llegada (a partir del {(llegada - timedelta(days=1)):%d/%m}).", False
+    if est and est["estado"] == "parcial":
+        return "Ya hay un parte empezado pero faltan huéspedes por registrar: que añada a todos los huéspedes de la reserva y lo complete.", False
+    if est:
+        return "La reserva ya está en RPV: puede rellenar el parte ahora. Si no le carga el enlace, que lo cierre y lo vuelva a abrir.", False
+    return rpv_latencia.consejo_reserva_no_en_rpv(edad, stats)
+
+
+def _t_parte_huesped(a, ctx):
+    nombre = _norm(a.get("huesped"))
+    if not nombre:
+        raise ErrorHerramienta("Falta el nombre del huésped")
+    hoy = hoy_madrid()
+    ahora = datetime.now(timezone.utc)
+    estados, sin_verificar = _estados_rpv()
+    stats = rpv_latencia.estadisticas()
+    coincidencias = []
+    for clave in _propiedades(a):
+        reservas, _incompleto = _reservas(_ids_propiedad(clave))
+        coincidencias += [(clave, r) for r in reservas if nombre in _norm(r["huesped"]) and r["checkout"] >= hoy]
+    if not coincidencias:
+        raise ErrorHerramienta("No hay ninguna reserva vigente o futura con ese nombre")
+    coincidencias.sort(key=lambda x: (x[1]["checkin"], x[1]["habitacion"]))
+    filas = []
+    for clave, r in coincidencias[:5]:
+        edad = rpv_latencia.edad_min(r["creada"], ahora)
+        consejo, anomala = _consejo_parte(r, hoy, estados, sin_verificar, edad, stats)
+        filas.append({"propiedad": clave, "huesped": r["huesped"], "habitacion": r["habitacion"], "llegada": r["checkin"].isoformat(), "canal": r["canal"],
+                      "reserva_creada_hace": rpv_latencia.formato_min(edad) if edad is not None else None,
+                      "estado_parte": _parte(r, r["checkin"], estados, sin_verificar, hoy), "que_decir_al_huesped": consejo, "anomalia": anomala})
+    return {"total_coincidencias": len(coincidencias), "coincidencias": filas}
+
+
+def _t_retraso_rpv(a, ctx):
+    stats = rpv_latencia.estadisticas()
+    tipica, fiable = rpv_latencia.espera_tipica_min(stats)
+    nota = ("Retraso entre que se crea la reserva en Beds24 y aparece en RPV, medido en cada pasada del watchdog (precisión ≈ 15-25 min); los minutos son cotas superiores. "
+            "«nunca_vistas» son reservas que no aparecieron en RPV en 72 h.")
+    if not fiable:
+        nota += f" Aún hay menos de {rpv_latencia.MUESTRAS_FIABLES} medidas: la espera típica de {tipica} min es una estimación provisional."
+    return {"medidas": stats, "espera_tipica_minutos": tipica, "estimacion_fiable": fiable, "nota": nota}
+
+
 # ── Disponibilidad y precios de calendario ───────────────────────────────────
 
 def _es_bloqueo_calendario(b):
@@ -654,7 +709,7 @@ def _t_finanzas_mes(a, ctx):
 
 HERRAMIENTAS = {"listar_reservas": _t_listar_reservas, "resumen": _t_resumen, "grafico": _t_grafico, "comparar": _t_comparar,
                 "cancelaciones": _t_cancelaciones, "agenda": _t_agenda, "partes": _t_partes, "disponibilidad": _t_disponibilidad,
-                "finanzas_mes": _t_finanzas_mes}
+                "parte_huesped": _t_parte_huesped, "retraso_rpv": _t_retraso_rpv, "finanzas_mes": _t_finanzas_mes}
 
 _PROP = {"type": "string", "enum": ["hostal", "primavera"], "description": "hostal = Hostal ALC Homes San Blas; primavera = La Casa de la Primavera"}
 _PROP_OPC = {"type": "string", "enum": ["hostal", "primavera"], "description": "Si se omite, las dos propiedades"}
@@ -712,6 +767,15 @@ TOOLS = [
         "Estado del parte de viajeros (registro oficial en RPV) de las llegadas de hoy a dentro de 30 días: recibido, incompleto, pendiente, etc. RPV no informa de fechas pasadas.",
         {"propiedad": _PROP_OPC, "desde": _FECHA, "hasta": _FECHA, "solo_pendientes": {"type": "boolean", "description": "Solo las llegadas cuyo parte aún no está recibido"}}, []),
     _herramienta(
+        "parte_huesped",
+        "Para cuando un huésped llama porque no puede hacer el parte de viajeros (o preguntan por él): busca su reserva por nombre, comprueba si ya está en RPV y dice qué decirle "
+        "(«pruebe de nuevo dentro de X»). `que_decir_al_huesped` es la respuesta lista para repetir por teléfono.",
+        {"huesped": {"type": "string", "description": "Nombre o apellido del huésped"}, "propiedad": _PROP_OPC}, ["huesped"]),
+    _herramienta(
+        "retraso_rpv",
+        "Cuánto tarda RPV en recibir las reservas de Beds24 según las mediciones reales: mediana, percentil 90, máximo y reservas que nunca llegaron.",
+        {}, []),
+    _herramienta(
         "disponibilidad",
         "Noches libres, ocupadas y bloqueadas de cada habitación en un rango (máx. 120 días), con tramos libres y precio de calendario de esas noches.",
         {"propiedad": _PROP, "desde": _FECHA, "hasta": _FECHA, "habitacion": {"type": "string", "description": "Texto del nombre o tipo de habitación (opcional)"}},
@@ -766,7 +830,7 @@ Reglas:
 2. Si la pregunta es ambigua en algo que cambia el resultado (propiedad, periodo, bruto o neto, qué quiere ver exactamente), haz UNA pregunta corta con 2-4 opciones antes de consultar. Si hay una suposición razonable (p. ej. el mes en curso), úsala y dila en una frase. No preguntes por cosas que ya sabes.
 3. Para gráficos usa la herramienta grafico: tarta para proporciones, barras para comparar, linea para evolución por mes. Después añade 1-2 frases con lo más llamativo (no repitas todos los números). Máximo 2 gráficos por respuesta.
 4. Ingresos brutos = precio de las reservas; netos = brutos menos la comisión del canal. Las noches y los ingresos de una estancia que cruza varios meses se reparten por noches. La rentabilidad de finanzas_mes usa costes estimados: avísalo. Para comparar periodos usa comparar (no restes tú) y avisa si tienen distinta duración.
-5. El «parte de viajeros» es el registro oficial de huéspedes en RPV. Que una reserva de menos de 24 h aún no conste en RPV es normal; si lleva más, avísalo como algo a revisar. Los precios de disponibilidad son los del calendario de venta, no lo que pagó cada huésped.
+5. El «parte de viajeros» es el registro oficial de huéspedes en RPV. Que una reserva de menos de 24 h aún no conste en RPV es normal; si lleva más, avísalo como algo a revisar. Los precios de disponibilidad son los del calendario de venta, no lo que pagó cada huésped. Si preguntan qué decirle a un huésped que no puede hacer el parte, usa parte_huesped y da la recomendación que devuelve, sin cambiar los tiempos que indica.
 6. Responde en español, breve y directo, en texto plano (sin markdown ni tablas; para listas usa «•»). Importes en euros, con separador de miles y sin decimales salvo que importen.
 7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app.
 8. No tienes teléfonos ni correos de huéspedes.

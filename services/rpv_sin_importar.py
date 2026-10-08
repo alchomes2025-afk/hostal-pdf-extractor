@@ -5,23 +5,28 @@ demasiado tiempo sin aparecer en RPV.
 RPV importa las reservas de Beds24 con cierto retraso (integración nativa "b24",
 frecuencia por confirmar; antes, el iCal una vez al día), así que que una reserva
 recién creada no conste todavía es lo normal y NO se avisa. Se avisa cuando pasan
-HORAS_NORMALES_SIN_RPV (services/resumen.py) desde que se creó o se modificó la
-reserva y RPV sigue sin conocerla: entonces algo falla (iCal caído, integración
-parada, reserva que RPV no ha entendido) y el huésped no podría hacer su parte.
+las horas que marca services.resumen.horas_normales_sin_rpv (menos si el huésped llega hoy
+o mañana) desde que se creó o se modificó la reserva y RPV sigue sin conocerla: entonces
+algo falla (iCal caído, integración parada, reserva que RPV no ha entendido) y el huésped
+no podría hacer su parte.
 
 Solo se comprueban las entradas de hoy a hoy+VENTANA_DIAS-1 (la ventana que
 devuelve RPV) de las habitaciones que tienen cuenta de RPV. Si RPV no responde
 para una habitación NO se avisa (no se sabe si consta o no; eso ya lo cubre el
 watchdog). Se avisa una sola vez por reserva: dedupe por book_id en Firestore
 (system_state/rpv_sin_importar), podado por fecha de llegada.
+
+Con los mismos datos de cada pasada (una sola consulta a Beds24 y a RPV) se alimenta además la medición
+del retraso real de RPV (services/rpv_latencia.py).
 """
 import logging
 from datetime import datetime, timedelta, timezone
 
 import config
+from services import rpv_latencia
 from services.beds24 import obtener_bookings_rango_beds24
 from services.fechas import hoy_madrid
-from services.resumen import HORAS_NORMALES_SIN_RPV, _hace
+from services.resumen import _hace, horas_normales_sin_rpv
 from services.rpv import TTL_SEGUNDO_PLANO, VENTANA_DIAS, habitaciones_cubiertas, obtener_estado_partes
 from services.whatsapp import enviar_whatsapp_callmebot
 
@@ -36,7 +41,7 @@ def _doc_ref():
 
 def _leer_avisados():
     """{book_id (str): fecha de llegada ISO} de las reservas ya avisadas. None si
-    Firestore no está disponible o falla (sin dedupe se repetiría el aviso cada 15 min)."""
+    Firestore no está disponible o falla la lectura (sin dedupe se repetiría el aviso cada 15 min)."""
     ref = _doc_ref()
     if ref is None:
         return None
@@ -65,29 +70,38 @@ def _horas_sin_cambios(entrada, ahora_utc):
     return min(horas) if horas else None
 
 
-def candidatas_sin_importar(ahora_utc=None):
-    """Reservas que RPV debería conocer ya y no conoce, sin enviar nada ni tocar Firestore:
-    lista de dicts {book_id, nombre_habitacion, huesped, canal, arrival, horas}. Separada del
-    envío para poder verla desde el endpoint de diagnóstico."""
-    ahora_utc = ahora_utc or datetime.now(timezone.utc)
+def leer_datos():
+    """Lo que ve esta pasada: {"estados", "cubiertas", "entradas"} (RPV y Beds24, una consulta de cada).
+    `cubiertas` son las habitaciones cuya cuenta de RPV ha respondido; sin ninguna, no se consulta Beds24."""
     estados, sin_verificar = obtener_estado_partes(max_age=TTL_SEGUNDO_PLANO)
     cubiertas = habitaciones_cubiertas() - sin_verificar
-    if not cubiertas:
-        return []
+    entradas = []
+    if cubiertas:
+        hoy = hoy_madrid()
+        entradas = obtener_bookings_rango_beds24(hoy.isoformat(), (hoy + timedelta(days=VENTANA_DIAS - 1)).isoformat(), tipo="checkin")
+    return {"estados": estados, "cubiertas": cubiertas, "entradas": entradas}
+
+
+def candidatas_sin_importar(ahora_utc=None, datos=None):
+    """Reservas que RPV debería conocer ya y no conoce, sin enviar nada ni tocar Firestore:
+    lista de dicts {book_id, nombre_habitacion, huesped, canal, arrival, departure, horas, umbral}. Separada del
+    envío para poder verla desde el endpoint de diagnóstico."""
+    ahora_utc = ahora_utc or datetime.now(timezone.utc)
+    datos = datos or leer_datos()
     hoy = hoy_madrid()
-    entradas = obtener_bookings_rango_beds24(hoy.isoformat(), (hoy + timedelta(days=VENTANA_DIAS - 1)).isoformat(), tipo="checkin")
     candidatas = []
-    for e in entradas:
-        if e["room_id"] not in cubiertas or (e["room_id"], e["arrival"]) in estados:
+    for e in datos["entradas"]:
+        if e["room_id"] not in datos["cubiertas"] or (e["room_id"], e["arrival"]) in datos["estados"]:
             continue
         if str(e.get("status") or "").lower() == "black":   # bloqueo de fechas, no es una reserva
             continue
         horas = _horas_sin_cambios(e, ahora_utc)
-        if horas is None or horas < HORAS_NORMALES_SIN_RPV:
+        umbral = horas_normales_sin_rpv(e["arrival"], hoy)
+        if horas is None or horas < umbral:
             continue
         candidatas.append({"book_id": str(e.get("book_id")), "nombre_habitacion": e["nombre_habitacion"],
                            "huesped": e.get("huesped", "?"), "canal": e.get("canal", "Desconocido"),
-                           "arrival": e["arrival"], "departure": e.get("departure"), "horas": horas})
+                           "arrival": e["arrival"], "departure": e.get("departure"), "horas": horas, "umbral": umbral})
     return sorted(candidatas, key=lambda c: (c["arrival"], c["nombre_habitacion"]))
 
 
@@ -106,11 +120,12 @@ def mensaje_aviso(nuevas):
     """Texto pensado para quien no conoce el sistema (también lo recibe la persona
     encargada de las reservas): qué pasa, por qué importa y qué hacer, sin jerga."""
     plural = len(nuevas) > 1
+    umbral = min(c["umbral"] for c in nuevas)
     lineas = [f"⚠️ ALCHOMES — {'Reservas que no han llegado' if plural else 'Una reserva no ha llegado'} a RPV", ""]
     lineas.append(
-        f"{'Estas reservas llevan' if plural else 'Esta reserva lleva'} más de {HORAS_NORMALES_SIN_RPV} h en Beds24 (nuestro gestor de reservas) "
+        f"{'Estas reservas llevan' if plural else 'Esta reserva lleva'} más de {umbral} h en Beds24 (nuestro gestor de reservas) "
         f"y todavía no {'aparecen' if plural else 'aparece'} en RPV, la web donde se hace el registro oficial de viajeros. "
-        f"Lo normal es que {'lleguen' if plural else 'llegue'} sola{'s' if plural else ''} en menos de un día.")
+        f"Lo normal es que ya {'estén' if plural else 'esté'}.")
     lineas.append("")
     for c in nuevas:
         salida = f" · sale el {_fecha_corta(c['departure'])}" if c.get("departure") else ""
@@ -131,14 +146,16 @@ def mensaje_aviso(nuevas):
 
 
 def avisar_reservas_sin_importar():
-    """Avisa por WhatsApp (un solo mensaje) de las reservas que RPV sigue sin conocer pasado
-    el tiempo normal, una vez por reserva. Para llamarse desde /watchdog; no lanza excepción
-    hacia arriba."""
+    """Avisa por WhatsApp (un solo mensaje) de las reservas que RPV sigue sin conocer pasado el tiempo normal,
+    una vez por reserva, y anota la medición del retraso de RPV. Para llamarse desde /watchdog; no lanza
+    excepción hacia arriba."""
+    datos = leer_datos()
+    if datos["entradas"]:
+        rpv_latencia.registrar(datos["entradas"], datos["estados"], datos["cubiertas"])
     avisados = _leer_avisados()
     if avisados is None:
         return
-    candidatas = candidatas_sin_importar()
-    nuevas = [c for c in candidatas if c["book_id"] not in avisados]
+    nuevas = [c for c in candidatas_sin_importar(datos=datos) if c["book_id"] not in avisados]
     if not nuevas:
         return
     try:

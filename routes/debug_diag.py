@@ -10,6 +10,7 @@ from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
 from services.beds24 import get_beds24_access_token, _ref_en_booking
 from services.fechas import hoy_madrid
 from services.rpv import diagnostico as diagnostico_rpv
+from services import rpv_latencia
 from services.rpv_sin_importar import candidatas_sin_importar
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,23 @@ def diag_sin_importar():
         return jsonify({"ok": False, "error": "No autorizado"}), 401
     candidatas = [{k: v for k, v in c.items() if k != "huesped"} for c in candidatas_sin_importar()]
     return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "candidatas": candidatas}), 200
+
+
+@debug_bp.route("/diag-latencia-rpv", methods=["GET"])
+def diag_latencia_rpv():
+    """
+    Diagnóstico de solo lectura: cuánto tarda RPV en recibir las reservas de Beds24 según las medidas del
+    watchdog (services/rpv_latencia.py): estadísticas, espera típica y las últimas medidas. Sin datos personales.
+
+    Uso: /diag-latencia-rpv?token=<TOKEN>
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    stats = rpv_latencia.estadisticas()
+    tipica, fiable = rpv_latencia.espera_tipica_min(stats)
+    return jsonify({"ok": True, "estadisticas": stats, "espera_tipica_min": tipica, "espera_tipica_fiable": fiable, **rpv_latencia.seguimiento()}), 200
 
 
 @debug_bp.route("/ver-booking-completo", methods=["GET"])
