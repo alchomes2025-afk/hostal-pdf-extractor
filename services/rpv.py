@@ -218,6 +218,24 @@ def parte_recibido_para(room_id, fecha_entrada_iso):
     return False
 
 
+def reserva_en_rpv(room_id, fecha_entrada_iso):
+    """
+    ¿Conoce RPV la reserva de esta habitación con esta fecha de entrada (aunque su parte siga pendiente)?
+    True si consta; False si RPV responde y no la tiene (aún no la ha importado); None si no se puede saber
+    (habitación sin cuenta de RPV o RPV no responde). Como parte_recibido_para: un «sí» en la copia se da por
+    bueno y un «no» se vuelve a comprobar contra RPV como mucho una vez por minuto.
+    """
+    if room_id not in RPV_PROPERTY_MAP:
+        return None
+    for max_age in (TTL_SEGUNDO_PLANO, TTL_CHECKIN):
+        estados, sin_verificar = obtener_estado_partes(max_age, rooms=[room_id])
+        if (room_id, fecha_entrada_iso) in estados:
+            return True
+        if room_id in sin_verificar:
+            return None
+    return False
+
+
 def comprobar_cuentas(max_age=TTL_SEGUNDO_PLANO):
     """[(etiqueta, error|None)] — una entrada por cuenta de RPV, para el chequeo de
     salud del watchdog. Usa la misma copia que el resto, así que no añade llamadas."""

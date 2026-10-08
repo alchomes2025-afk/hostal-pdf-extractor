@@ -16,6 +16,7 @@ from services.beds24 import (
     buscar_booking_por_ref, buscar_booking_por_nombre,
     get_beds24_access_token, _extraer_nombre_huesped_beds24,
 )
+from services.parte_intentos import aviso_parte_no_disponible
 from services.rpv import parte_recibido_para
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,10 @@ def check_in_status():
 
     Ejemplo respuesta (parte recibido):
     { ...mismo esquema..., "parte_submitted": true, "rpv_link": null, "pin": "191199" }
+
+    Con el parte pendiente y la llegada hoy o mañana, la respuesta lleva además `aviso_parte`: null (RPV conoce la
+    reserva, o no se puede saber), "reintentar" (RPV aún no la tiene: volver a probar pasados unos minutos) o "llamar"
+    (llamar al teléfono de atención al cliente) — reglas en services/parte_intentos.py.
     """
     ref = request.args.get("ref", "").strip()
     if not ref:
@@ -129,6 +134,12 @@ def check_in_status():
 
     # ── 3. Verificar parte via API de RPV (válido para el día de hoy o días previos) ──
     parte_enviado = parte_recibido_para(room_id, arrival)
+    aviso_parte = None
+    if not parte_enviado:
+        try:
+            aviso_parte = aviso_parte_no_disponible(booking.get("id"), room_id, arrival, ahora_madrid)
+        except Exception as e:   # el aviso es un extra: nunca debe impedir el check-in
+            logger.error(f"[check-in] No se pudo calcular el aviso del parte: {e}")
 
     # ── 4. Antes del día de check-in ────────────────────────────────────────
     if hoy < arrival_date:
@@ -142,6 +153,7 @@ def check_in_status():
             "estado": estado, "parte_submitted": parte_enviado,
             "pin_available": False, "pin": None,
             "rpv_link": RPV_LINKS.get(room_id) if not parte_enviado else None,
+            "aviso_parte": aviso_parte,
         })
 
     # ── 5. Día de check-in (hoy == arrival_date) ────────────────────────────
@@ -155,6 +167,7 @@ def check_in_status():
             "estado": estado, "parte_submitted": parte_enviado,
             "pin_available": False, "pin": None,
             "rpv_link": RPV_LINKS.get(room_id) if not parte_enviado else None,
+            "aviso_parte": aviso_parte,
         })
 
     # A partir de las 15:00 del día de check-in
@@ -168,6 +181,7 @@ def check_in_status():
             "estado": "checkin_pending", "parte_submitted": False,
             "pin_available": False, "pin": None,
             "rpv_link": RPV_LINKS.get(room_id),
+            "aviso_parte": aviso_parte,
         })
 
 
