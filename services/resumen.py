@@ -3,7 +3,7 @@ services/resumen.py — Generación del resumen diario para WhatsApp
 (entradas/salidas de hoy según Beds24, cruzadas con los partes de RPV).
 """
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from services.beds24 import get_beds24_access_token, obtener_bookings_dia_beds24
 from services.rpv import obtener_estado_partes
@@ -14,6 +14,51 @@ logger = logging.getLogger(__name__)
 
 
 ROOM_ID_PRIMAVERA = "720841"
+
+# RPV recibe las reservas de Beds24 con cierto retraso (iCal una vez al día; la
+# integración directa "b24", frecuencia por confirmar). Una reserva creada hace menos
+# de estas horas que aún no está en RPV es lo normal; pasado ese tiempo ya es
+# una anomalía que conviene revisar.
+HORAS_NORMALES_SIN_RPV = 24
+
+
+def _hace(creada_iso, ahora_utc):
+    """Antigüedad de la reserva en horas (int) o None si falta el dato o no se entiende."""
+    try:
+        creada = datetime.fromisoformat(str(creada_iso).replace("Z", "+00:00"))
+        if creada.tzinfo is None:
+            creada = creada.replace(tzinfo=timezone.utc)
+        horas = int((ahora_utc - creada).total_seconds() // 3600)
+        return horas if horas >= 0 else None
+    except Exception:
+        return None
+
+
+def texto_estado_parte(entrada, dia_iso, estados_rpv, rpv_sin_verificar, ahora_utc=None):
+    """
+    Texto corto del estado del parte de una entrada (para resúmenes y avisos de
+    WhatsApp), a partir del estado real en RPV. Cuando la reserva no consta en RPV
+    distingue lo normal de lo anormal por la hora a la que se creó en Beds24:
+    reciente → informativo; antigua → aviso para revisar la sincronización.
+    """
+    ahora_utc = ahora_utc or datetime.now(timezone.utc)
+    est = estados_rpv.get((entrada["room_id"], dia_iso))
+    if est and est["completado"]:
+        return "📄 parte recibido y comunicado" if est["comunicado"] else "📄 parte recibido"
+    if entrada["room_id"] in rpv_sin_verificar:
+        # Si RPV no responde, "no consta" no significa "pendiente".
+        return "❓ parte SIN VERIFICAR (RPV no responde)"
+    if est and est["estado"] == "parcial":
+        return "🟡 parte INCOMPLETO (faltan huéspedes)"
+    if est:
+        return "⚠️ parte PENDIENTE"
+    horas = _hace(entrada.get("creada"), ahora_utc)
+    if horas is None:
+        return "⚠️ parte pendiente · aún no consta en RPV"
+    if horas < HORAS_NORMALES_SIN_RPV:
+        return "🕐 parte pendiente · reserva reciente, RPV aún no la ha importado"
+    antiguedad = f"{horas} h" if horas < 48 else f"{horas // 24} días"
+    return f"⚠️ parte pendiente · lleva {antiguedad} sin aparecer en RPV: revisar"
 
 
 def _formatear_estancia(entrada):
@@ -91,20 +136,7 @@ def generar_mensaje_resumen(hora_str=None, dia=None):
     lineas.append(f"\n✅ ENTRADAS {etiqueta}:")
     if entradas_beds24:
         for e in entradas_beds24:
-            est = estados_rpv.get((e["room_id"], dia_iso))
-            if est and est["completado"]:
-                estado = "📄 parte recibido y comunicado" if est["comunicado"] else "📄 parte recibido"
-            elif e["room_id"] in rpv_sin_verificar:
-                # Si RPV no responde, "no consta" no significa "pendiente".
-                estado = "❓ parte SIN VERIFICAR (RPV no responde)"
-            elif est and est["estado"] == "parcial":
-                estado = "🟡 parte INCOMPLETO (faltan huéspedes)"
-            elif est:
-                estado = "⚠️ parte PENDIENTE"
-            else:
-                # RPV importa las reservas del iCal de Beds24 una vez al día: una reserva
-                # reciente puede no estar todavía, y entonces conviene crearla a mano.
-                estado = "⚠️ parte PENDIENTE (no consta en RPV)"
+            estado = texto_estado_parte(e, dia_iso, estados_rpv, rpv_sin_verificar)
             canal = e.get("canal", "Desconocido")
             if e["room_id"] == ROOM_ID_PRIMAVERA:
                 noches, salida_fmt = _formatear_estancia(e)

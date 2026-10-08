@@ -356,6 +356,7 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
                 "canal": _canal_legible(b),
                 "email": guest.get("email") or b.get("email"),
                 "country": guest.get("country") or b.get("country"),
+                "creada": b.get("bookingTime"),
             })
 
         if descartadas_por_fecha:
@@ -433,6 +434,7 @@ def obtener_bookings_rango_beds24(fecha_desde_iso, fecha_hasta_iso, tipo="checki
                 "canal": _canal_legible(b),
                 "email": guest.get("email") or b.get("email"),
                 "country": guest.get("country") or b.get("country"),
+                "creada": b.get("bookingTime"),
             })
 
     return resultado
