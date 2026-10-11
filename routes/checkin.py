@@ -12,10 +12,12 @@ from config import (
     API_TOKEN, TEST_TOKEN, ROOM_CONFIG, RPV_LINKS, TEST_BOOKINGS,
     BEDS24_API_BASE, BEDS24_PROPERTY_ID,
 )
+from services.acceso_enlace import crear_token, verificar_token
 from services.beds24 import (
-    buscar_booking_por_ref, buscar_booking_por_nombre,
+    buscar_booking_por_id, buscar_booking_por_ref, buscar_booking_por_nombre,
     get_beds24_access_token, _extraer_nombre_huesped_beds24,
 )
+from services.limites import ip_cliente, permitir
 from services.parte_intentos import aviso_parte_no_disponible
 from services.rpv import parte_comprobado_estancia_iniciada, parte_recibido_para
 
@@ -27,6 +29,7 @@ checkin_bp = Blueprint("checkin", __name__)
 def check_in_status():
     """
     GET /check-in?ref=<numero_de_reserva_o_nombre_completo>
+    GET /check-in?t=<token>   (enlace personal firmado, ver services/acceso_enlace.py: no hace falta teclear el nombre)
 
     Endpoint para la web de check-in estática alojada en Firebase.
     El huésped introduce el número de su reserva (de cualquier canal, no
@@ -69,25 +72,38 @@ def check_in_status():
     reserva, o no se puede saber), "reintentar" (RPV aún no la tiene: volver a probar pasados unos minutos) o "llamar"
     (llamar al teléfono de atención al cliente) — reglas en services/parte_intentos.py.
     """
-    ref = request.args.get("ref", "").strip()
-    if not ref:
-        return jsonify({"ok": False, "error": "ref_required"}), 400
+    # Freno al abuso (probar nombres a ritmo de máquina); holgado: la web consulta cada 45 s y varios huéspedes
+    # pueden compartir la IP de la wifi.
+    if not permitir([(f"check-in:{ip_cliente()}", 90, 60)]):
+        return jsonify({"ok": False, "error": "demasiadas_peticiones"}), 429
 
-    # ── Reservas ficticias de prueba ──────────────────────────────────────
-    if ref in TEST_BOOKINGS:
-        t = TEST_BOOKINGS[ref]
-        return jsonify({"ok": True, **t})
+    token_acceso = request.args.get("t", "").strip()
+    if token_acceso:
+        # Enlace personal: identifica la reserva sin teclear el nombre (el id sale de un token firmado).
+        book_id_token = verificar_token(token_acceso)
+        booking = buscar_booking_por_id(book_id_token) if book_id_token else None
+        if not booking:
+            return jsonify({"ok": False, "error": "enlace_no_valido"}), 404
+    else:
+        ref = request.args.get("ref", "").strip()
+        if not ref:
+            return jsonify({"ok": False, "error": "ref_required"}), 400
 
-    booking = buscar_booking_por_ref(ref)
-    if not booking:
-        # Fallback: puede que `ref` sea el nombre del huésped, no un número
-        # de reserva (necesario en La Casa de la Primavera, con reservas de
-        # Booking/Airbnb/Holidu y sin un campo de número unificado).
-        booking, ambiguo = buscar_booking_por_nombre(ref)
-        if ambiguo:
-            return jsonify({"ok": False, "error": "nombre_ambiguo"}), 409
-    if not booking:
-        return jsonify({"ok": False, "error": "no_encontrado"}), 404
+        # ── Reservas ficticias de prueba ──────────────────────────────────────
+        if ref in TEST_BOOKINGS:
+            t = TEST_BOOKINGS[ref]
+            return jsonify({"ok": True, **t})
+
+        booking = buscar_booking_por_ref(ref)
+        if not booking:
+            # Fallback: puede que `ref` sea el nombre del huésped, no un número
+            # de reserva (necesario en La Casa de la Primavera, con reservas de
+            # Booking/Airbnb/Holidu y sin un campo de número unificado).
+            booking, ambiguo = buscar_booking_por_nombre(ref)
+            if ambiguo:
+                return jsonify({"ok": False, "error": "nombre_ambiguo"}), 409
+        if not booking:
+            return jsonify({"ok": False, "error": "no_encontrado"}), 404
 
     room_id    = str(booking.get("roomId", ""))
     arrival    = booking.get("arrival", "")
@@ -114,6 +130,7 @@ def check_in_status():
         "ok": True, "room_id": room_id, "room_name": cfg.get("nombre", ""),
         "guest_name": guest_name, "arrival": arrival, "departure": departure,
         "book_id": booking.get("id"),
+        "acceso": crear_token(booking.get("id")),   # enlace personal: la web lo recuerda para la próxima vez (None si no hay clave)
     }
 
     # ── 1. Estancia finalizada (después de las 12:00 del día de salida) ──

@@ -28,6 +28,7 @@ from routes.historial import historial_bp
 from routes.watchdog import watchdog_bp
 from routes.debug_diag import debug_bp
 from routes.rebotes import rebotes_bp
+from routes.acceso import acceso_bp
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ app = Flask(__name__)
 app.register_blueprint(mobile_bp)
 for _bp in (
     misc_bp, chat_bp, checkin_bp,
-    resumen_bp, historial_bp, watchdog_bp, debug_bp, rebotes_bp,
+    resumen_bp, historial_bp, watchdog_bp, debug_bp, rebotes_bp, acceso_bp,
 ):
     app.register_blueprint(_bp)
 CORS(app)

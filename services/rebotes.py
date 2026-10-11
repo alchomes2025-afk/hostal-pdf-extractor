@@ -23,6 +23,7 @@ import re
 from datetime import timedelta
 
 import config
+from services.acceso_enlace import CHECKIN_URL
 from services.beds24 import obtener_bookings_rango_beds24
 from services.fechas import ahora_madrid, hoy_madrid
 from services.whatsapp import enviar_whatsapp_callmebot
@@ -33,7 +34,6 @@ COLECCION = "rebotes_email"
 MAX_MENSAJES = 20            # por llamada
 MAX_CUERPO = 8000
 MAX_EN_ALERTA = 5            # rebotes detallados en un mismo WhatsApp
-CHECKIN_URL = "https://alc-homes-checkin.web.app/"
 PROPIOS = ("alchomes2025.guest@gmail.com", "mailer-daemon", "postmaster")
 
 _EMAIL = r"[\w.+'-]+@[\w-]+(?:\.[\w-]+)+"

@@ -57,6 +57,11 @@ def _ref_en_booking(obj, ref_norm, _path=""):
 
 # ── Función principal: buscar reserva por número de Booking.com ──────────
 
+# Campos con ids INTERNOS de Beds24 (casi correlativos, se pueden adivinar): no valen como «número de reserva»
+# en la búsqueda pública. Los ids solo se aceptan si salen de un token firmado (buscar_booking_por_id).
+CAMPOS_ID_INTERNOS = ("id", "masterId")
+
+
 def buscar_booking_por_ref(booking_ref):
     """
     Busca en Beds24 la reserva cuyo número de confirmación de Booking.com
@@ -111,6 +116,8 @@ def buscar_booking_por_ref(booking_ref):
             if str(b.get("status", "")).lower() == "cancelled":
                 continue
             campo = _ref_en_booking(b, ref_norm)
+            if campo in CAMPOS_ID_INTERNOS:
+                continue
             if campo is not None:
                 logger.info(
                     f"[check-in] Reserva encontrada: ref='{booking_ref}' "
@@ -119,6 +126,37 @@ def buscar_booking_por_ref(booking_ref):
                 return b
 
     logger.warning(f"[check-in] ref='{booking_ref}': no encontrado en ninguna propiedad ({BEDS24_PROPERTY_IDS}).")
+    return None
+
+
+def buscar_booking_por_id(book_id):
+    """
+    Reserva (no cancelada) con ese id de Beds24, o None. Solo se usa con ids que salen de un token firmado
+    (services/acceso_enlace.py): el id de Beds24 es casi correlativo y por eso NO se acepta como referencia pública en
+    buscar_booking_por_ref. Pregunta a Beds24 con el filtro `id` en cada propiedad.
+    """
+    book_id = str(book_id or "").strip()
+    if not book_id.isdigit():
+        return None
+    try:
+        token = get_beds24_access_token()
+    except Exception as e:
+        logger.error(f"[check-in] Beds24 auth error en buscar_booking_por_id: {e}")
+        return None
+    for property_id in BEDS24_PROPERTY_IDS:
+        try:
+            resp = requests.get(
+                f"{BEDS24_API_BASE}/bookings",
+                headers={"token": token, "accept": "application/json"},
+                params={"propertyId": property_id, "id": book_id},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            for b in resp.json().get("data", []):
+                if str(b.get("id")) == book_id and str(b.get("status", "")).lower() != "cancelled":
+                    return b
+        except Exception as e:
+            logger.error(f"[check-in] Error buscando la reserva {book_id} (property {property_id}): {e}")
     return None
 
 

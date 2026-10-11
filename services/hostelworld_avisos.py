@@ -23,12 +23,12 @@ from datetime import timedelta
 
 import config
 from services.beds24 import obtener_bookings_dia_beds24
+from services.acceso_enlace import url_checkin
 from services.email_send import enviar_email, es_email_relay_ota
 from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
 
-CHECKIN_URL = "https://alc-homes-checkin.web.app/"
 
 # País (código ISO 3166-1 alpha-2, tal como lo devuelve Beds24) → se envía en
 # castellano para España e Hispanoamérica, en inglés para el resto. Si el
@@ -78,7 +78,7 @@ def _marcar_avisado(book_id):
         logger.error(f"[hostelworld_avisos] Error guardando estado en Firestore: {e}")
 
 
-def _cuerpo_email_es():
+def _cuerpo_email_es(url):
     return (
         "¡Gracias por reservar en ALC HOMES!\n\n"
         "Es obligatorio hacer el check-in online en el siguiente enlace (recuerde que si son dos "
@@ -88,7 +88,7 @@ def _cuerpo_email_es():
         "asistente virtual que le ayudará en todo lo que necesite, tanto en el proceso de check-in "
         "como a lo largo de su estancia. Por favor, asegúrese de haber preguntado primero al "
         "asistente virtual antes de hacer uso del teléfono de información y asistencia:\n\n"
-        f"{CHECKIN_URL}\n\n"
+        f"{url}\n\n"
         "Si no puede ver el enlace, escríbanos a:\n\n"
         "alchomes2025.guest@gmail.com\n\n"
         "indicando en el asunto su nombre completo. En unos minutos le responderemos con el enlace "
@@ -104,7 +104,7 @@ def _cuerpo_email_es():
     )
 
 
-def _cuerpo_email_en():
+def _cuerpo_email_en(url):
     return (
         "Thank you for booking with ALC HOMES!\n\n"
         "Completing the online check-in at the following link is mandatory (please note that if "
@@ -114,7 +114,7 @@ def _cuerpo_email_en():
         "with anything you need — whether during the check-in process or throughout your stay. "
         "Please make sure to consult the virtual assistant before using the information and "
         "assistance phone line:\n\n"
-        f"{CHECKIN_URL}\n\n"
+        f"{url}\n\n"
         "If you can't see the link, please email us at:\n\n"
         "alchomes2025.guest@gmail.com\n\n"
         "With your full name in the subject line. We'll reply with the link in few minutes.\n\n"
@@ -159,10 +159,10 @@ def enviar_avisos_checkin_hostelworld():
         idioma = _idioma_email(e.get("country"))
         if idioma == "es":
             subject = "Gracias por reservar en ALC Homes"
-            body = _cuerpo_email_es()
+            body = _cuerpo_email_es(url_checkin(book_id, idioma))
         else:
             subject = "Thank you for your reservation with ALC Homes"
-            body = _cuerpo_email_en()
+            body = _cuerpo_email_en(url_checkin(book_id, idioma))
         try:
             enviar_email(to=email, subject=subject, body=body)
             _marcar_avisado(book_id)

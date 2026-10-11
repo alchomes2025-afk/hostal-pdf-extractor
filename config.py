@@ -135,6 +135,12 @@ GROQ_MODEL_FALL = "openai/gpt-oss-20b"
 APPS_SCRIPT_EMAIL_URL    = os.environ.get("APPS_SCRIPT_EMAIL_URL", "")
 APPS_SCRIPT_EMAIL_SECRET = os.environ.get("APPS_SCRIPT_EMAIL_SECRET", "")
 
+# ── Enlace personal de acceso a la web de check-in ─────────────────────────
+# Clave secreta con la que se firman los enlaces `?t=<token>` (services/acceso_enlace.py). Sin ella no hay
+# enlaces personales ni formulario de correo y todo funciona como antes. Debe ser larga y aleatoria; cambiarla
+# invalida los enlaces ya enviados.
+CHECKIN_LINK_SECRET = os.environ.get("CHECKIN_LINK_SECRET", "")
+
 # ── Calendarios iCal de Beds24 (los que importa RPV) ──────────────────────
 # Los 6 enlaces (uno por habitación) que están pegados en las fichas de RPV,
 # separados por comas, puntos y coma, espacios o saltos de línea. Llevan un token: secreto,

@@ -7,7 +7,8 @@ from datetime import timedelta
 from flask import Blueprint, request, jsonify
 
 from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
-from services.beds24 import get_beds24_access_token, _ref_en_booking
+from services.acceso_enlace import crear_token, habilitado as enlaces_habilitados, verificar_token
+from services.beds24 import buscar_booking_por_id, get_beds24_access_token, _ref_en_booking
 from services.fechas import hoy_madrid
 from services.rpv import diagnostico as diagnostico_rpv, diagnostico_pasado as diagnostico_rpv_pasado
 from services import rpv_latencia
@@ -70,6 +71,30 @@ def diag_rpv():
     entorno = "pre" if request.args.get("entorno") == "pre" else "real"
     return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "entorno": entorno,
                     "cuentas": diagnostico_rpv(entorno)}), 200
+
+
+@debug_bp.route("/diag-enlaces", methods=["GET"])
+def diag_enlaces():
+    """
+    Diagnóstico de solo lectura de los enlaces personales de check-in: ¿está configurada la clave (CHECKIN_LINK_SECRET)
+    y verifican bien los tokens? Con `id=<id de Beds24>` comprueba además que la búsqueda por id encuentra esa reserva
+    (solo devuelve estado y fechas, sin datos personales). No expone la clave ni ningún token.
+
+    Uso: /diag-enlaces?token=<TOKEN>[&id=94352000]
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    resultado = {"ok": True, "habilitado": enlaces_habilitados(),
+                 "firma_verifica": verificar_token(crear_token("12345")) == "12345" if enlaces_habilitados() else None,
+                 "manipulado_rechazado": (verificar_token((crear_token("12345") or "x.y")[:-2] + "AA") is None) if enlaces_habilitados() else None}
+    book_id = request.args.get("id", "").strip()
+    if book_id:
+        b = buscar_booking_por_id(book_id)
+        resultado["reserva"] = {"encontrada": bool(b), "estado": b.get("status") if b else None,
+                                "llegada": b.get("arrival") if b else None, "salida": b.get("departure") if b else None}
+    return jsonify(resultado), 200
 
 
 @debug_bp.route("/diag-rpv-pasado", methods=["GET"])

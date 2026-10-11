@@ -27,11 +27,11 @@ import config
 from services.beds24 import obtener_bookings_rango_beds24
 from services.rpv import obtener_estado_partes
 from services.email_send import enviar_email, es_email_relay_ota
+from services.acceso_enlace import url_checkin
 from services.fechas import hoy_madrid
 
 logger = logging.getLogger(__name__)
 
-CHECKIN_URL = "https://alc-homes-checkin.web.app/"
 VENTANA_DIAS = 14
 
 ROOM_ID_PRIMAVERA = "720841"
@@ -84,25 +84,25 @@ def _marcar_avisado(book_id):
         logger.error(f"[registro_completado_avisos] Error guardando estado en Firestore: {e}")
 
 
-def _cuerpo_email_es(nombre, nombre_propiedad):
+def _cuerpo_email_es(nombre, nombre_propiedad, url):
     return (
         f"Estimado/a {nombre},\n\n"
         f"Ya ha completado el registro de viajeros en {nombre_propiedad}.\n\n"
         "Vuelva a entrar en nuestra web a partir de las 15:00 horas del día de su "
         "check-in, para obtener los códigos de entrada al establecimiento y el "
         "resto de información de interés para su estancia:\n\n"
-        f"{CHECKIN_URL}\n\n"
+        f"{url}\n\n"
         "Atentamente,\nEquipo ALC Homes"
     )
 
 
-def _cuerpo_email_en(nombre, nombre_propiedad):
+def _cuerpo_email_en(nombre, nombre_propiedad, url):
     return (
         f"Dear {nombre},\n\n"
         f"You have now completed the guest registration for {nombre_propiedad}.\n\n"
         "Please return to our website from 3:00 PM on your check-in day to obtain "
         "the property access codes and other useful information for your stay:\n\n"
-        f"{CHECKIN_URL}\n\n"
+        f"{url}\n\n"
         "Kind regards,\nALC Homes Team"
     )
 
@@ -152,10 +152,10 @@ def _candidatos_registro_completado():
         idioma = _idioma_email(e.get("country"))
         if idioma == "es":
             subject = f"Registro completado — {nombre_propiedad}: vuelva a la web para sus códigos"
-            body = _cuerpo_email_es(nombre, nombre_propiedad)
+            body = _cuerpo_email_es(nombre, nombre_propiedad, url_checkin(book_id, idioma))
         else:
             subject = f"Registration complete — {nombre_propiedad}: return to our website for your codes"
-            body = _cuerpo_email_en(nombre, nombre_propiedad)
+            body = _cuerpo_email_en(nombre, nombre_propiedad, url_checkin(book_id, idioma))
 
         candidatos.append({
             "book_id": book_id, "room_id": room_id, "arrival": arrival,
