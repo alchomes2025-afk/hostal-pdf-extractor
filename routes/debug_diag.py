@@ -9,7 +9,7 @@ from flask import Blueprint, request, jsonify
 from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
 from services.beds24 import get_beds24_access_token, _ref_en_booking
 from services.fechas import hoy_madrid
-from services.rpv import diagnostico as diagnostico_rpv
+from services.rpv import diagnostico as diagnostico_rpv, diagnostico_pasado as diagnostico_rpv_pasado
 from services import rpv_latencia
 from services.rpv_sin_importar import candidatas_sin_importar
 
@@ -70,6 +70,25 @@ def diag_rpv():
     entorno = "pre" if request.args.get("entorno") == "pre" else "real"
     return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "entorno": entorno,
                     "cuentas": diagnostico_rpv(entorno)}), 200
+
+
+@debug_bp.route("/diag-rpv-pasado", methods=["GET"])
+def diag_rpv_pasado():
+    """
+    Diagnóstico de solo lectura: ¿admite el endpoint de partes de RPV fechas de entrada PASADAS? (hace falta para
+    comprobar el parte de quien ya está alojado). Una consulta por cuenta; sin datos personales.
+
+    Uso: /diag-rpv-pasado?token=<TOKEN>[&dias=3]
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    try:
+        dias = max(1, min(int(request.args.get("dias", 3)), 30))
+    except ValueError:
+        dias = 3
+    return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "cuentas": diagnostico_rpv_pasado(dias)}), 200
 
 
 @debug_bp.route("/diag-sin-importar", methods=["GET"])

@@ -17,7 +17,7 @@ from services.beds24 import (
     get_beds24_access_token, _extraer_nombre_huesped_beds24,
 )
 from services.parte_intentos import aviso_parte_no_disponible
-from services.rpv import parte_recibido_para
+from services.rpv import parte_comprobado_estancia_iniciada, parte_recibido_para
 
 logger = logging.getLogger(__name__)
 checkin_bp = Blueprint("checkin", __name__)
@@ -124,9 +124,22 @@ def check_in_status():
         })
 
     # ── 2. Ya alojado (entre check-in y check-out, no es el día de llegada) ──
-    # La API de RPV solo devuelve huéspedes del día actual, por lo que para días
-    # posteriores al de llegada asumimos que el parte fue enviado (ya están dentro).
+    # Regla de Adrián: nadie entra sin haber rellenado el parte. Pasado el día de llegada (p. ej. quien
+    # llega de madrugada) solo se NIEGA el código si RPV confirma que el parte NO está completado; si no
+    # se puede comprobar (RPV no responde, la reserva no aparece…) se da, para no dejar fuera a un huésped
+    # por un fallo puntual. El huésped ve el enlace de RPV y el código aparece en cuanto lo completa.
     if hoy > arrival_date:
+        try:
+            parte_pendiente = parte_comprobado_estancia_iniciada(room_id, arrival) == "pendiente"
+        except Exception as e:   # la comprobación nunca debe impedir el check-in
+            logger.error(f"[check-in] No se pudo comprobar el parte de la estancia iniciada: {e}")
+            parte_pendiente = False
+        if parte_pendiente:
+            return jsonify({**base,
+                "estado": "checkin_pending", "parte_submitted": False,
+                "pin_available": False, "pin": None,
+                "rpv_link": RPV_LINKS.get(room_id), "aviso_parte": None,
+            })
         return jsonify({**base,
             "estado": "staying", "parte_submitted": True,
             "pin_available": True, "pin": cfg.get("pin"), "rpv_link": None,

@@ -75,10 +75,10 @@ def _etiqueta(rooms):
     return nombres[0] if len(nombres) == 1 else f"{nombres[0]} y {len(nombres) - 1} más"
 
 
-def _pedir_partes(key, url=None):
-    """Una llamada real a /partes de esa cuenta. Devuelve la lista `partes` o lanza
-    una excepción con un mensaje legible (los de 429 empiezan por "429" para que el
-    watchdog los distinga de un fallo real)."""
+def _pedir_partes(key, url=None, desde=None, hasta=None):
+    """Una llamada real a /partes de esa cuenta (por defecto, de hoy a hoy+VENTANA_DIAS-1; `desde`/`hasta`
+    son fechas ISO de entrada). Devuelve la lista `partes` o lanza una excepción con un mensaje legible
+    (los de 429 empiezan por "429" para que el watchdog los distinga de un fallo real)."""
     ahora = time.time()
     if ahora < _pausa_hasta.get(key, 0.0):
         raise Exception("429 — en pausa tras límite de peticiones de RPV")
@@ -93,7 +93,7 @@ def _pedir_partes(key, url=None):
     resp = requests.get(
         url or RPV_PARTES_URL,
         headers={"Authorization": f"Bearer {key}", "accept": "application/json"},
-        params={"desde": hoy.isoformat(), "hasta": (hoy + timedelta(days=VENTANA_DIAS - 1)).isoformat()},
+        params={"desde": desde or hoy.isoformat(), "hasta": hasta or (hoy + timedelta(days=VENTANA_DIAS - 1)).isoformat()},
         timeout=10,
     )
     if resp.status_code == 429:
@@ -236,11 +236,62 @@ def reserva_en_rpv(room_id, fecha_entrada_iso):
     return False
 
 
+_pasadas = {}   # (api_key, fecha_entrada) -> {"t": epoch, "resultado": "completado" | "pendiente" | None}
+
+
+def parte_comprobado_estancia_iniciada(room_id, fecha_entrada_iso):
+    """
+    Para huéspedes cuya fecha de entrada ya pasó (desde el día siguiente a la llegada): "completado",
+    "pendiente" o None. Solo es "pendiente" si RPV RESPONDE y la reserva consta con el parte sin completar;
+    en cualquier otro caso (RPV no responde, la API no admite fechas pasadas, la reserva no aparece, habitación
+    sin cuenta…) es None: no se ha comprobado que el parte falte y no se debe negar el acceso por ello.
+    Un parte completado no se deshace, así que se guarda; el resto se vuelve a comprobar como mucho 1 vez/min.
+    """
+    prop = RPV_PROPERTY_MAP.get(room_id)
+    key = RPV_API_KEY_MAP.get(room_id) or RPV_API_KEY
+    if not prop or not key:
+        return None
+    copia = _pasadas.get((key, fecha_entrada_iso))
+    if copia and (copia["resultado"] == "completado" or time.time() - copia["t"] < TTL_CHECKIN):
+        return copia["resultado"]
+    try:
+        estados = _normalizar(_pedir_partes(key, desde=fecha_entrada_iso, hasta=fecha_entrada_iso))
+    except Exception as e:
+        logger.error(f"[RPV] No se pudo comprobar el parte de una estancia iniciada ({fecha_entrada_iso}): {e}")
+        return None
+    parte = estados.get((room_id, fecha_entrada_iso))
+    resultado = None if parte is None else ("completado" if parte["completado"] else "pendiente")
+    _pasadas[(key, fecha_entrada_iso)] = {"t": time.time(), "resultado": resultado}
+    return resultado
+
+
 def comprobar_cuentas(max_age=TTL_SEGUNDO_PLANO):
     """[(etiqueta, error|None)] — una entrada por cuenta de RPV, para el chequeo de
     salud del watchdog. Usa la misma copia que el resto, así que no añade llamadas."""
     return [(_etiqueta(rooms), _partes_cuenta(key, max_age, _etiqueta(rooms))[1])
             for key, rooms in _cuentas().items()]
+
+
+def diagnostico_pasado(dias=3):
+    """Prueba de solo lectura: ¿acepta /partes entradas PASADAS? Consulta cada cuenta con la ventana de los
+    `dias` días anteriores a hoy y resume el resultado (sin datos personales). Lo usa /diag-rpv-pasado."""
+    hoy = hoy_madrid()
+    desde, hasta = (hoy - timedelta(days=dias)).isoformat(), (hoy - timedelta(days=1)).isoformat()
+    resultado = []
+    for key, rooms in _cuentas().items():
+        cuenta = {"cuenta": _etiqueta(rooms), "desde": desde, "hasta": hasta}
+        try:
+            partes = _pedir_partes(key, desde=desde, hasta=hasta)
+        except Exception as e:
+            cuenta["error"] = str(e)
+        else:
+            por_estado = {}
+            for p in partes:
+                por_estado[p.get("estado")] = por_estado.get(p.get("estado"), 0) + 1
+            cuenta.update({"error": None, "total": len(partes), "por_estado": por_estado,
+                           "fechas_entrada": sorted({p.get("fecha_entrada") for p in partes if p.get("fecha_entrada")})})
+        resultado.append(cuenta)
+    return resultado
 
 
 def diagnostico(entorno="real"):
