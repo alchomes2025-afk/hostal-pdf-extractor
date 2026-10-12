@@ -16,6 +16,10 @@ para una habitación NO se avisa (no se sabe si consta o no; eso ya lo cubre el
 watchdog). Se avisa una sola vez por reserva: dedupe por book_id en Firestore
 (system_state/rpv_sin_importar), podado por fecha de llegada.
 
+Cuando una reserva de la que ya se avisó acaba apareciendo en RPV (la importó RPV o alguien la creó a mano) se manda
+UN segundo mensaje de confirmación («ya consta, no hace falta hacer nada», con lo que tardó); se anota en
+`resueltas` para no repetirlo. Si la reserva se cancela o sale de la ventana de RPV antes de aparecer, no se confirma.
+
 Con los mismos datos de cada pasada (una sola consulta a Beds24 y a RPV) se alimenta además la medición
 del retraso real de RPV (services/rpv_latencia.py).
 """
@@ -39,24 +43,28 @@ def _doc_ref():
     return config.db.collection("system_state").document("rpv_sin_importar")
 
 
-def _leer_avisados():
-    """{book_id (str): fecha de llegada ISO} de las reservas ya avisadas. None si
-    Firestore no está disponible o falla la lectura (sin dedupe se repetiría el aviso cada 15 min)."""
+def _leer_estado():
+    """({book_id (str): fecha de llegada ISO} de las reservas ya avisadas, ídem de las avisadas que después han
+    llegado a RPV y ya se han confirmado). None si Firestore no está disponible o falla la lectura (sin dedupe
+    se repetiría el aviso cada 15 min)."""
     ref = _doc_ref()
     if ref is None:
         return None
     try:
         doc = ref.get()
-        return {str(k): v for k, v in ((doc.to_dict() or {}).get("avisados") or {}).items()} if doc.exists else {}
+        datos = (doc.to_dict() or {}) if doc.exists else {}
+        return ({str(k): v for k, v in (datos.get("avisados") or {}).items()},
+                {str(k): v for k, v in (datos.get("resueltas") or {}).items()})
     except Exception as e:
         logger.error(f"[rpv_sin_importar] Error leyendo estado en Firestore: {e}")
         return None
 
 
-def _guardar_avisados(avisados, hoy_iso):
+def _guardar_estado(avisados, resueltas, hoy_iso):
     ref = _doc_ref()
     try:
-        ref.set({"avisados": {k: v for k, v in avisados.items() if v >= hoy_iso}})
+        ref.set({"avisados": {k: v for k, v in avisados.items() if v >= hoy_iso},
+                 "resueltas": {k: v for k, v in resueltas.items() if v >= hoy_iso}})
         return True
     except Exception as e:
         logger.error(f"[rpv_sin_importar] Error guardando estado en Firestore: {e}")
@@ -140,28 +148,75 @@ def mensaje_aviso(nuevas):
         f"3. Si no {'aparecen' if plural else 'aparece'}, {'créalas' if plural else 'créala'} a mano en RPV con los datos de arriba (si RPV te pide una referencia, usa el nº de Beds24{' de cada una' if plural else ''}).",
         "4. Si no sabes cómo hacerlo, o si te llegan varios avisos seguidos, avisa a Adrián: puede que se haya roto la conexión entre Beds24 y RPV.",
         "",
-        "Este aviso no se repetirá para " + ("estas reservas." if plural else "esta reserva."),
+        "Este aviso no se repetirá para " + ("estas reservas" if plural else "esta reserva") +
+        "; en cuanto " + ("aparezcan" if plural else "aparezca") + " en RPV te llegará otro mensaje para confirmarlo.",
     ]
     return "\n".join(lineas)
 
 
+def llegadas_resueltas(avisados, resueltas, datos, ahora_utc=None):
+    """Reservas de las que ya se avisó (están en `avisados`) y que ahora SÍ constan en RPV, sin confirmar todavía:
+    lista de dicts {book_id, nombre_habitacion, huesped, canal, arrival, departure, horas}. `horas` son las
+    transcurridas desde que se creó o modificó la reserva en Beds24 (None si no se sabe). Solo mira las que Beds24 sigue
+    devolviendo en la ventana de RPV y cuya cuenta de RPV responde; una reserva cancelada o ya fuera de la ventana
+    no se confirma."""
+    ahora_utc = ahora_utc or datetime.now(timezone.utc)
+    llegadas = []
+    for e in datos["entradas"]:
+        book_id = str(e.get("book_id"))
+        if book_id not in avisados or book_id in resueltas:
+            continue
+        if e["room_id"] not in datos["cubiertas"] or (e["room_id"], e["arrival"]) not in datos["estados"]:
+            continue
+        llegadas.append({"book_id": book_id, "nombre_habitacion": e["nombre_habitacion"], "huesped": e.get("huesped", "?"),
+                         "canal": e.get("canal", "Desconocido"), "arrival": e["arrival"], "departure": e.get("departure"),
+                         "horas": _horas_sin_cambios(e, ahora_utc)})
+    return sorted(llegadas, key=lambda c: (c["arrival"], c["nombre_habitacion"]))
+
+
+def mensaje_llegada(llegadas):
+    """Aviso corto de que una reserva de la que se avisó ya consta en RPV: no hay nada que hacer."""
+    plural = len(llegadas) > 1
+    lineas = [f"✅ ALCHOMES — {'Reservas que ya constan' if plural else 'Una reserva ya consta'} en RPV", "",
+              f"{'Las reservas' if plural else 'La reserva'} de {'las' if plural else 'la'} que te avisamos antes ya "
+              f"{'aparecen' if plural else 'aparece'} en RPV. No hace falta que hagas nada: todo en orden.", ""]
+    for c in llegadas:
+        salida = f" · sale el {_fecha_corta(c['departure'])}" if c.get("departure") else ""
+        tardanza = f" · tardó como mucho {_antiguedad(c['horas'])} en llegar a RPV" if c.get("horas") is not None else ""
+        lineas.append(f"• {c['nombre_habitacion']} · {c['huesped']} · {c['canal']} · llega el {_fecha_corta(c['arrival'])}{salida}{tardanza} · nº Beds24 {c['book_id']}")
+    return "\n".join(lineas)
+
+
 def avisar_reservas_sin_importar():
-    """Avisa por WhatsApp (un solo mensaje) de las reservas que RPV sigue sin conocer pasado el tiempo normal,
-    una vez por reserva, y anota la medición del retraso de RPV. Para llamarse desde /watchdog; no lanza
-    excepción hacia arriba."""
+    """Avisa por WhatsApp de las reservas que RPV sigue sin conocer pasado el tiempo normal (una vez por reserva) y,
+    más tarde, de que ya constan en RPV (también una vez), y anota la medición del retraso de RPV. Para llamarse desde
+    /watchdog; no lanza excepción hacia arriba. Si falla un envío no se anota, y se reintenta en el próximo watchdog."""
     datos = leer_datos()
     if datos["entradas"]:
         rpv_latencia.registrar(datos["entradas"], datos["estados"], datos["cubiertas"])
-    avisados = _leer_avisados()
-    if avisados is None:
+    estado = _leer_estado()
+    if estado is None:
         return
+    avisados, resueltas = estado
+    cambios = False
+
     nuevas = [c for c in candidatas_sin_importar(datos=datos) if c["book_id"] not in avisados]
-    if not nuevas:
-        return
-    try:
-        enviar_whatsapp_callmebot(mensaje_aviso(nuevas))
-    except Exception as e:
-        logger.error(f"[rpv_sin_importar] No se pudo enviar el aviso, se reintenta en el próximo watchdog: {e}")
-        return
-    avisados.update({c["book_id"]: c["arrival"] for c in nuevas})
-    _guardar_avisados(avisados, hoy_madrid().isoformat())
+    if nuevas:
+        try:
+            enviar_whatsapp_callmebot(mensaje_aviso(nuevas))
+            avisados.update({c["book_id"]: c["arrival"] for c in nuevas})
+            cambios = True
+        except Exception as e:
+            logger.error(f"[rpv_sin_importar] No se pudo enviar el aviso, se reintenta en el próximo watchdog: {e}")
+
+    llegadas = llegadas_resueltas(avisados, resueltas, datos)
+    if llegadas:
+        try:
+            enviar_whatsapp_callmebot(mensaje_llegada(llegadas))
+            resueltas.update({c["book_id"]: c["arrival"] for c in llegadas})
+            cambios = True
+        except Exception as e:
+            logger.error(f"[rpv_sin_importar] No se pudo enviar la confirmación, se reintenta en el próximo watchdog: {e}")
+
+    if cambios:
+        _guardar_estado(avisados, resueltas, hoy_madrid().isoformat())
