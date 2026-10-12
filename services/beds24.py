@@ -320,6 +320,25 @@ def _extraer_nombre_huesped_beds24(booking):
     return nombre_completo or booking.get("guestName") or "Huésped sin nombre"
 
 
+EMAIL_BLOQUEO_APP = "bloqueo@bloqueo.com"
+
+
+def es_bloqueo_beds24(booking):
+    """True si esta «reserva» de Beds24 es un bloqueo de calendario y no un huésped: estado «black», la reserva
+    ficticia que crea la app de gestión (email bloqueo@bloqueo.com, nombre «Fecha bloqueada») o un bloqueo importado
+    por iCal de otro calendario («BLOCKED by Holidu»). Los bloqueos no tienen parte de viajeros: no deben salir como
+    entradas o salidas en los resúmenes ni en los avisos, ni medirse contra RPV. Las importaciones por iCal con otro
+    nombre NO son bloqueos (son reservas reales de Holidu)."""
+    if str(booking.get("status", "")).lower() == "black":
+        return True
+    guest = booking.get("guest") or {}
+    email = (guest.get("email") or booking.get("email") or "").strip().lower()
+    if email == EMAIL_BLOQUEO_APP:
+        return True
+    nombre = f"{guest.get('firstName') or booking.get('firstName') or ''} {guest.get('lastName') or booking.get('lastName') or ''}".strip().lower()
+    return nombre.startswith(("fecha bloqueada", "blocked"))
+
+
 def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
     """
     Consulta en Beds24 las reservas con entrada (arrival) o salida (departure)
@@ -379,6 +398,8 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
                 descartadas_por_fecha += 1
                 continue
             if str(b.get("status", "")).lower() == "cancelled":
+                continue
+            if es_bloqueo_beds24(b):
                 continue
             room_id = str(b.get("roomId", ""))
             if not room_id:
@@ -457,6 +478,8 @@ def obtener_bookings_rango_beds24(fecha_desde_iso, fecha_hasta_iso, tipo="checki
             if not fecha_campo or not (fecha_desde_iso <= fecha_campo <= fecha_hasta_iso):
                 continue
             if str(b.get("status", "")).lower() == "cancelled":
+                continue
+            if es_bloqueo_beds24(b):
                 continue
             room_id = str(b.get("roomId", ""))
             if not room_id:
