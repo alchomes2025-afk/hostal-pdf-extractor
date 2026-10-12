@@ -133,6 +133,66 @@ def diag_sin_importar():
     return jsonify({"ok": True, "hoy": hoy_madrid().isoformat(), "candidatas": candidatas}), 200
 
 
+@debug_bp.route("/diag-bloqueos", methods=["GET"])
+def diag_bloqueos():
+    """
+    Diagnóstico de solo lectura: cómo se ven en Beds24 los bloqueos (reservas ficticias de la app, importaciones por
+    iCal como «BLOCKED by Holidu») frente a las reservas reales, y si constan en RPV. Para cada reserva: habitación,
+    fechas, estado, canal, origen, si tiene precio, si el email es el de bloqueos de la app y si consta en RPV. El
+    nombre solo se muestra cuando es el de un bloqueo («Fecha bloqueada», «BLOCKED by …»); los de huéspedes reales
+    salen como «(huésped)». Sin emails ni datos personales.
+
+    Uso: /diag-bloqueos?token=<TOKEN>[&desde=2026-10-01&hasta=2026-12-31][&habitacion=720841]
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    from config import BEDS24_PROPERTY_IDS
+    from services.rpv import TTL_SEGUNDO_PLANO, obtener_estado_partes
+    hoy = hoy_madrid()
+    desde = request.args.get("desde") or (hoy - timedelta(days=10)).isoformat()
+    hasta = request.args.get("hasta") or (hoy + timedelta(days=120)).isoformat()
+    habitacion = request.args.get("habitacion", "").strip()
+    try:
+        access_token = get_beds24_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Beds24 auth: {e}"}), 500
+    estados, _sin_verificar = obtener_estado_partes(max_age=TTL_SEGUNDO_PLANO)
+    filas, campos = [], set()
+    for property_id in BEDS24_PROPERTY_IDS:
+        for pagina in range(1, 11):
+            try:
+                resp = requests.get(f"{BEDS24_API_BASE}/bookings", headers={"token": access_token, "accept": "application/json"},
+                                    params={"propertyId": property_id, "arrivalFrom": desde, "arrivalTo": hasta,
+                                            "includePersonalInfo": "true", "page": pagina}, timeout=20)
+                resp.raise_for_status()
+                cuerpo = resp.json()
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"Error consultando Beds24 (propiedad {property_id}): {e}"}), 500
+            for b in cuerpo.get("data", []):
+                if not b.get("arrival") or not (desde <= b["arrival"] <= hasta):
+                    continue
+                if habitacion and str(b.get("roomId")) != habitacion:
+                    continue
+                guest = b.get("guest") or {}
+                nombre = f"{guest.get('firstName') or b.get('firstName') or ''} {guest.get('lastName') or b.get('lastName') or ''}".strip()
+                es_nombre_bloqueo = nombre.lower().startswith(("blocked", "fecha bloqueada"))
+                email = (guest.get("email") or b.get("email") or "").strip().lower()
+                room_id = str(b.get("roomId", ""))
+                rpv = estados.get((room_id, b.get("arrival")))
+                campos.update(b.keys())
+                filas.append({"id": b.get("id"), "habitacion": room_id, "llegada": b.get("arrival"), "salida": b.get("departure"),
+                              "estado": b.get("status"), "canal": b.get("channel"), "origen_api": b.get("apiSource"),
+                              "referer": b.get("referer"), "precio": b.get("price"), "nombre": nombre if es_nombre_bloqueo else ("(huésped)" if nombre else "(sin nombre)"),
+                              "email_de_bloqueo_app": email == "bloqueo@bloqueo.com", "tiene_email": bool(email),
+                              "en_rpv": rpv["estado"] if rpv else None, "creada": b.get("bookingTime"), "modificada": b.get("modifiedTime")})
+            if not (cuerpo.get("pages") or {}).get("nextPageExists"):
+                break
+    filas.sort(key=lambda f: (f["habitacion"], f["llegada"] or ""))
+    return jsonify({"ok": True, "hoy": hoy.isoformat(), "total": len(filas), "campos_disponibles": sorted(campos), "reservas": filas}), 200
+
+
 @debug_bp.route("/diag-latencia-rpv", methods=["GET"])
 def diag_latencia_rpv():
     """
