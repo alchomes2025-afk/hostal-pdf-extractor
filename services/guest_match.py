@@ -124,6 +124,13 @@ def emparejar_nombre(nombre_query, candidatos_con_nombre):
         return candidatos_con_nombre[exactos[0]][0], False
     if len(exactos) > 1:
         logger.info(f"[guest_match] query='{nombre_query}' — match exacto ambiguo entre: {[nombres[i] for i in exactos]}")
+        # Si solo UNO tiene exactamente las mismas palabras (los otros solo contienen o están contenidos), es ese.
+        identicos = [i for i in exactos if candidatos_tokens[i] == query_tokens]
+        if len(identicos) == 1:
+            return candidatos_con_nombre[identicos[0]][0], False
+        # Varias coincidencias igual de buenas: Groq no puede distinguirlas (el nombre es el mismo) y elegir al azar podría
+        # dar la habitación y el código de OTRA persona con el mismo nombre. Se declara ambiguo y el huésped lo aclara.
+        return None, True
 
     idx = _desambiguar_con_groq(nombre_query, nombres)
     if idx is not None:

@@ -7,8 +7,8 @@ import requests
 from datetime import date, timedelta
 
 from config import BEDS24_REFRESH_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID, BEDS24_PROPERTY_IDS, ROOM_CONFIG
-from services.guest_match import emparejar_nombre
-from services.fechas import hoy_madrid
+from services.guest_match import emparejar_nombre, normalizar_nombre, _match_exacto
+from services.fechas import ahora_madrid, hoy_madrid
 
 logger = logging.getLogger(__name__)
 
@@ -193,7 +193,8 @@ def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
         logger.error(f"[check-in] Beds24 auth error en buscar_booking_por_nombre: {e}")
         return None, False
 
-    hoy    = hoy_madrid()
+    ahora  = ahora_madrid()
+    hoy    = ahora.date()
     manana = hoy + timedelta(days=1)
     # arrivalFrom amplio para no perder a huéspedes ya alojados con una
     # estancia larga en curso; el filtro real de relevancia es en Python.
@@ -207,7 +208,8 @@ def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
     # respuesta). Se trocea en ventanas de 30 días y se pide "limit": 500
     # explícito, igual que las demás consultas amplias de este proyecto.
     CHUNK_DAYS = 30
-    candidatos_con_nombre = []
+    candidatos_con_nombre = []   # vigentes: llegada hoy/mañana o estancia en curso
+    candidatos_terminados = []   # estancia que acaba de terminar (pasadas las 12:00 del día de salida)
     seen_ids = set()
     for property_id in BEDS24_PROPERTY_IDS:
         chunk_start = desde_total
@@ -244,18 +246,30 @@ def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
                 except (ValueError, TypeError):
                     continue
                 llegada_inminente = arrival_date in (hoy, manana)
+                # Una estancia que ya terminó (pasadas las 12:00 del día de salida) no compite con las vigentes: si no, quien
+                # encadena dos reservas (p. ej. una de ayer y otra de hoy) saldría con DOS coincidencias y no se le reconocería.
+                estancia_terminada = hoy == departure_date and ahora.hour >= HORA_CHECKOUT
                 ya_alojado         = arrival_date <= hoy <= departure_date
                 if not (llegada_inminente or ya_alojado):
                     continue
                 if bid is not None:
                     seen_ids.add(bid)
-                candidatos_con_nombre.append((b, _extraer_nombre_huesped_beds24(b)))
+                destino = candidatos_terminados if (estancia_terminada and not llegada_inminente) else candidatos_con_nombre
+                destino.append((b, _extraer_nombre_huesped_beds24(b)))
 
             chunk_start = chunk_end + timedelta(days=1)
 
     desde, hasta = desde_total.isoformat(), hasta_total.isoformat()
 
     booking, ambiguo = emparejar_nombre(nombre_query, candidatos_con_nombre)
+    if booking is None:
+        # Sin ninguna coincidencia VIGENTE: puede ser alguien cuya estancia acaba de terminar (que vea «estancia finalizada»
+        # en vez de «no encontrado»). Solo coincidencia directa y nunca si hay vigentes que coincidan (ahí manda lo ambiguo).
+        q_tokens = normalizar_nombre(nombre_query)
+        if q_tokens and not _match_exacto(q_tokens, [normalizar_nombre(n) for _, n in candidatos_con_nombre]):
+            previas = [c for c in candidatos_terminados if _match_exacto(q_tokens, [normalizar_nombre(c[1])])]
+            if previas:
+                booking, ambiguo = max(previas, key=lambda c: c[0].get("departure") or "")[0], False
     if booking is not None:
         logger.info(
             f"[check-in] Reserva encontrada por nombre: query='{nombre_query}' "
@@ -321,6 +335,7 @@ def _extraer_nombre_huesped_beds24(booking):
 
 
 EMAIL_BLOQUEO_APP = "bloqueo@bloqueo.com"
+HORA_CHECKOUT = 12   # a esa hora (Madrid) del día de salida la estancia se da por terminada (igual que en routes/checkin.py)
 
 
 def es_bloqueo_beds24(booking):
