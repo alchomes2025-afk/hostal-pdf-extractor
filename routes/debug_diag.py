@@ -142,7 +142,10 @@ def diag_bloqueos():
     nombre solo se muestra cuando es el de un bloqueo («Fecha bloqueada», «BLOCKED by …»); los de huéspedes reales
     salen como «(huésped)». Sin emails ni datos personales.
 
-    Uso: /diag-bloqueos?token=<TOKEN>[&desde=2026-10-01&hasta=2026-12-31][&habitacion=720841]
+    Con `q=<nombre>` añade a cada reserva si su nombre coincide con ese texto según la regla de la web de check-in
+    (`coincide_con_q`) y cuántas palabras tiene, para depurar «no me reconoce» sin mostrar nombres.
+
+    Uso: /diag-bloqueos?token=<TOKEN>[&desde=2026-10-01&hasta=2026-12-31][&habitacion=720841][&q=Nombre Apellido]
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -154,6 +157,9 @@ def diag_bloqueos():
     desde = request.args.get("desde") or (hoy - timedelta(days=10)).isoformat()
     hasta = request.args.get("hasta") or (hoy + timedelta(days=120)).isoformat()
     habitacion = request.args.get("habitacion", "").strip()
+    q = request.args.get("q", "").strip()
+    from services.guest_match import normalizar_nombre, _match_exacto
+    q_tokens = normalizar_nombre(q) if q else None
     try:
         access_token = get_beds24_access_token()
     except Exception as e:
@@ -186,7 +192,8 @@ def diag_bloqueos():
                               "estado": b.get("status"), "canal": b.get("channel"), "origen_api": b.get("apiSource"),
                               "referer": b.get("referer"), "precio": b.get("price"), "nombre": nombre if es_nombre_bloqueo else ("(huésped)" if nombre else "(sin nombre)"),
                               "email_de_bloqueo_app": email == "bloqueo@bloqueo.com", "tiene_email": bool(email),
-                              "en_rpv": rpv["estado"] if rpv else None, "creada": b.get("bookingTime"), "modificada": b.get("modifiedTime")})
+                              "en_rpv": rpv["estado"] if rpv else None, "creada": b.get("bookingTime"), "modificada": b.get("modifiedTime"),
+                              **({"coincide_con_q": bool(_match_exacto(q_tokens, [normalizar_nombre(nombre)])), "palabras_nombre": len(normalizar_nombre(nombre))} if q_tokens else {})})
             if not (cuerpo.get("pages") or {}).get("nextPageExists"):
                 break
     filas.sort(key=lambda f: (f["habitacion"], f["llegada"] or ""))
