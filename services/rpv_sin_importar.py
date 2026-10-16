@@ -145,8 +145,9 @@ def mensaje_aviso(nuevas):
         "Qué hacer:",
         f"1. Entra en RPV y busca {'cada reserva' if plural else 'la reserva'} por el nombre o la fecha de llegada.",
         f"2. Si ya {'aparecen' if plural else 'aparece'}, no hagas nada: llegó después de este aviso.",
-        f"3. Si no {'aparecen' if plural else 'aparece'}, {'créalas' if plural else 'créala'} a mano en RPV con los datos de arriba (si RPV te pide una referencia, usa el nº de Beds24{' de cada una' if plural else ''}).",
-        "4. Si no sabes cómo hacerlo, o si te llegan varios avisos seguidos, avisa a Adrián: puede que se haya roto la conexión entre Beds24 y RPV.",
+        f"3. Si no {'aparecen' if plural else 'aparece'}, pulsa «Actualizar reservas» en el panel de RPV: importa todas las reservas de Beds24 al momento. Espera un minuto y vuelve a mirar.",
+        f"4. Si sigue sin aparecer, {'créalas' if plural else 'créala'} a mano en RPV con los datos de arriba (si RPV te pide una referencia, usa el nº de Beds24{' de cada una' if plural else ''}).",
+        "5. Si no sabes cómo hacerlo, o si te llegan varios avisos seguidos, avisa a Adrián: puede que se haya roto la conexión entre Beds24 y RPV.",
         "",
         "Este aviso no se repetirá para " + ("estas reservas" if plural else "esta reserva") +
         "; en cuanto " + ("aparezcan" if plural else "aparezca") + " en RPV te llegará otro mensaje para confirmarlo.",

@@ -198,6 +198,7 @@ def consejo_reserva_no_en_rpv(edad, stats=None):
         restante = max(10, 5 * math.ceil((tipica - edad) / 5))
         provisional = "" if fiable else " (estimación provisional, aún sin suficientes medidas)"
         return (f"Es normal: la reserva se hizo hace {formato_min(edad)} y RPV suele tardar hasta unos {formato_min(tipica)}{provisional}. "
-                f"Pídale que lo intente de nuevo dentro de {formato_min(restante)}; si todavía no puede, que pruebe otra vez una hora más tarde."), False
+                f"Pídale que lo intente de nuevo dentro de {formato_min(restante)}; si todavía no puede, que pruebe otra vez una hora más tarde. "
+                "Si no puede esperar, pulsa «Actualizar reservas» en el panel de RPV (importa todas al momento) y dígale que lo intente de nuevo en un minuto."), False
     return (f"Ya ha tardado más de lo normal: la reserva se hizo hace {formato_min(edad)} y lo habitual es hasta unos {formato_min(tipica)}. "
-            "No hace falta que espere más: revisa la reserva en RPV y, si no está, créala a mano allí; después dígale que lo intente de nuevo."), True
+            "No hace falta que espere más: en RPV pulsa «Actualizar reservas» (importa todas al momento) y, si sigue sin estar, créala a mano allí; después dígale que lo intente de nuevo."), True
