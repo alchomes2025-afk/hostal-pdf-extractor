@@ -26,7 +26,6 @@ Diseño:
   - La API key no se escribe nunca en logs ni en mensajes de error.
 """
 import logging
-import re
 import time
 from datetime import timedelta
 
@@ -164,7 +163,6 @@ def _normalizar(partes):
             "comunicado": bool(p.get("comunicado_autoridades")),
             "registrados": p.get("huespedes_registrados"),
             "previstos": p.get("huespedes_previstos"),
-            "id": p.get("id"),   # localizador de la reserva en RPV: forma su enlace propio (ver enlace_reserva)
         }
         previo = estados.get((room, fecha))
         if previo is None or _rango(item) > _rango(previo):
@@ -220,27 +218,6 @@ def parte_recibido_para(room_id, fecha_entrada_iso):
     return False
 
 
-ENLACE_RESERVA = "https://app.registroparteviajeros.com/propiedad/{}"
-_ID_RPV = re.compile(r"^[A-Za-z0-9_-]{4,40}$")
-
-
-def enlace_reserva(localizador):
-    """Enlace PROPIO de una reserva de RPV (https://app.registroparteviajeros.com/propiedad/<localizador>), o None si el
-    localizador no tiene la forma esperada. Es el que RPV recomienda para el huésped: no le pregunta las fechas y no deja margen
-    de error. El enlace general de la propiedad (config.RPV_LINKS) es el de respaldo, que sirve para crear la reserva si no existe."""
-    localizador = str(localizador or "").strip()
-    return ENLACE_RESERVA.format(localizador) if _ID_RPV.match(localizador) else None
-
-
-def enlace_parte_para(room_id, fecha_entrada_iso):
-    """Enlace propio de la reserva de esta habitación y fecha de entrada si RPV la conoce y da su localizador; si no, None
-    (se usa entonces el enlace general). Se apoya en la copia reciente que acaba de refrescar parte_recibido_para."""
-    if room_id not in RPV_PROPERTY_MAP:
-        return None
-    estados, _ = obtener_estado_partes(TTL_SEGUNDO_PLANO, rooms=[room_id])
-    return enlace_reserva((estados.get((room_id, fecha_entrada_iso)) or {}).get("id"))
-
-
 def reserva_en_rpv(room_id, fecha_entrada_iso):
     """
     ¿Conoce RPV la reserva de esta habitación con esta fecha de entrada (aunque su parte siga pendiente)?
@@ -284,15 +261,8 @@ def parte_comprobado_estancia_iniciada(room_id, fecha_entrada_iso):
         return None
     parte = estados.get((room_id, fecha_entrada_iso))
     resultado = None if parte is None else ("completado" if parte["completado"] else "pendiente")
-    _pasadas[(key, fecha_entrada_iso)] = {"t": time.time(), "resultado": resultado, "id": (parte or {}).get("id")}
+    _pasadas[(key, fecha_entrada_iso)] = {"t": time.time(), "resultado": resultado}
     return resultado
-
-
-def enlace_parte_estancia_iniciada(room_id, fecha_entrada_iso):
-    """Enlace propio de la reserva (ver enlace_reserva) de una estancia ya iniciada, tras parte_comprobado_estancia_iniciada;
-    None si no se conoce."""
-    key = RPV_API_KEY_MAP.get(room_id) or RPV_API_KEY
-    return enlace_reserva(((_pasadas.get((key, fecha_entrada_iso)) or {}).get("id")))
 
 
 def comprobar_cuentas(max_age=TTL_SEGUNDO_PLANO):
@@ -353,7 +323,7 @@ def diagnostico(entorno="real"):
                 "estado": p.get("estado"), "completado": p.get("parte_completado"),
                 "comunicado": p.get("comunicado_autoridades"),
                 "registrados": p.get("huespedes_registrados"), "previstos": p.get("huespedes_previstos"),
-                "completado_en": p.get("completado_en"), "localizador": p.get("id"),
+                "completado_en": p.get("completado_en"),
             } for p in sorted(partes, key=lambda x: (x.get("fecha_entrada") or "", x.get("propiedad_id") or ""))],
         })
         resultado.append(cuenta)
