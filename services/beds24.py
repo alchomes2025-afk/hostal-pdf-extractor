@@ -240,6 +240,94 @@ def reservas_del_grupo(booking):
     return sorted(validas, key=lambda b: int(b.get("id") or 0)) or [booking]
 
 
+def _se_solapan(a, b):
+    """True si las dos estancias comparten alguna noche (la salida de una el mismo día que entra la otra NO es solape)."""
+    return (a.get("arrival") or "") < (b.get("departure") or "") and (b.get("arrival") or "") < (a.get("departure") or "")
+
+
+def es_cadena_mismo_huesped(reservas):
+    """True si todas son del MISMO huésped con estancias que no se solapan: mismo nombre completo (al menos nombre y apellido)
+    y ninguna comparte noches con otra. Dos personas distintas con el mismo nombre alojadas a la vez se solapan y NO cuentan
+    (así nunca se le muestra a alguien la habitación de otro)."""
+    nombres = {frozenset(normalizar_nombre(_extraer_nombre_huesped_beds24(b))) for b in reservas}
+    if len(nombres) != 1 or len(next(iter(nombres))) < 2:
+        return False
+    return not any(_se_solapan(a, b) for i, a in enumerate(reservas) for b in reservas[i + 1:])
+
+
+def reserva_actual_de_cadena(reservas, hoy):
+    """La que toca ahora: de las ya empezadas (llegada <= hoy), la que termina antes (el día del cambio, por la mañana, es
+    la habitación que aún ocupa); si ninguna ha empezado, la de llegada más próxima. Las ya terminadas no deben venir aquí."""
+    en_curso = [b for b in reservas if (b.get("arrival") or "") <= hoy.isoformat()]
+    return min(en_curso, key=lambda b: b.get("departure") or "") if en_curso else min(reservas, key=lambda b: b.get("arrival") or "")
+
+
+_CACHE_RECIENTES = {}   # {property_id: (instante, [reservas])}
+TTL_RECIENTES = 300
+
+
+def _reservas_recientes(property_id):
+    """Reservas (crudas) de una propiedad con llegada entre hace 60 días y mañana: las que pueden estar en curso o empezar
+    ya. Caché de 5 min por propiedad (la web consulta a menudo y Beds24 limita las llamadas)."""
+    ahora = time.time()
+    cache = _CACHE_RECIENTES.get(property_id)
+    if cache and ahora - cache[0] < TTL_RECIENTES:
+        return cache[1]
+    token = get_beds24_access_token()
+    hoy = hoy_madrid()
+    reservas, vistos = [], set()
+    for pagina in range(1, 6):
+        datos = _pedir_reservas(token, {"propertyId": property_id, "arrivalFrom": (hoy - timedelta(days=60)).isoformat(),
+                                        "arrivalTo": (hoy + timedelta(days=1)).isoformat(), "page": pagina})
+        nuevas = [b for b in datos if b.get("id") not in vistos]
+        if not nuevas:
+            break
+        vistos.update(b.get("id") for b in nuevas)
+        reservas += nuevas
+        if len(datos) < 100:
+            break
+    _CACHE_RECIENTES[property_id] = (ahora, reservas)
+    return reservas
+
+
+def reservas_encadenadas(booking):
+    """
+    Otras reservas VIGENTES del mismo huésped que `booking` (mismo nombre completo y sin solaparse con ella): p. ej. quien
+    reserva una noche y después otra, quizá en otra habitación. Vigente = no cancelada, no terminada (antes de las 12:00 del
+    día de salida) y con llegada como muy tarde mañana (el registro se puede hacer desde el día antes). No incluye las
+    habitaciones de su mismo grupo (eso es reservas_del_grupo). Ordenadas por llegada; [] si no hay o falla la consulta.
+    """
+    ahora = ahora_madrid()
+    hoy = ahora.date()
+    try:
+        recientes = _reservas_recientes(booking.get("propertyId")) if booking.get("propertyId") else \
+            [b for pid in BEDS24_PROPERTY_IDS for b in _reservas_recientes(pid)]
+    except Exception as e:
+        logger.error(f"[check-in] No se pudieron consultar las otras reservas del huésped: {e}")
+        return []
+    propio_grupo = clave_grupo(booking)
+    otras = []
+    for b in recientes:
+        if str(b.get("id")) == str(booking.get("id")) or clave_grupo(b) == propio_grupo:
+            continue
+        if str(b.get("status", "")).lower() == "cancelled" or es_bloqueo_beds24(b):
+            continue
+        try:
+            llegada, salida = date.fromisoformat(b.get("arrival") or ""), date.fromisoformat(b.get("departure") or "")
+        except ValueError:
+            continue
+        if hoy > salida or (hoy == salida and ahora.hour >= HORA_CHECKOUT) or llegada > hoy + timedelta(days=1):
+            continue
+        if es_cadena_mismo_huesped([booking, b]):
+            otras.append(b)
+    vistos, unicas = set(), []
+    for b in sorted(otras, key=lambda b: b.get("arrival") or ""):
+        if clave_grupo(b) not in vistos:   # de un grupo de habitaciones basta con una (la web mostrará el grupo entero)
+            vistos.add(clave_grupo(b))
+            unicas.append(b)
+    return unicas
+
+
 def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
     """
     Busca una reserva por el nombre del huésped — es la vía principal de
@@ -345,6 +433,15 @@ def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
     candidatos_terminados = _colapsar_grupos(candidatos_terminados)
 
     desde, hasta = desde_total.isoformat(), hasta_total.isoformat()
+
+    # El mismo huésped con varias reservas seguidas (p. ej. una noche y luego otra en otra habitación) sale con varias
+    # coincidencias iguales: no es ambiguo. Se elige la que toca ahora y /check-in ofrece las demás («otras_reservas»).
+    q_tokens = normalizar_nombre(nombre_query)
+    exactos = [b for b, n in candidatos_con_nombre if q_tokens and _match_exacto(q_tokens, [normalizar_nombre(n)])]
+    if len(exactos) > 1 and es_cadena_mismo_huesped(exactos):
+        actual = reserva_actual_de_cadena(exactos, hoy)
+        logger.info(f"[check-in] '{nombre_query}': {len(exactos)} reservas encadenadas del mismo huésped → book_id={actual.get('id')}")
+        return actual, False
 
     booking, ambiguo = emparejar_nombre(nombre_query, candidatos_con_nombre)
     if booking is None:

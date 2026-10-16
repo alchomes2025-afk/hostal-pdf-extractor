@@ -14,7 +14,7 @@ from config import (
 )
 from services.acceso_enlace import crear_token, verificar_token
 from services.beds24 import (
-    buscar_booking_por_id, buscar_booking_por_ref, buscar_booking_por_nombre, reservas_del_grupo,
+    buscar_booking_por_id, buscar_booking_por_ref, buscar_booking_por_nombre, reservas_del_grupo, reservas_encadenadas,
     get_beds24_access_token, _extraer_nombre_huesped_beds24,
 )
 from services.limites import ip_cliente, permitir
@@ -206,6 +206,19 @@ def check_in_status():
         if len(habitaciones) > 1:
             respuesta["habitaciones"] = habitaciones
             respuesta["estado_grupo"] = min((h["estado"] for h in habitaciones), key=lambda e: PRIORIDAD_ESTADOS.index(e) if e in PRIORIDAD_ESTADOS else 99)
+
+    # ── Otras reservas vigentes del mismo huésped (reservas encadenadas) ──
+    # Quien encadena dos reservas puede registrar la siguiente desde el día antes: la web le muestra las dos y le deja
+    # pasar de una a otra con su enlace personal, sin quedarse atrapado en la que tiene recordada en el dispositivo.
+    try:
+        otras = reservas_encadenadas(booking)
+    except Exception as e:   # es un extra: nunca debe impedir el check-in
+        logger.error(f"[check-in] No se pudieron buscar las otras reservas del huésped: {e}")
+        otras = []
+    if otras:
+        respuesta["otras_reservas"] = [{"book_id": b.get("id"), "acceso": crear_token(b.get("id")), "arrival": b.get("arrival"),
+                                        "departure": b.get("departure"),
+                                        "room_name": ROOM_CONFIG.get(str(b.get("roomId", "")), {}).get("nombre", "")} for b in otras]
     return jsonify(respuesta)
 
 
