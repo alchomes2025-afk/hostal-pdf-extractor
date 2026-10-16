@@ -3,6 +3,7 @@ services/beds24.py — Autenticación con Beds24, búsqueda de reservas y envío
 del código de puerta vía Booking.com Messages.
 """
 import logging
+import time
 import requests
 from datetime import date, timedelta
 
@@ -160,6 +161,79 @@ def buscar_booking_por_id(book_id):
     return None
 
 
+def clave_grupo(booking):
+    """Identificador del grupo de una reserva de varias habitaciones. Beds24 crea una reserva por habitación: la primera
+    (la «maestra») tiene masterId vacío y las demás llevan en masterId el id de la maestra. Sin grupo, su propio id."""
+    return str(booking.get("masterId") or booking.get("id") or "")
+
+
+def _colapsar_grupos(candidatos):
+    """De una lista de (reserva, nombre), deja una por grupo de habitaciones: la maestra si está, si no la primera."""
+    elegidos = {}
+    for b, n in candidatos:
+        k = clave_grupo(b)
+        if k not in elegidos or str(b.get("id")) == k:
+            elegidos[k] = (b, n)
+    return list(elegidos.values())
+
+
+_CACHE_GRUPOS = {}      # {id de la maestra: (instante, [reservas del grupo])}; evita repetir consultas en cada refresco de la web
+TTL_GRUPOS = 300
+
+
+def _pedir_reservas(token, params):
+    try:
+        resp = requests.get(f"{BEDS24_API_BASE}/bookings", headers={"token": token, "accept": "application/json"},
+                            params={**params, "includePersonalInfo": "true"}, timeout=20)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
+    except Exception as e:
+        logger.error(f"[check-in] Error buscando las habitaciones del grupo ({params}): {e}")
+        return []
+
+
+def reservas_del_grupo(booking):
+    """
+    Todas las reservas (una por habitación, sin canceladas ni bloqueos) de la misma reserva de VARIAS HABITACIONES que
+    `booking`, incluida ella misma y ordenadas por id. Si no es de grupo, o falla la consulta: [booking].
+
+    Una reserva de varias habitaciones llega a Beds24 como una reserva por habitación con el mismo nombre y fechas; las
+    hijas llevan en `masterId` el id de la primera. Se busca por masterId y, por si ese filtro no responde bien, también por
+    la fecha de llegada, y se vuelve a filtrar en Python. Resultado en caché 5 min por grupo.
+    """
+    master = clave_grupo(booking)
+    if not master.isdigit():
+        return [booking]
+    ahora = time.time()
+    cache = _CACHE_GRUPOS.get(master)
+    if cache and ahora - cache[0] < TTL_GRUPOS:
+        miembros = cache[1]
+    else:
+        try:
+            token = get_beds24_access_token()
+        except Exception as e:
+            logger.error(f"[check-in] Beds24 auth error en reservas_del_grupo: {e}")
+            return [booking]
+        propiedades = [booking["propertyId"]] if booking.get("propertyId") else BEDS24_PROPERTY_IDS
+        encontrados = {}
+        for pid in propiedades:
+            consultas = [{"propertyId": pid, "masterId": master}]
+            if booking.get("arrival"):
+                consultas.append({"propertyId": pid, "arrivalFrom": booking["arrival"], "arrivalTo": booking["arrival"]})
+            if str(booking.get("id")) != master:
+                consultas.append({"propertyId": pid, "id": master})
+            for params in consultas:
+                for b in _pedir_reservas(token, params):
+                    if str(b.get("id")) == master or str(b.get("masterId") or "") == master:
+                        encontrados[str(b.get("id"))] = b
+        miembros = list(encontrados.values())
+        _CACHE_GRUPOS[master] = (ahora, miembros)
+    resultado = {str(m.get("id")): m for m in miembros}
+    resultado[str(booking.get("id"))] = booking   # la propia reserva, con los datos recién leídos
+    validas = [b for b in resultado.values() if str(b.get("status", "")).lower() != "cancelled" and not es_bloqueo_beds24(b)]
+    return sorted(validas, key=lambda b: int(b.get("id") or 0)) or [booking]
+
+
 def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
     """
     Busca una reserva por el nombre del huésped — es la vía principal de
@@ -258,6 +332,11 @@ def buscar_booking_por_nombre(nombre_query, max_dias_estancia=60):
                 destino.append((b, _extraer_nombre_huesped_beds24(b)))
 
             chunk_start = chunk_end + timedelta(days=1)
+
+    # Una reserva de varias habitaciones llega como una reserva por habitación con el MISMO nombre: contarlas como varias
+    # coincidencias la dejaría «ambigua». Se deja una por grupo (la principal); /check-in añade después todas las habitaciones.
+    candidatos_con_nombre = _colapsar_grupos(candidatos_con_nombre)
+    candidatos_terminados = _colapsar_grupos(candidatos_terminados)
 
     desde, hasta = desde_total.isoformat(), hasta_total.isoformat()
 

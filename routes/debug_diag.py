@@ -209,6 +209,27 @@ def diag_bloqueos():
     return jsonify({"ok": True, "hoy": hoy.isoformat(), "total": len(filas), "campos_disponibles": sorted(campos), "reservas": filas}), 200
 
 
+@debug_bp.route("/diag-grupo", methods=["GET"])
+def diag_grupo():
+    """
+    Diagnóstico de solo lectura: las habitaciones de la misma reserva de VARIAS HABITACIONES que una reserva de Beds24
+    (la misma consulta que usa /check-in). Solo habitación, fechas y estado; sin nombres ni datos personales.
+
+    Uso: /diag-grupo?token=<TOKEN>&id=94617075
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    from services.beds24 import reservas_del_grupo
+    booking = buscar_booking_por_id(request.args.get("id", ""))
+    if not booking:
+        return jsonify({"ok": False, "error": "reserva no encontrada"}), 404
+    miembros = reservas_del_grupo(booking)
+    return jsonify({"ok": True, "habitaciones": [{"id": b.get("id"), "master_id": b.get("masterId"), "habitacion": str(b.get("roomId")), "llegada": b.get("arrival"),
+                                                  "salida": b.get("departure"), "estado": b.get("status")} for b in miembros]}), 200
+
+
 @debug_bp.route("/diag-latencia-rpv", methods=["GET"])
 def diag_latencia_rpv():
     """
