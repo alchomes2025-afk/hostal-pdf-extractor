@@ -245,14 +245,27 @@ def _se_solapan(a, b):
     return (a.get("arrival") or "") < (b.get("departure") or "") and (b.get("arrival") or "") < (a.get("departure") or "")
 
 
-def es_cadena_mismo_huesped(reservas):
-    """True si todas son del MISMO huésped con estancias que no se solapan: mismo nombre completo (al menos nombre y apellido)
-    y ninguna comparte noches con otra. Dos personas distintas con el mismo nombre alojadas a la vez se solapan y NO cuentan
-    (así nunca se le muestra a alguien la habitación de otro)."""
-    nombres = {frozenset(normalizar_nombre(_extraer_nombre_huesped_beds24(b))) for b in reservas}
-    if len(nombres) != 1 or len(next(iter(nombres))) < 2:
+def _mismo_huesped(a, b):
+    """¿Son estas dos reservas (que no se solapan) del mismo huésped? Sí si el nombre completo es igual (al menos nombre y
+    apellido). Y también si un nombre está contenido en el otro (p. ej. la noche extra creada a mano solo con el nombre de
+    pila) pero SOLO cuando una estancia termina el mismo día que empieza la otra: sin hueco entre ambas."""
+    na, nb = normalizar_nombre(_extraer_nombre_huesped_beds24(a)), normalizar_nombre(_extraer_nombre_huesped_beds24(b))
+    if not na or not nb or _se_solapan(a, b):
         return False
-    return not any(_se_solapan(a, b) for i, a in enumerate(reservas) for b in reservas[i + 1:])
+    if na == nb and len(na) >= 2:
+        return True
+    seguidas = a.get("departure") == b.get("arrival") or b.get("departure") == a.get("arrival")
+    return seguidas and (na <= nb or nb <= na)
+
+
+def es_cadena_mismo_huesped(reservas):
+    """True si todas son del MISMO huésped con estancias que no se solapan (ver _mismo_huesped, entre cada una y la
+    siguiente por fecha). Dos personas con el mismo nombre alojadas a la vez se solapan y NO cuentan: así nunca se le
+    muestra a alguien la habitación de otro."""
+    orden = sorted(reservas, key=lambda b: b.get("arrival") or "")
+    if any(_se_solapan(a, b) for i, a in enumerate(orden) for b in orden[i + 1:]):
+        return False
+    return all(_mismo_huesped(a, b) for a, b in zip(orden, orden[1:]))
 
 
 def reserva_actual_de_cadena(reservas, hoy):
