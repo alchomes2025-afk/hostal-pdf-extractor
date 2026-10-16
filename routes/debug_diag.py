@@ -188,15 +188,24 @@ def diag_bloqueos():
                 room_id = str(b.get("roomId", ""))
                 rpv = estados.get((room_id, b.get("arrival")))
                 campos.update(b.keys())
+                clave_grupo = str(b.get("masterId") or "") or str(b.get("apiReference") or "") or str(b.get("reference") or "")
                 filas.append({"id": b.get("id"), "habitacion": room_id, "llegada": b.get("arrival"), "salida": b.get("departure"),
                               "estado": b.get("status"), "canal": b.get("channel"), "origen_api": b.get("apiSource"),
                               "referer": b.get("referer"), "precio": b.get("price"), "nombre": nombre if es_nombre_bloqueo else ("(huésped)" if nombre else "(sin nombre)"),
                               "email_de_bloqueo_app": email == "bloqueo@bloqueo.com", "tiene_email": bool(email),
+                              "master_id": b.get("masterId"), "_g": clave_grupo, "_n": f"{nombre.lower()}|{b.get('arrival')}",
                               "en_rpv": rpv["estado"] if rpv else None, "creada": b.get("bookingTime"), "modificada": b.get("modifiedTime"),
                               **({"coincide_con_q": bool(_match_exacto(q_tokens, [normalizar_nombre(nombre)])), "palabras_nombre": len(normalizar_nombre(nombre))} if q_tokens else {})})
             if not (cuerpo.get("pages") or {}).get("nextPageExists"):
                 break
     filas.sort(key=lambda f: (f["habitacion"], f["llegada"] or ""))
+    from collections import Counter
+    por_clave, por_nombre = Counter(f["_g"] for f in filas if f["_g"]), Counter(f["_n"] for f in filas if f["nombre"] != "(sin nombre)")
+    numeros = {}
+    for f in filas:
+        f["mismo_grupo_o_ref"] = numeros.setdefault(("g", f["_g"]), len(numeros) + 1) if f["_g"] and por_clave[f["_g"]] > 1 else None
+        f["mismo_nombre_y_llegada"] = numeros.setdefault(("n", f["_n"]), len(numeros) + 1) if por_nombre[f["_n"]] > 1 else None
+        del f["_g"], f["_n"]
     return jsonify({"ok": True, "hoy": hoy.isoformat(), "total": len(filas), "campos_disponibles": sorted(campos), "reservas": filas}), 200
 
 
