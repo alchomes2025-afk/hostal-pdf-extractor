@@ -167,6 +167,12 @@ def clave_grupo(booking):
     return str(booking.get("masterId") or booking.get("id") or "")
 
 
+def clave_grupo_entrada(entrada):
+    """Lo mismo que clave_grupo pero para las entradas de obtener_bookings_*_beds24 (dicts ya resumidos):
+    el id de la reserva maestra del grupo de habitaciones o, sin grupo, el propio book_id."""
+    return str(entrada.get("master_id") or entrada.get("book_id") or "")
+
+
 def _colapsar_grupos(candidatos):
     """De una lista de (reserva, nombre), deja una por grupo de habitaciones: la maestra si está, si no la primera."""
     elegidos = {}
@@ -510,6 +516,7 @@ def obtener_bookings_dia_beds24(fecha_iso, tipo="checkin"):
                 "email": guest.get("email") or b.get("email"),
                 "country": guest.get("country") or b.get("country"),
                 "creada": b.get("bookingTime"),
+                "master_id": b.get("masterId"),
             })
 
         if descartadas_por_fecha:
@@ -592,6 +599,7 @@ def obtener_bookings_rango_beds24(fecha_desde_iso, fecha_hasta_iso, tipo="checki
                 "creada": b.get("bookingTime"),
                 "modificada": b.get("modifiedTime"),
                 "status": b.get("status"),
+                "master_id": b.get("masterId"),
             })
 
     return resultado

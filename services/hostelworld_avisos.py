@@ -22,7 +22,7 @@ import logging
 from datetime import timedelta
 
 import config
-from services.beds24 import obtener_bookings_dia_beds24
+from services.beds24 import clave_grupo_entrada, obtener_bookings_dia_beds24
 from services.acceso_enlace import url_checkin
 from services.email_send import enviar_email, es_email_relay_ota
 from services.fechas import hoy_madrid
@@ -67,18 +67,19 @@ def _leer_avisados():
         return set()
 
 
-def _marcar_avisado(book_id):
+def _marcar_avisado(*claves):
+    """Anota como avisados los book_id (y la clave del grupo) a los que ya se ha escrito."""
     ref = _doc_ref()
     if ref is None:
         return
     try:
-        actuales = _leer_avisados() | {str(book_id)}
+        actuales = _leer_avisados() | {str(c) for c in claves if c}
         ref.set({"book_ids": sorted(actuales)})
     except Exception as e:
         logger.error(f"[hostelworld_avisos] Error guardando estado en Firestore: {e}")
 
 
-def _cuerpo_email_es(url):
+def _cuerpo_email_es(url, habitaciones=1):
     return (
         "¡Gracias por reservar en ALC HOMES!\n\n"
         "Es obligatorio hacer el check-in online en el siguiente enlace (recuerde que si son dos "
@@ -101,10 +102,12 @@ def _cuerpo_email_es(url):
         "web, una vez haya completado el check-in online.\n\n"
         "Esperamos que sea todo de su agrado.\n\n"
         "Por favor, indíquenos su hora de llegada estimada."
+        + (f"\n\nSu reserva incluye {habitaciones} habitaciones: en el mismo enlace verá todas ellas, y cada habitación "
+           "tiene su propio registro de viajeros y su propio código." if habitaciones > 1 else "")
     )
 
 
-def _cuerpo_email_en(url):
+def _cuerpo_email_en(url, habitaciones=1):
     return (
         "Thank you for booking with ALC HOMES!\n\n"
         "Completing the online check-in at the following link is mandatory (please note that if "
@@ -126,6 +129,8 @@ def _cuerpo_email_en(url):
         "online check-in.\n\n"
         "We hope everything is to your liking.\n\n"
         "Please let us know your estimated time of arrival."
+        + (f"\n\nYour booking includes {habitaciones} rooms: you will see all of them on the same link, and each room "
+           "has its own traveller registration and its own door code." if habitaciones > 1 else "")
     )
 
 
@@ -145,11 +150,18 @@ def enviar_avisos_checkin_hostelworld():
     if not hostelworld:
         return
 
+    # Una reserva de varias habitaciones llega a Beds24 como una reserva por habitación: se escribe UNA vez por reserva
+    # (el enlace personal lleva a todas las habitaciones), no una por habitación.
     avisados = _leer_avisados()
+    grupos = {}
     for e in hostelworld:
-        book_id = str(e.get("book_id"))
-        if not book_id or book_id in avisados:
+        grupos.setdefault(clave_grupo_entrada(e), []).append(e)
+    for clave, miembros in grupos.items():
+        ids = {str(m.get("book_id")) for m in miembros}
+        if not clave or clave in avisados or ids & avisados:
             continue
+        e = next((m for m in miembros if str(m.get("book_id")) == clave), miembros[0])   # la principal si está
+        book_id = str(e.get("book_id"))
         email = e.get("email")
         if not email:
             logger.warning(f"[hostelworld_avisos] Reserva {book_id} (Hostelworld) sin email — no se puede avisar")
@@ -157,14 +169,15 @@ def enviar_avisos_checkin_hostelworld():
         if es_email_relay_ota(email):
             continue  # alias de Booking/Airbnb: el correo rebotaría (ver services/email_send.py)
         idioma = _idioma_email(e.get("country"))
+        n = len(miembros)
         if idioma == "es":
             subject = "Gracias por reservar en ALC Homes"
-            body = _cuerpo_email_es(url_checkin(book_id, idioma))
+            body = _cuerpo_email_es(url_checkin(book_id, idioma), n)
         else:
             subject = "Thank you for your reservation with ALC Homes"
-            body = _cuerpo_email_en(url_checkin(book_id, idioma))
+            body = _cuerpo_email_en(url_checkin(book_id, idioma), n)
         try:
             enviar_email(to=email, subject=subject, body=body)
-            _marcar_avisado(book_id)
+            _marcar_avisado(clave, *ids)
         except Exception as ex:
             logger.error(f"[hostelworld_avisos] Error enviando email a {email} (reserva {book_id}): {ex}")
