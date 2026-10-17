@@ -108,6 +108,8 @@ html,body{
 .room-sub{
   font-size:12px;color:var(--muted);font-weight:500;margin-top:2px;
 }
+/* «ENTRA HOY» junto al nombre de la habitación: siempre visible aunque el calendario esté desplazado */
+.room-arr{display:inline-block;margin-top:5px;background:var(--acc);color:#fff;font-size:9px;font-weight:800;letter-spacing:.3px;line-height:1;padding:3px 6px;border-radius:9px;white-space:nowrap}
 /* Separadores entre habitaciones */
 .room-row td,.room-row th{border-bottom:2px solid #e2e8f0}
 .room-row:last-child td{border-bottom:none}
@@ -304,6 +306,9 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .day-cell.bk{background:var(--booked-bg)}
 .day-cell.bk.alt{background:var(--booked-bg-alt)}
 .day-cell.bl{background:var(--blocked-bg)}
+/* Día de llegada de una reserva: borde de color a la izquierda y etiqueta «ENTRA» */
+.day-cell.arr{box-shadow:inset 5px 0 0 var(--acc)}
+.dc-arr{display:inline-block;background:var(--acc);color:#fff;font-size:9px;font-weight:800;letter-spacing:.4px;line-height:1;padding:2px 4px;border-radius:3px;margin-bottom:3px}
 /* Icono de estado (✔ o —) */
 .dc-icon{font-size:20px;font-weight:700;line-height:1}
 .dc-icon.av-c{color:var(--avail)}
@@ -1071,7 +1076,8 @@ function renderCalendar() {
     const lbl = document.createElement("td");
     lbl.className = "room-lbl";
     const rl = ROOM_LABEL[room.id] || {name: room.name, sub: ""};
-    lbl.innerHTML = `<div class="room-name">${rl.name}</div><div class="room-sub">${rl.sub}</div>`;
+    const entraHoy = ALL_BOOKINGS.some(b => String(b.roomId) === String(room.id) && b.arrival === todaySt && !isBlockBooking(b));
+    lbl.innerHTML = `<div class="room-name">${rl.name}</div><div class="room-sub">${rl.sub}</div>` + (entraHoy ? `<div class="room-arr">ENTRA HOY</div>` : "");
     tr.appendChild(lbl);
 
     // Celdas de días
@@ -1094,6 +1100,7 @@ function renderCalendar() {
         if (bk.id !== prevBkId) altShade = !altShade;
         prevBkId = bk.id;
         if (altShade) cls += " alt";
+        if (bk.arrival === ds) cls += " arr";   // primer día de la reserva: llegada
       } else {
         prevBkId = null;
       }
@@ -1101,7 +1108,7 @@ function renderCalendar() {
 
       if (bk) {
         const first = (bk.guestName || "Hués.").split(" ")[0].substring(0, 7);
-        td.innerHTML = `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(price1)}</div>`;
+        td.innerHTML = (bk.arrival === ds ? `<div class="dc-arr">ENTRA</div>` : "") + `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(price1)}</div>`;
       } else if (bl) {
         td.innerHTML = `<div class="dc-icon bl-c">—</div>`;
       } else {
