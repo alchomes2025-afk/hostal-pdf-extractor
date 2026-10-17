@@ -8,12 +8,79 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
-from config import CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2
+from config import (
+    AVISOS_EMAIL, CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+)
 
 logger = logging.getLogger(__name__)
 
 
+def _lista(texto):
+    return [x.strip() for x in str(texto or "").replace(";", ",").split(",") if x.strip()]
+
+
+def _enviar_telegram(mensaje):
+    """Mensaje por el bot de Telegram a cada chat de TELEGRAM_CHAT_ID. Lanza excepción si alguno no se entrega."""
+    errores = []
+    for chat in _lista(TELEGRAM_CHAT_ID):
+        resp = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                             json={"chat_id": chat, "text": mensaje[:4000]}, timeout=15)
+        try:
+            ok = resp.ok and resp.json().get("ok") is True
+        except Exception:
+            ok = False
+        if not ok:
+            errores.append(f"chat {chat}: HTTP {resp.status_code} {resp.text[:120]}")
+    if errores:
+        raise Exception("Telegram no entregó: " + " | ".join(errores))
+
+
+def _enviar_correo_aviso(mensaje):
+    """El mensaje por correo a cada dirección de AVISOS_EMAIL (asunto = primera línea)."""
+    from services.email_send import enviar_email
+    asunto = (mensaje.strip().splitlines() or ["Aviso ALCHOMES"])[0][:90]
+    for destino in _lista(AVISOS_EMAIL):
+        enviar_email(to=destino, subject=asunto, body=mensaje)
+
+
+def _enviar_respaldos(mensaje):
+    """Envía por los canales de respaldo configurados. Devuelve [(canal, error|None)]."""
+    resultados = []
+    for canal, configurado, enviar in (("Telegram", TELEGRAM_BOT_TOKEN and _lista(TELEGRAM_CHAT_ID), _enviar_telegram),
+                                       ("correo", _lista(AVISOS_EMAIL), _enviar_correo_aviso)):
+        if not configurado:
+            continue
+        try:
+            enviar(mensaje)
+            resultados.append((canal, None))
+        except Exception as e:
+            logger.error(f"[avisos] Respaldo por {canal} fallido: {e}")
+            resultados.append((canal, str(e)))
+    return resultados
+
+
 def enviar_whatsapp_callmebot(mensaje):
+    """
+    Envía un aviso interno: por WhatsApp (CallMeBot) y, además, por los canales de respaldo configurados (Telegram y/o
+    correo). Cuenta como enviado si llega por CUALQUIERA de ellos; si fallan todos lanza la excepción de WhatsApp. Sin
+    canales de respaldo se comporta como siempre (solo WhatsApp).
+    """
+    error_whatsapp, respuesta = None, ""
+    try:
+        respuesta = _enviar_callmebot(mensaje)
+    except Exception as e:
+        error_whatsapp = e
+    respaldos = _enviar_respaldos(mensaje)
+    if error_whatsapp is not None:
+        if not any(error is None for _, error in respaldos):
+            raise error_whatsapp
+        logger.error(f"[avisos] WhatsApp falló pero el aviso llegó por respaldo: {error_whatsapp}")
+        return "respaldo: " + ", ".join(canal for canal, error in respaldos if error is None)
+    return respuesta
+
+
+def _enviar_callmebot(mensaje):
     """
     Envía un mensaje WhatsApp via CallMeBot a uno o dos números.
     Requiere CALLMEBOT_PHONE y CALLMEBOT_API_KEY en Render.

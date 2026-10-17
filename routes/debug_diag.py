@@ -300,6 +300,42 @@ def diag_whatsapp():
     return jsonify({"ok": True, "enviado": True, **extra, "resultados": resultados}), 200
 
 
+@debug_bp.route("/diag-avisos", methods=["GET"])
+def diag_avisos():
+    """
+    Diagnóstico y ayuda de configuración de los canales de respaldo de los avisos (Telegram y correo):
+      - sin parámetros: qué canales están configurados (sin mostrar claves) y, si hay bot de Telegram, los chats que le han
+        escrito (id, tipo y nombre) para saber qué poner en TELEGRAM_CHAT_ID: basta escribirle «hola» al bot y abrir esto;
+      - con enviar=1: manda UNA prueba por cada canal de respaldo configurado y dice si llegó (ENVÍA MENSAJES REALES).
+
+    Uso: /diag-avisos?token=<TOKEN>[&enviar=1]
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    from config import AVISOS_EMAIL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    from services import whatsapp as wa
+    resultado = {"ok": True, "telegram": {"bot_configurado": bool(TELEGRAM_BOT_TOKEN), "chats_configurados": len(wa._lista(TELEGRAM_CHAT_ID))},
+                 "correo": {"direcciones_configuradas": len(wa._lista(AVISOS_EMAIL))}}
+    if TELEGRAM_BOT_TOKEN:
+        try:
+            r = requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates", timeout=15).json()
+            chats = {}
+            for u in r.get("result", []):
+                chat = (u.get("message") or u.get("my_chat_member") or {}).get("chat") or {}
+                if chat.get("id") is not None:
+                    chats[chat["id"]] = {"id": chat["id"], "tipo": chat.get("type"), "nombre": chat.get("first_name") or chat.get("title")}
+            resultado["telegram"]["chats_que_han_escrito_al_bot"] = list(chats.values())
+            if not r.get("ok"):
+                resultado["telegram"]["error"] = str(r.get("description"))[:120]
+        except Exception as e:
+            resultado["telegram"]["error"] = str(e)[:120]
+    if request.args.get("enviar") == "1":
+        resultado["enviado"] = [{"canal": canal, "llego": error is None, "error": error} for canal, error in wa._enviar_respaldos("Prueba de aviso de respaldo ALCHOMES")]
+    return jsonify(resultado), 200
+
+
 @debug_bp.route("/diag-latencia-rpv", methods=["GET"])
 def diag_latencia_rpv():
     """

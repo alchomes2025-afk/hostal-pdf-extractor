@@ -141,6 +141,24 @@ APPS_SCRIPT_EMAIL_SECRET = os.environ.get("APPS_SCRIPT_EMAIL_SECRET", "")
 # invalida los enlaces ya enviados.
 CHECKIN_LINK_SECRET = os.environ.get("CHECKIN_LINK_SECRET", "")
 
+# ── Canales de respaldo de los avisos internos ─────────────────────────────
+# CallMeBot (WhatsApp) es gratuito y lo mantiene una sola persona: puede aceptar un mensaje («queued») y no entregarlo.
+# Por eso cada aviso sale además, si están configurados, por Telegram (bot propio: TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID,
+# uno o varios ids separados por comas) y/o por correo (AVISOS_EMAIL, una o varias direcciones separadas por comas, enviado con
+# el Gmail del buzón de huéspedes). Si WhatsApp falla pero un respaldo llega, el aviso cuenta como enviado.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+AVISOS_EMAIL       = os.environ.get("AVISOS_EMAIL", "")
+
+# ── Facturas en el Drive del cliente (Finanzas) ────────────────────────────
+# Puente de Drive: Apps Script de la cuenta de la PLATAFORMA (HostalFácil) publicado como aplicación web; cada cliente
+# comparte con esa cuenta su carpeta de facturas. DRIVE_PUENTE_SECRETO = la propiedad SECRETO del script.
+# FACTURAS_DRIVE_RAIZ_ALC = id de la carpeta de facturas de ALC Homes (lo que va tras /folders/ en su enlace de Drive).
+# Sin estas tres variables la subida de facturas se muestra desactivada en la app y nada más cambia.
+DRIVE_PUENTE_URL        = os.environ.get("DRIVE_PUENTE_URL", "")
+DRIVE_PUENTE_SECRETO    = os.environ.get("DRIVE_PUENTE_SECRETO", "")
+FACTURAS_DRIVE_RAIZ_ALC = os.environ.get("FACTURAS_DRIVE_RAIZ_ALC", "")
+
 # ── Calendarios iCal de Beds24 (los que importa RPV) ──────────────────────
 # Los 6 enlaces (uno por habitación) que están pegados en las fichas de RPV,
 # separados por comas, puntos y coma, espacios o saltos de línea. Llevan un token: secreto,
