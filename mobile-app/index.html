@@ -243,6 +243,15 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 #as-send:disabled{opacity:.5}
 .as-chart{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;align-self:stretch}
 .as-chart-title{font-weight:800;font-size:12.5px;margin-bottom:10px}
+.as-draft{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;align-self:stretch;font-size:12.5px}
+.as-draft-head{font-weight:800;margin-bottom:6px}
+.as-draft-meta{color:#8a7690;margin-bottom:2px;overflow-wrap:anywhere}
+.as-draft-body{white-space:pre-wrap;overflow-wrap:anywhere;background:#fdf1f8;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin:8px 0;max-height:220px;overflow:auto}
+.as-draft-btns{display:flex;gap:8px}
+.as-draft-btns button{flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:13px}
+.as-draft-btns button.send{background:var(--bk2);color:#fff;border-color:var(--bk2)}
+.as-draft-btns button:disabled{opacity:.55}
+.as-draft-state{margin-top:8px;font-weight:700}
 .as-legend{display:flex;flex-direction:column;gap:5px;margin-top:10px;font-size:12px}
 .as-legend-row{display:flex;align-items:center;gap:7px}
 .as-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
@@ -2172,6 +2181,52 @@ function asChart(spec) {
   return card;
 }
 
+// Borrador de correo con los códigos de acceso (herramienta del asistente, solo admin): NO se envía solo; solo este botón lo manda.
+function asDraft(b) {
+  const card = document.createElement("div");
+  card.className = "as-draft";
+  const add = (cls, text) => { const el = document.createElement("div"); el.className = cls; el.textContent = text; card.appendChild(el); return el; };
+  add("as-draft-head", "✉️ Borrador — sin enviar");
+  add("as-draft-meta", "Para: " + b.email);
+  add("as-draft-meta", "Asunto: " + b.asunto);
+  add("as-draft-meta", [b.habitacion, b.huesped, b.llegada && b.salida ? `${b.llegada} → ${b.salida}` : ""].filter(Boolean).join(" · "));
+  add("as-draft-body", b.cuerpo);
+  const btns = document.createElement("div");
+  btns.className = "as-draft-btns";
+  const send = document.createElement("button");
+  send.type = "button"; send.className = "send"; send.textContent = "Enviar";
+  const discard = document.createElement("button");
+  discard.type = "button"; discard.textContent = "Descartar";
+  btns.append(send, discard);
+  card.appendChild(btns);
+  const state = add("as-draft-state", "");
+  discard.addEventListener("click", () => { card.remove(); });
+  send.addEventListener("click", async () => {
+    send.disabled = discard.disabled = true;      // un solo envío por borrador
+    state.textContent = "Enviando…";
+    try {
+      const r = await fetch(`${API}/assistant/enviar-codigos`, {
+        method: "POST",
+        headers: {"x-app-pin": PIN, "content-type": "application/json"},
+        body: JSON.stringify({reserva: b.reserva, email: b.email, idioma: b.idioma, pin: PIN}),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        state.textContent = "✓ Enviado a " + b.email;
+        btns.remove();
+        AS_HISTORY.push({role: "assistant", content: `(El usuario ha pulsado Enviar: el correo de códigos de la reserva ${b.reserva} se envió a ${b.email}.)`});
+      } else {
+        state.textContent = "No se envió: " + (d.error || "error");
+        send.disabled = discard.disabled = false;
+      }
+    } catch (e) {
+      state.textContent = "No se envió (error de conexión). Comprueba antes de reintentar.";
+      send.disabled = discard.disabled = false;
+    }
+  });
+  return card;
+}
+
 async function sendAsistente() {
   if (AS_BUSY) return;
   const input = $("#as-input");
@@ -2196,6 +2251,7 @@ async function sendAsistente() {
       AS_HISTORY.push({role: "assistant", content: d.respuesta});
       asAppend("bot", d.respuesta);
       (d.graficos || []).forEach(g => { $("#as-messages").appendChild(asChart(g)); });
+      (d.borradores || []).forEach(b => { $("#as-messages").appendChild(asDraft(b)); });
       $("#as-messages").scrollTop = $("#as-messages").scrollHeight;
     } else {
       fallo = d.error || "No se pudo responder.";

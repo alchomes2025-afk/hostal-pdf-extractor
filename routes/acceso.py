@@ -76,6 +76,26 @@ CODIGO_URBANIZACION = "2308"   # urbanización Costa Hispania (La Casa de la Pri
 ROOM_ID_PRIMAVERA = "720841"
 
 
+class ErrorCodigos(Exception):
+    """No se puede redactar el correo de códigos: `codigo` es el error que ve el cliente, `status` el HTTP."""
+    def __init__(self, codigo, status):
+        super().__init__(codigo)
+        self.codigo, self.status = codigo, status
+
+
+def redactar_codigos(booking, idioma):
+    """(asunto, cuerpo, nombre de la habitación) del correo de emergencia con los códigos de acceso de esa reserva.
+    La usan POST /enviar-codigos y el asistente de la app (borrador + botón de confirmar)."""
+    cfg = ROOM_CONFIG.get(str(booking.get("roomId", "")), {})
+    if not cfg.get("pin"):
+        raise ErrorCodigos("habitacion_sin_codigo", 409)
+    primavera = str(booking.get("roomId", "")) == ROOM_ID_PRIMAVERA   # urbanización + cajetín de llaves, sin portal del hostal
+    asunto, cuerpo = correo_codigos(idioma, url_checkin(booking.get("id"), idioma), cfg.get("nombre", ""), cfg["pin"],
+                                    codigo_portal=None if primavera else CODIGO_PORTAL,
+                                    codigo_urbanizacion=CODIGO_URBANIZACION if primavera else None)
+    return asunto, cuerpo, cfg.get("nombre", "")
+
+
 @acceso_bp.route("/enviar-codigos", methods=["POST"])
 def enviar_codigos():
     """
@@ -98,13 +118,10 @@ def enviar_codigos():
         return jsonify({"ok": False, "error": "error_interno"}), 500
     if not booking:
         return jsonify({"ok": False, "error": "reserva_no_encontrada"}), 404
-    cfg = ROOM_CONFIG.get(str(booking.get("roomId", "")), {})
-    if not cfg.get("pin"):
-        return jsonify({"ok": False, "error": "habitacion_sin_codigo"}), 409
-    primavera = str(booking.get("roomId", "")) == ROOM_ID_PRIMAVERA   # urbanización + cajetín de llaves, sin portal del hostal
-    asunto, cuerpo = correo_codigos(idioma, url_checkin(booking.get("id"), idioma), cfg.get("nombre", ""), cfg["pin"],
-                                    codigo_portal=None if primavera else CODIGO_PORTAL,
-                                    codigo_urbanizacion=CODIGO_URBANIZACION if primavera else None)
+    try:
+        asunto, cuerpo, _habitacion = redactar_codigos(booking, idioma)
+    except ErrorCodigos as e:
+        return jsonify({"ok": False, "error": e.codigo}), e.status
     try:
         enviar_email(to=email, subject=asunto, body=cuerpo)
     except Exception as e:

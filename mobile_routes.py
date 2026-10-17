@@ -30,7 +30,7 @@ from flask import Blueprint, request, jsonify, Response
 import re
 
 from config import GROQ_API_KEY
-from mobile_asistente import responder as asistente_responder
+from mobile_asistente import ErrorHerramienta, borrador_codigos, responder as asistente_responder
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
 
@@ -1882,6 +1882,37 @@ def mobile_assistant():
         finanzas = True
     resultado, status = asistente_responder(mensajes, {"es_admin": _es_pin_admin(), "finanzas": finanzas})
     return jsonify(resultado), status
+
+
+@mobile_bp.route("/assistant/enviar-codigos", methods=["POST"])
+def mobile_assistant_enviar_codigos():
+    """
+    Envía el correo de emergencia con los códigos de acceso de una reserva. Es el botón «Enviar» bajo el borrador que
+    prepara el asistente (herramienta preparar_correo_codigos): el modelo nunca envía nada por sí mismo.
+
+    Solo con el PIN de administrador. Cuerpo: {"reserva": "<nº Beds24>", "email": "...", "idioma": "es"|"en"}.
+    El correo se vuelve a redactar aquí con los mismos datos, así que lo enviado es lo mostrado. Máx. 10 al día.
+    """
+    if not _es_pin_admin():
+        return jsonify({"ok": False, "error": "Solo con el PIN de administrador"}), 401
+    from services.email_send import enviar_email
+    from services.limites import permitir
+    data = request.get_json(silent=True) or {}
+    if not permitir([("asistente-codigos-dia", 10, 86400)]):
+        return jsonify({"ok": False, "error": "Demasiados envíos hoy: espera o envíalo a mano"}), 429
+    try:
+        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"))
+    except ErrorHerramienta as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    try:
+        enviar_email(to=borrador["email"], subject=borrador["asunto"], body=borrador["cuerpo"])
+    except Exception as e:
+        logger.error(f"[asistente] No se pudo enviar el correo de códigos: {e}")
+        return jsonify({"ok": False, "error": "No se pudo enviar el correo. Inténtalo de nuevo."}), 502
+    log_action(str(data.get("userName") or "Admin"), str(data.get("deviceId") or ""), "enviar_codigos_correo",
+               {"reserva": borrador["reserva"], "habitacion": borrador["habitacion"], "idioma": borrador["idioma"]})
+    logger.info(f"[asistente] Códigos enviados por correo (reserva {borrador['reserva']}, idioma {borrador['idioma']})")
+    return jsonify({"ok": True})
 
 
 @mobile_bp.route("/all-data", methods=["GET"])

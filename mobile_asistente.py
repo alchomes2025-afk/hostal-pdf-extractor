@@ -17,13 +17,16 @@ modelo:
   - partes: estado del parte de viajeros (RPV) de las próximas llegadas.
   - disponibilidad: noches libres, ocupadas y bloqueadas con el precio de calendario.
   - finanzas_mes: el informe de la pestaña Finanzas (incluida la rentabilidad estimada).
+  - preparar_correo_codigos (solo PIN de administrador): deja un BORRADOR del correo de emergencia con los códigos de
+    acceso de una reserva. No envía nada: la app lo enseña con un botón «Enviar» y solo ese botón (POST
+    /mobile/assistant/enviar-codigos, también solo con PIN de administrador) manda el correo.
 
 Permisos (los decide el servidor, nunca el modelo): los datos económicos del Hostal solo
 con el PIN de administrador; los de La Casa de la Primavera con el PIN normal si la app
 tiene Finanzas desbloqueado (ese desbloqueo es una comprobación del cliente, igual que en
 la pestaña Finanzas). Sin permiso económico, ni siquiera se devuelven los precios.
 
-Es solo lectura: no crea, modifica ni cancela nada.
+Es solo lectura (no crea, modifica ni cancela nada), salvo el borrador de correo de códigos, que solo se envía con el botón.
 """
 import json
 import logging
@@ -34,6 +37,9 @@ from datetime import date, datetime, timedelta, timezone
 import requests
 
 from config import GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
+from routes.acceso import ErrorCodigos, redactar_codigos, _EMAIL as EMAIL_VALIDO
+from services.beds24 import buscar_booking_por_id
+from services.email_send import es_email_relay_ota
 from services.fechas import hoy_madrid
 from services import rpv_latencia
 from services.resumen import texto_estado_parte
@@ -50,6 +56,8 @@ PRESUPUESTO_SEG = 45      # gunicorn mata la petición a los 60 s
 MAX_MENSAJES = 12         # mensajes de la conversación que se envían al modelo
 MAX_CHARS_MENSAJE = 1500
 MAX_GRAFICOS = 3
+MAX_BORRADORES = 2
+HERRAMIENTAS_SOLO_ADMIN = ('preparar_correo_codigos',)
 MAX_LISTADO = 25
 
 DIAS_SEMANA = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -255,6 +263,8 @@ def _t_listar_reservas(a, ctx):
                 "habitacion": r["habitacion"], "huesped": r["huesped"], "canal": r["canal"]}
         if dinero:
             fila["precio_eur"] = round(r["bruto"], 2)
+        if ctx.get("es_admin"):
+            fila["numero_reserva"] = r["id"]
         filas.append(fila)
     resultado = {"total_coinciden": len(elegidas), "mostrando": len(filas), "reservas": filas}
     if not dinero:
@@ -529,9 +539,11 @@ def _t_agenda(a, ctx):
         se_quedan = sorted((r for r in reservas if r["checkin"] < fecha < r["checkout"]), key=lambda r: r["habitacion"])
         resultado[clave] = {
             "llegadas": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "canal": r["canal"], "noches": r["noches"],
-                          "sale": r["checkout"].isoformat(), "parte": _parte(r, fecha, estados, sin_verificar, hoy)} for r in llegadas[:MAX_AGENDA]],
+                          "sale": r["checkout"].isoformat(), "parte": _parte(r, fecha, estados, sin_verificar, hoy),
+                          **({"numero_reserva": r["id"]} if ctx.get("es_admin") else {})} for r in llegadas[:MAX_AGENDA]],
             "salidas": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "canal": r["canal"]} for r in salidas[:MAX_AGENDA]],
-            "se_quedan": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "sale": r["checkout"].isoformat()} for r in se_quedan[:MAX_AGENDA]],
+            "se_quedan": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "sale": r["checkout"].isoformat(),
+                           **({"numero_reserva": r["id"]} if ctx.get("es_admin") else {})} for r in se_quedan[:MAX_AGENDA]],
             "habitaciones_ocupadas_esa_noche": len(llegadas) + len(se_quedan),
             "habitaciones_en_total": len(_habitaciones(property_id)),
         }
@@ -707,7 +719,42 @@ def _t_finanzas_mes(a, ctx):
     return informe
 
 
-HERRAMIENTAS = {"listar_reservas": _t_listar_reservas, "resumen": _t_resumen, "grafico": _t_grafico, "comparar": _t_comparar,
+def borrador_codigos(reserva, email, idioma):
+    """Borrador del correo de emergencia con los códigos de una reserva: dict con asunto y cuerpo, o ErrorHerramienta.
+    Lo usan la herramienta del asistente y el endpoint que lo envía al pulsar el botón (así lo enviado es siempre lo mostrado)."""
+    reserva, email = str(reserva or "").strip(), str(email or "").strip()
+    idioma = "es" if idioma == "es" else "en"
+    if not reserva.isdigit():
+        raise ErrorHerramienta("Falta el número de reserva de Beds24 (sale de listar_reservas o agenda)")
+    if len(email) > 254 or not EMAIL_VALIDO.fullmatch(email):
+        raise ErrorHerramienta("El correo del destinatario no es válido")
+    if es_email_relay_ota(email):
+        raise ErrorHerramienta("Es una dirección de reenvío de Booking/Airbnb: el correo rebotaría. Pide un correo directo del huésped")
+    booking = buscar_booking_por_id(reserva)
+    if not booking:
+        raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
+    try:
+        asunto, cuerpo, habitacion = redactar_codigos(booking, idioma)
+    except ErrorCodigos:
+        raise ErrorHerramienta("Esa habitación no tiene código de acceso configurado")
+    huesped = " ".join(x for x in (booking.get("firstName"), booking.get("lastName")) if x).strip()
+    return {"reserva": reserva, "email": email, "idioma": idioma, "asunto": asunto, "cuerpo": cuerpo, "habitacion": habitacion,
+            "huesped": huesped, "llegada": booking.get("arrival"), "salida": booking.get("departure")}
+
+
+def _t_preparar_correo_codigos(a, ctx):
+    if not ctx.get("es_admin"):
+        raise ErrorHerramienta("Enviar los códigos de acceso requiere el PIN de administrador")
+    if len(ctx["borradores"]) >= MAX_BORRADORES:
+        raise ErrorHerramienta(f"Ya hay {MAX_BORRADORES} borradores en esta respuesta: que el usuario los envíe o los descarte antes de preparar más")
+    borrador = borrador_codigos(a.get("reserva"), a.get("email"), a.get("idioma"))
+    ctx["borradores"].append(borrador)
+    return {"borrador_preparado": True, "para": borrador["email"], "huesped": borrador["huesped"], "habitacion": borrador["habitacion"],
+            "llegada": borrador["llegada"], "salida": borrador["salida"], "idioma": borrador["idioma"],
+            "nota": "NO se ha enviado nada. El borrador aparece en la app con un botón «Enviar»: dile al usuario que lo revise y lo pulse."}
+
+
+HERRAMIENTAS = {"preparar_correo_codigos": _t_preparar_correo_codigos, "listar_reservas": _t_listar_reservas, "resumen": _t_resumen, "grafico": _t_grafico, "comparar": _t_comparar,
                 "cancelaciones": _t_cancelaciones, "agenda": _t_agenda, "partes": _t_partes, "disponibilidad": _t_disponibilidad,
                 "parte_huesped": _t_parte_huesped, "retraso_rpv": _t_retraso_rpv, "finanzas_mes": _t_finanzas_mes}
 
@@ -784,7 +831,21 @@ TOOLS = [
         "finanzas_mes",
         "Informe financiero de un mes (el de la pestaña Finanzas): ingresos, comisiones, ocupación y rentabilidad estimada (beneficio tras costes e impuestos).",
         {"propiedad": _PROP, "mes": {"type": "string", "description": "YYYY-MM"}}, ["propiedad", "mes"]),
+    _herramienta(
+        "preparar_correo_codigos",
+        "EMERGENCIAS (solo administrador): prepara el BORRADOR del correo con los códigos de acceso (portal y habitación, o urbanización y cajetín en Primavera) de una reserva. "
+        "No envía nada: la app muestra el borrador con un botón «Enviar» que pulsa el usuario. Necesita el número de reserva de Beds24 (campo numero_reserva de listar_reservas o agenda), "
+        "el correo del destinatario y el idioma.",
+        {"reserva": {"type": "string", "description": "Número de reserva de Beds24"},
+         "email": {"type": "string", "description": "Correo del destinatario, tal como lo ha dado el usuario"},
+         "idioma": {"type": "string", "enum": ["es", "en"], "description": "Idioma del correo (por defecto en)"}},
+        ["reserva", "email"]),
 ]
+
+
+def herramientas_para(ctx):
+    """Las herramientas que ve el modelo: las de solo administrador no existen para el resto de usuarios."""
+    return [t for t in TOOLS if ctx.get("es_admin") or t["function"]["name"] not in HERRAMIENTAS_SOLO_ADMIN]
 
 
 def ejecutar_herramienta(nombre, argumentos, ctx):
@@ -820,6 +881,14 @@ def _system(ctx):
     else:
         permisos = ("Este usuario NO tiene los datos económicos desbloqueados (precios, ingresos, comisiones, beneficio): no los menciones ni "
                     "los consultes; si los pide, di que primero debe desbloquear la pestaña Finanzas. Sí puedes dar reservas, ocupación y fechas.")
+    if ctx.get("es_admin"):
+        regla7 = ("7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app. "
+                  "ÚNICA excepción: preparar_correo_codigos, que NO envía nada: deja un borrador del correo de emergencia con los códigos de acceso y la app lo muestra con un botón «Enviar» que pulsa el usuario; "
+                  "tú nunca envías correos y nunca digas que lo has enviado. Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario "
+                  "y el idioma (es o en): si falta algo, haz UNA pregunta corta. Después dile en una frase que revise el borrador y pulse «Enviar».")
+    else:
+        regla7 = ("7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app. "
+                  "Tampoco puedes enviar correos con los códigos de acceso: eso requiere el PIN de administrador.")
     hostal = ", ".join(h["nombre"] for h in _habitaciones(mr.PROPERTY_ID))
     return f"""Eres el asistente de la app de gestión de ALC Homes. Ayudas al personal y a la propiedad a entender sus reservas, ocupación y finanzas, y puedes dibujar gráficos. Hoy es {DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}.
 
@@ -832,8 +901,8 @@ Reglas:
 4. Ingresos brutos = precio de las reservas; netos = brutos menos la comisión del canal. Las noches y los ingresos de una estancia que cruza varios meses se reparten por noches. La rentabilidad de finanzas_mes usa costes estimados: avísalo. Para comparar periodos usa comparar (no restes tú) y avisa si tienen distinta duración.
 5. El «parte de viajeros» es el registro oficial de huéspedes en RPV. Que una reserva de menos de 24 h aún no conste en RPV es normal; si lleva más, avísalo como algo a revisar. Los precios de disponibilidad son los del calendario de venta, no lo que pagó cada huésped. Si preguntan qué decirle a un huésped que no puede hacer el parte, usa parte_huesped y da la recomendación que devuelve, sin cambiar los tiempos que indica.
 6. Responde en español, breve y directo, en texto plano (sin markdown ni tablas; para listas usa «•»). Importes en euros, con separador de miles y sin decimales salvo que importen.
-7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app.
-8. No tienes teléfonos ni correos de huéspedes.
+{regla7}
+8. No tienes teléfonos ni correos de huéspedes (el correo de destino de un borrador te lo da el usuario).
 {permisos}"""
 
 
@@ -851,7 +920,7 @@ class _Agotado(Exception):
     pass
 
 
-def _llamar_groq(messages, deadline, con_herramientas):
+def _llamar_groq(messages, deadline, con_herramientas, ctx=None):
     """Una llamada al modelo principal; si está saturado (429/503/413) usa el de respaldo, y si genera
     una llamada a herramienta mal formada (400 tool_use_failed) reintenta una vez."""
     resp = None
@@ -862,7 +931,7 @@ def _llamar_groq(messages, deadline, con_herramientas):
                 raise _Agotado()
             cuerpo = {"model": modelo, "messages": messages, "max_tokens": 1200, "temperature": 0.2}
             if con_herramientas:
-                cuerpo["tools"] = TOOLS
+                cuerpo["tools"] = herramientas_para(ctx or {})
                 cuerpo["tool_choice"] = "auto"
             resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
                                  json=cuerpo, timeout=min(30, restante))
@@ -888,13 +957,13 @@ def responder(mensajes, ctx):
     historial = _limpiar_mensajes(mensajes)
     if not historial or historial[-1]["role"] != "user":
         return {"ok": False, "error": "Falta la pregunta"}, 400
-    ctx = {"es_admin": bool(ctx.get("es_admin")), "finanzas": bool(ctx.get("finanzas")), "graficos": []}
+    ctx = {"es_admin": bool(ctx.get("es_admin")), "finanzas": bool(ctx.get("finanzas")), "graficos": [], "borradores": []}
     messages = [{"role": "system", "content": _system(ctx)}] + historial
     deadline = time.time() + PRESUPUESTO_SEG
     try:
         for paso in range(MAX_PASOS):
             ultima_ronda = paso == MAX_PASOS - 1
-            resp = _llamar_groq(messages, deadline, con_herramientas=not ultima_ronda)
+            resp = _llamar_groq(messages, deadline, con_herramientas=not ultima_ronda, ctx=ctx)
             if resp.status_code != 200:
                 logger.error(f"[asistente] Groq {resp.status_code}: {resp.text[:300]}")
                 return {"ok": False, "error": f"Error consultando el asistente: {resp.status_code}. Inténtalo de nuevo en un minuto."}, 500
@@ -904,9 +973,11 @@ def responder(mensajes, ctx):
                 texto = (mensaje.get("content") or "").strip()
                 if not texto and ctx["graficos"]:
                     texto = "Aquí tienes el gráfico."
+                if not texto and ctx["borradores"]:
+                    texto = "Aquí tienes el borrador del correo: revísalo y pulsa «Enviar» si es correcto."
                 if not texto:
                     return {"ok": False, "error": "El asistente no ha dado una respuesta. Prueba a reformular la pregunta."}, 500
-                return {"ok": True, "respuesta": texto, "graficos": ctx["graficos"]}, 200
+                return {"ok": True, "respuesta": texto, "graficos": ctx["graficos"], "borradores": ctx["borradores"]}, 200
             messages.append({"role": "assistant", "content": mensaje.get("content") or "", "tool_calls": llamadas})
             for llamada in llamadas:
                 funcion = llamada.get("function") or {}
