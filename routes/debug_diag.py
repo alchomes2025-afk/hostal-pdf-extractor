@@ -268,7 +268,8 @@ def diag_whatsapp():
     CallMeBot (código HTTP y texto) de cada uno, con el teléfono enmascarado. Sirve para ver si los envíos que el servidor
     da por buenos (HTTP 200) llegan de verdad o CallMeBot responde con un error dentro del texto. ENVÍA UN WHATSAPP REAL.
 
-    Uso: /diag-whatsapp?token=<TOKEN>&enviar=1   (sin enviar=1 solo dice qué números hay configurados)
+    Uso: /diag-whatsapp?token=<TOKEN>&enviar=1[&resumen=hoy|manana]   (sin enviar=1 solo dice qué números hay configurados;
+    con resumen= manda el resumen real en lugar de la prueba y da su longitud)
     """
     token = request.args.get("token", "")
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
@@ -281,15 +282,22 @@ def diag_whatsapp():
         destinos.append((f"nº2 …{str(CALLMEBOT_PHONE_2)[-3:]}", CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2))
     if request.args.get("enviar") != "1":
         return jsonify({"ok": True, "numeros_configurados": [d[0] for d in destinos], "enviado": False}), 200
+    texto_envio, extra = "Prueba de diagnostico ALCHOMES", {}
+    if request.args.get("resumen") in ("hoy", "manana"):
+        # El resumen REAL (el que el watchdog manda a las 08:00 / 23:00), sin marcarlo como enviado en Firestore.
+        from services.resumen import generar_mensaje_resumen
+        manana = request.args.get("resumen") == "manana"
+        texto_envio, _ = generar_mensaje_resumen("23" if manana else "08", dia=(hoy_madrid() + timedelta(days=1)) if manana else hoy_madrid())
+        extra = {"caracteres": len(texto_envio), "caracteres_url": len(quote(texto_envio))}
     resultados = []
     for etiqueta, telefono, apikey in destinos:
         try:
-            resp = requests.get(f"https://api.callmebot.com/whatsapp.php?phone={telefono}&text={quote('Prueba de diagnostico ALCHOMES')}&apikey={apikey}", timeout=25)
+            resp = requests.get(f"https://api.callmebot.com/whatsapp.php?phone={telefono}&text={quote(texto_envio)}&apikey={apikey}", timeout=25)
             texto = resp.text.replace(str(telefono), "<tel>").replace(str(apikey), "<clave>")
             resultados.append({"destino": etiqueta, "http": resp.status_code, "respuesta": " ".join(texto.split())[:350]})
         except Exception as e:
             resultados.append({"destino": etiqueta, "error": str(e)[:200]})
-    return jsonify({"ok": True, "enviado": True, "resultados": resultados}), 200
+    return jsonify({"ok": True, "enviado": True, **extra, "resultados": resultados}), 200
 
 
 @debug_bp.route("/diag-latencia-rpv", methods=["GET"])
