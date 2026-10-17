@@ -15,6 +15,8 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+ETIQUETA_ASUNTO = "[Aviso ALCHOMES] "   # prefijo fijo del asunto de los avisos por correo (para el filtro de Gmail)
+
 
 def _lista(texto):
     return [x.strip() for x in str(texto or "").replace(";", ",").split(",") if x.strip()]
@@ -37,9 +39,10 @@ def _enviar_telegram(mensaje):
 
 
 def _enviar_correo_aviso(mensaje):
-    """El mensaje por correo a cada dirección de AVISOS_EMAIL (asunto = primera línea)."""
+    """El mensaje por correo a cada dirección de AVISOS_EMAIL. Asunto = «[Aviso ALCHOMES] » + primera línea: la etiqueta
+    fija permite un filtro de Gmail que los archive (sin bandeja de entrada) y los deje buscables."""
     from services.email_send import enviar_email
-    asunto = (mensaje.strip().splitlines() or ["Aviso ALCHOMES"])[0][:90]
+    asunto = (ETIQUETA_ASUNTO + (mensaje.strip().splitlines() or ["Aviso"])[0])[:110]
     for destino in _lista(AVISOS_EMAIL):
         enviar_email(to=destino, subject=asunto, body=mensaje)
 
