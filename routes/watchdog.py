@@ -24,6 +24,7 @@ from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hor
 from services.fechas import hoy_madrid
 from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
 from services.registro_completado_avisos import enviar_avisos_registro_completado
+from services.sin_mensajeria_avisos import avisar_reservas_sin_mensajeria
 from services.rpv_sin_importar import avisar_reservas_sin_importar
 from services.resumen_programado import enviar_resumenes_programados
 
@@ -331,6 +332,13 @@ def watchdog():
         enviar_avisos_registro_completado()
     except Exception as e:
         logger.error(f"[watchdog] Error enviando avisos de registro completado: {e}")
+
+    # ── 13. Huéspedes que no pueden recibir mensajes por la plataforma ─────
+    # (p. ej. Expedia vía red de afiliados): aviso con sus datos de contacto.
+    try:
+        avisar_reservas_sin_mensajeria()
+    except Exception as e:
+        logger.error(f"[watchdog] Error avisando de reservas sin mensajería: {e}")
 
     # ── Resumen y alerta WhatsApp (con deduplicación) ─────────────────────
     n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")
