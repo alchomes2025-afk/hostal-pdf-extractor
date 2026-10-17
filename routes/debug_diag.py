@@ -230,6 +230,37 @@ def diag_grupo():
                                                   "salida": b.get("departure"), "estado": b.get("status")} for b in miembros]}), 200
 
 
+@debug_bp.route("/diag-estado", methods=["GET"])
+def diag_estado():
+    """
+    Diagnóstico de solo lectura: cuándo se escribió por última vez cada documento de estado del watchdog en Firestore
+    (system_state/*). Sirve para saber si el watchdog sigue ejecutándose y cuándo salió el último resumen. Sin datos
+    personales: solo fechas de escritura y, del de resúmenes programados, la fecha de último envío de cada uno.
+
+    Uso: /diag-estado?token=<TOKEN>
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    import config
+    from services.fechas import ahora_madrid
+    if config.db is None:
+        return jsonify({"ok": False, "error": "Firestore no configurado"}), 500
+    docs = {}
+    for nombre in ("watchdog", "resumenes_programados", "primavera_avisos", "rpv_sin_importar", "rpv_latencia",
+                   "registro_completado_emails", "hostelworld_checkin_emails", "token_health"):
+        try:
+            d = config.db.collection("system_state").document(nombre).get()
+            info = {"existe": d.exists, "escrito": d.update_time.isoformat() if d.exists and d.update_time else None}
+            if nombre == "resumenes_programados" and d.exists:
+                info["ultimo_envio"] = {k: v for k, v in (d.to_dict() or {}).items() if k in ("manana", "noche")}
+            docs[nombre] = info
+        except Exception as e:
+            docs[nombre] = {"error": str(e)[:120]}
+    return jsonify({"ok": True, "ahora_madrid": ahora_madrid().isoformat(timespec="minutes"), "documentos": docs}), 200
+
+
 @debug_bp.route("/diag-latencia-rpv", methods=["GET"])
 def diag_latencia_rpv():
     """
