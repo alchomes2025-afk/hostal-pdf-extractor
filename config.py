@@ -150,13 +150,15 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 AVISOS_EMAIL       = os.environ.get("AVISOS_EMAIL", "")
 
-# ── Facturas en el Drive del cliente (Finanzas) ────────────────────────────
-# Puente de Drive: Apps Script de la cuenta de la PLATAFORMA (HostalFácil) publicado como aplicación web; cada cliente
-# comparte con esa cuenta su carpeta de facturas. DRIVE_PUENTE_SECRETO = la propiedad SECRETO del script.
-# FACTURAS_DRIVE_RAIZ_ALC = id de la carpeta de facturas de ALC Homes (lo que va tras /folders/ en su enlace de Drive).
-# Sin estas tres variables la subida de facturas se muestra desactivada en la app y nada más cambia.
-DRIVE_PUENTE_URL        = os.environ.get("DRIVE_PUENTE_URL", "")
-DRIVE_PUENTE_SECRETO    = os.environ.get("DRIVE_PUENTE_SECRETO", "")
+# ── Puente de la plataforma (HostalFácil): Drive y correo de los avisos ───────
+# Un Apps Script de la cuenta de la PLATAFORMA (hostalfacil@gmail.com) publicado como aplicación web (puente_hostalfacil.js).
+# Hace de intermediario para lo que el servidor no puede hacer solo: leer (OCR) y guardar facturas en las carpetas de Drive
+# que cada cliente comparte con esa cuenta, y enviar los avisos internos por correo desde esa cuenta (respaldo de WhatsApp).
+# PUENTE_SECRETO = la propiedad SECRETO del script. FACTURAS_DRIVE_RAIZ_ALC = id de la carpeta de facturas de ALC Homes
+# (lo que va tras /folders/ en su enlace de Drive). Sin PUENTE_URL/PUENTE_SECRETO los avisos por correo salen por el
+# buzón de huéspedes, como hasta ahora, y la subida de facturas se muestra desactivada en la app.
+PUENTE_URL        = os.environ.get("PUENTE_URL", "")
+PUENTE_SECRETO    = os.environ.get("PUENTE_SECRETO", "")
 FACTURAS_DRIVE_RAIZ_ALC = os.environ.get("FACTURAS_DRIVE_RAIZ_ALC", "")
 
 # ── Calendarios iCal de Beds24 (los que importa RPV) ──────────────────────

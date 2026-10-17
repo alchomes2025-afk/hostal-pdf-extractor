@@ -41,10 +41,14 @@ def _enviar_telegram(mensaje):
 def _enviar_correo_aviso(mensaje):
     """El mensaje por correo a cada dirección de AVISOS_EMAIL. Asunto = «[Aviso ALCHOMES] » + primera línea: la etiqueta
     fija permite un filtro de Gmail que los archive (sin bandeja de entrada) y los deje buscables."""
+    from services import puente_plataforma
     from services.email_send import enviar_email
     asunto = (ETIQUETA_ASUNTO + (mensaje.strip().splitlines() or ["Aviso"])[0])[:110]
     for destino in _lista(AVISOS_EMAIL):
-        enviar_email(to=destino, subject=asunto, body=mensaje)
+        if puente_plataforma.configurado():   # desde la cuenta de la plataforma (hostalfacil@gmail.com)
+            puente_plataforma.correo(destino, asunto, mensaje)
+        else:                                  # sin puente: por el buzón de huéspedes, como hasta ahora
+            enviar_email(to=destino, subject=asunto, body=mensaje)
 
 
 def _enviar_respaldos(mensaje):
