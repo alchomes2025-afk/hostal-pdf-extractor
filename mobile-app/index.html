@@ -19,7 +19,7 @@
   --bk:#d17fae;--bk2:#e0a0c4;--acc:#e0629e;--yel:#d9b8f5;
   --avail:#4caf7d;--avail-bg:#d9f2e3;
   --blocked:#d1655c;--blocked-bg:#fbe0dd;
-  --booked:#c94f8f;--booked-bg:#f7d9ec;--booked-bg-alt:#eebbdb;
+  --booked:#c94f8f;--booked-bg:#f7d9ec;--booked-bg-alt:#eebbdb;--sale:#7c5cc4;
   --muted:#8a7690;--border:#f0dceb;--ink:#4a2c40;
   --cell:62px;--radius:16px;
 }
@@ -109,6 +109,7 @@ html,body{
   font-size:12px;color:var(--muted);font-weight:500;margin-top:2px;
 }
 /* «ENTRA HOY» junto al nombre de la habitación: siempre visible aunque el calendario esté desplazado */
+.room-sal{display:inline-block;margin-top:5px;margin-right:3px;background:var(--sale);color:#fff;font-size:9px;font-weight:800;letter-spacing:.3px;line-height:1;padding:3px 6px;border-radius:9px;white-space:nowrap}
 .room-arr{display:inline-block;margin-top:5px;background:var(--acc);color:#fff;font-size:9px;font-weight:800;letter-spacing:.3px;line-height:1;padding:3px 6px;border-radius:9px;white-space:nowrap}
 /* Separadores entre habitaciones */
 .room-row td,.room-row th{border-bottom:2px solid #e2e8f0}
@@ -307,7 +308,13 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .day-cell.bk.alt{background:var(--booked-bg-alt)}
 .day-cell.bl{background:var(--blocked-bg)}
 /* Día de llegada de una reserva: borde de color a la izquierda y etiqueta «ENTRA» */
-.day-cell.arr{box-shadow:inset 5px 0 0 var(--acc)}
+.day-cell{position:relative}
+.day-cell.arr::before,.day-cell.sal::before{content:"";position:absolute;left:0;top:0;bottom:0;width:6px}
+.day-cell.arr::before{background:var(--acc)}
+.day-cell.sal::before{background:var(--sale)}
+/* Cambio de huésped el mismo día: arriba lo que sale (mañana) y abajo lo que entra (tarde) */
+.day-cell.arr.sal::before{background:linear-gradient(to bottom,var(--sale) 50%,var(--acc) 50%)}
+.dc-sal{display:inline-block;background:var(--sale);color:#fff;font-size:9px;font-weight:800;letter-spacing:.4px;line-height:1;padding:2px 4px;border-radius:3px;margin-bottom:3px}
 .dc-arr{display:inline-block;background:var(--acc);color:#fff;font-size:9px;font-weight:800;letter-spacing:.4px;line-height:1;padding:2px 4px;border-radius:3px;margin-bottom:3px}
 /* Icono de estado (✔ o —) */
 .dc-icon{font-size:20px;font-weight:700;line-height:1}
@@ -1022,6 +1029,9 @@ function fmtPrice(v) {
 function renderCalendar() {
   const today = new Date();
   const todaySt = todayStr();
+  // Habitación y día en que sale un huésped (los bloqueos no cuentan): el día de salida la celda queda libre u ocupada por
+  // la reserva siguiente, así que se marca aparte.
+  const salidas = new Set(ALL_BOOKINGS.filter(b => !isBlockBooking(b)).map(b => `${b.roomId}|${b.departure}`));
   const tb = $("#cal-body"); tb.innerHTML = "";
 
   // 365 días desde hoy
@@ -1077,7 +1087,9 @@ function renderCalendar() {
     lbl.className = "room-lbl";
     const rl = ROOM_LABEL[room.id] || {name: room.name, sub: ""};
     const entraHoy = ALL_BOOKINGS.some(b => String(b.roomId) === String(room.id) && b.arrival === todaySt && !isBlockBooking(b));
-    lbl.innerHTML = `<div class="room-name">${rl.name}</div><div class="room-sub">${rl.sub}</div>` + (entraHoy ? `<div class="room-arr">ENTRA HOY</div>` : "");
+    const saleHoy = salidas.has(`${room.id}|${todaySt}`);
+    lbl.innerHTML = `<div class="room-name">${rl.name}</div><div class="room-sub">${rl.sub}</div>`
+      + (saleHoy || entraHoy ? `<div>${saleHoy ? `<span class="room-sal">SALE HOY</span>` : ""}${entraHoy ? `<span class="room-arr">ENTRA HOY</span>` : ""}</div>` : "");
     tr.appendChild(lbl);
 
     // Celdas de días
@@ -1104,16 +1116,19 @@ function renderCalendar() {
       } else {
         prevBkId = null;
       }
+      const sale = salidas.has(`${room.id}|${ds}`);
+      if (sale) cls += " sal";
       td.className = cls;
+      const marcas = (sale ? `<div class="dc-sal">SALE</div>` : "") + (bk && bk.arrival === ds ? `<div class="dc-arr">ENTRA</div>` : "");
 
       if (bk) {
         const first = (bk.guestName || "Hués.").split(" ")[0].substring(0, 7);
-        td.innerHTML = (bk.arrival === ds ? `<div class="dc-arr">ENTRA</div>` : "") + `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(price1)}</div>`;
+        td.innerHTML = marcas + `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(price1)}</div>`;
       } else if (bl) {
-        td.innerHTML = `<div class="dc-icon bl-c">—</div>`;
+        td.innerHTML = marcas + `<div class="dc-icon bl-c">—</div>`;
       } else {
         const pCls = price1 == null ? " na" : isOverride ? " ov" : "";
-        td.innerHTML = `<div class="dc-icon av-c">✔</div><div class="dc-price${pCls}">${fmtPrice(price1)}</div>`;
+        td.innerHTML = marcas + `<div class="dc-icon av-c">✔</div><div class="dc-price${pCls}">${fmtPrice(price1)}</div>`;
       }
 
       td.addEventListener("click", () => openDaySheet(ds, room));
