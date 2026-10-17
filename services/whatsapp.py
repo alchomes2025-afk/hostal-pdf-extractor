@@ -63,7 +63,7 @@ def _enviar_correo_aviso(mensaje):
             puente_plataforma.correo(destino, asunto, cabecera_aviso(mensaje) + "\n\n" + mensaje)
         else:                                  # sin puente: por el buzón de huéspedes, como hasta ahora
             enviar_email(to=destino, subject=asunto, body=cabecera_aviso(mensaje) + "\n\n" + mensaje,
-                         nombre=NOMBRE_REMITENTE_AVISOS)
+                         nombre=NOMBRE_REMITENTE_AVISOS, timeout=30)
 
 
 def _enviar_respaldos(mensaje):

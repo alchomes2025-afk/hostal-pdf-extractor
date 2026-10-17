@@ -31,7 +31,7 @@ def es_email_relay_ota(email):
     return (email or "").rsplit("@", 1)[-1].strip().lower() in DOMINIOS_RELAY_OTA
 
 
-def enviar_email(to, subject, body, nombre=None):
+def enviar_email(to, subject, body, nombre=None, timeout=15):
     """
     Envía un email de texto plano pidiéndoselo al Web App de Apps Script
     (APPS_SCRIPT_EMAIL_URL en Render). El secreto compartido
@@ -39,6 +39,7 @@ def enviar_email(to, subject, body, nombre=None):
     dentro del script — si no, el script responde {"ok": false}.
     No envía a direcciones de reenvío de Booking/Airbnb (ver DOMINIOS_RELAY_OTA).
     `nombre` (opcional): nombre visible del remitente (la dirección no cambia); el script lo usa solo si viene en la petición.
+    `timeout`: segundos de espera (Apps Script tarda hasta ~20 s en arrancar en frío; gunicorn mata a los 60 s).
     """
     if es_email_relay_ota(to):
         raise DestinoNoPermitido("dirección de reenvío de Booking/Airbnb: el correo rebotaría")
@@ -48,7 +49,7 @@ def enviar_email(to, subject, body, nombre=None):
     carga = {"to": to, "subject": subject, "body": body, "secret": APPS_SCRIPT_EMAIL_SECRET}
     if nombre:
         carga["nombre"] = nombre
-    resp = requests.post(APPS_SCRIPT_EMAIL_URL, json=carga, timeout=15)
+    resp = requests.post(APPS_SCRIPT_EMAIL_URL, json=carga, timeout=timeout)
     try:
         data = resp.json()
     except Exception:
