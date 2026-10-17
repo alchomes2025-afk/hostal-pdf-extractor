@@ -3,6 +3,7 @@ services/whatsapp.py — Envío de WhatsApp vía CallMeBot y sistema
 centralizado de alertas.
 """
 import logging
+import re
 import requests
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -52,17 +53,23 @@ def _enviar_telegram(mensaje):
         raise Exception("Telegram no entregó: " + " | ".join(errores))
 
 
+def _sin_emojis(texto):
+    """Quita los emojis de fuera del plano básico (📍, 🏨…): por el Apps Script llegaban al correo rotos («������»).
+    Telegram y WhatsApp los llevan bien; solo se limpia el correo. Las tildes y el resto del texto no cambian."""
+    return re.sub(r"[\U00010000-\U0010FFFF] ?", "", texto).replace("\ufe0f", "").replace("\u200d", "")
+
+
 def _enviar_correo_aviso(mensaje):
     """El mensaje por correo a cada dirección de AVISOS_EMAIL. Asunto = «[Aviso ALCHOMES] » + primera línea: la etiqueta
     fija permite un filtro de Gmail que los archive (sin bandeja de entrada) y los deje buscables."""
     from services import puente_plataforma
     from services.email_send import enviar_email
-    asunto = (ETIQUETA_ASUNTO + (mensaje.strip().splitlines() or ["Aviso"])[0])[:110]
+    asunto = (ETIQUETA_ASUNTO + " ".join(_sin_emojis((mensaje.strip().splitlines() or ["Aviso"])[0]).split()))[:110]
     for destino in _lista(AVISOS_EMAIL):
         if puente_plataforma.configurado():   # desde la cuenta de la plataforma (hostalfacil@gmail.com)
-            puente_plataforma.correo(destino, asunto, cabecera_aviso(mensaje) + "\n\n" + mensaje)
+            puente_plataforma.correo(destino, asunto, _sin_emojis(cabecera_aviso(mensaje) + "\n\n" + mensaje))
         else:                                  # sin puente: por el buzón de huéspedes, como hasta ahora
-            enviar_email(to=destino, subject=asunto, body=cabecera_aviso(mensaje) + "\n\n" + mensaje,
+            enviar_email(to=destino, subject=asunto, body=_sin_emojis(cabecera_aviso(mensaje) + "\n\n" + mensaje),
                          nombre=NOMBRE_REMITENTE_AVISOS, timeout=30)
 
 
