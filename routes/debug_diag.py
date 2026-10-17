@@ -261,6 +261,37 @@ def diag_estado():
     return jsonify({"ok": True, "ahora_madrid": ahora_madrid().isoformat(timespec="minutes"), "documentos": docs}), 200
 
 
+@debug_bp.route("/diag-whatsapp", methods=["GET"])
+def diag_whatsapp():
+    """
+    Diagnóstico: manda UN mensaje de prueba corto a cada número de CallMeBot configurado y devuelve la respuesta CRUDA de
+    CallMeBot (código HTTP y texto) de cada uno, con el teléfono enmascarado. Sirve para ver si los envíos que el servidor
+    da por buenos (HTTP 200) llegan de verdad o CallMeBot responde con un error dentro del texto. ENVÍA UN WHATSAPP REAL.
+
+    Uso: /diag-whatsapp?token=<TOKEN>&enviar=1   (sin enviar=1 solo dice qué números hay configurados)
+    """
+    token = request.args.get("token", "")
+    tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
+    if token not in tokens_validos:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    from urllib.parse import quote
+    from config import CALLMEBOT_API_KEY, CALLMEBOT_API_KEY_2, CALLMEBOT_PHONE, CALLMEBOT_PHONE_2
+    destinos = [(f"nº1 …{str(CALLMEBOT_PHONE)[-3:]}", CALLMEBOT_PHONE, CALLMEBOT_API_KEY)] if CALLMEBOT_PHONE and CALLMEBOT_API_KEY else []
+    if CALLMEBOT_PHONE_2 and CALLMEBOT_API_KEY_2:
+        destinos.append((f"nº2 …{str(CALLMEBOT_PHONE_2)[-3:]}", CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2))
+    if request.args.get("enviar") != "1":
+        return jsonify({"ok": True, "numeros_configurados": [d[0] for d in destinos], "enviado": False}), 200
+    resultados = []
+    for etiqueta, telefono, apikey in destinos:
+        try:
+            resp = requests.get(f"https://api.callmebot.com/whatsapp.php?phone={telefono}&text={quote('Prueba de diagnostico ALCHOMES')}&apikey={apikey}", timeout=25)
+            texto = resp.text.replace(str(telefono), "<tel>").replace(str(apikey), "<clave>")
+            resultados.append({"destino": etiqueta, "http": resp.status_code, "respuesta": " ".join(texto.split())[:350]})
+        except Exception as e:
+            resultados.append({"destino": etiqueta, "error": str(e)[:200]})
+    return jsonify({"ok": True, "enviado": True, "resultados": resultados}), 200
+
+
 @debug_bp.route("/diag-latencia-rpv", methods=["GET"])
 def diag_latencia_rpv():
     """
