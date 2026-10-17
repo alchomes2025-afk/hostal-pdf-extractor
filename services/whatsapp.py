@@ -35,7 +35,12 @@ def enviar_whatsapp_callmebot(mensaje):
         resp = requests.get(url, timeout=20)
         if resp.status_code != 200:
             raise Exception(f"CallMeBot {phone} respondió {resp.status_code}: {resp.text[:300]}")
-        logger.info(f"CallMeBot OK ({phone}): {resp.text[:120]}")
+        # CallMeBot responde HTTP 200 también cuando NO envía (límite, número desvinculado…) y entonces lo dice en el texto.
+        # Solo cuenta como enviado si confirma que lo ha puesto en cola («Message queued»); si no, es un fallo y quien
+        # llama reintenta (los resúmenes lo hacen en el watchdog siguiente) en lugar de darlo por enviado.
+        if "queued" not in resp.text.lower():
+            raise Exception(f"CallMeBot {phone} no confirmó el envío: {' '.join(resp.text.split())[-300:]}")
+        logger.info(f"CallMeBot OK ({phone}): {resp.text[-120:]}")
         return resp.text
 
     resultados = []

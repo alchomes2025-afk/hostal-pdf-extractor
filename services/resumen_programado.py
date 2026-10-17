@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 HORA_RESUMEN_MANANA = time(8, 0)
 HORA_RESUMEN_NOCHE = time(23, 0)
+MAX_INTENTOS = 6   # reintentos por resumen y día (≈ hora y media de watchdogs) si CallMeBot o Beds24 fallan
+_INTENTOS = {}     # (clave, día) → intentos fallidos; en memoria: un reinicio del servidor lo pone a cero
 
 
 def _doc_ref():
@@ -100,9 +102,13 @@ def enviar_resumenes_programados():
 
     if estado.get(clave) == hoy_iso:
         return
-    if _enviar_resumen(dia, hora_str):
-        estado[clave] = hoy_iso
-        try:
-            ref.set(estado)
-        except Exception as e:
-            logger.error(f"[resumen_programado] Resumen enviado pero no se pudo guardar en Firestore (podría repetirse): {e}")
+    if _INTENTOS.get((clave, hoy_iso), 0) >= MAX_INTENTOS:
+        return   # ya se ha reintentado varias veces: no insistir cada 15 min (el motivo está en el registro)
+    if not _enviar_resumen(dia, hora_str):
+        _INTENTOS[(clave, hoy_iso)] = _INTENTOS.get((clave, hoy_iso), 0) + 1
+        return
+    estado[clave] = hoy_iso
+    try:
+        ref.set(estado)
+    except Exception as e:
+        logger.error(f"[resumen_programado] Resumen enviado pero no se pudo guardar en Firestore (podría repetirse): {e}")
