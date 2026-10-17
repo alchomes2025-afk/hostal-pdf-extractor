@@ -42,8 +42,10 @@ class EnviarCodigos(unittest.TestCase):
 
     def test_primavera_sin_portal(self):
         _, enviar = self._post({"id": 5, "roomId": 720841})
-        self.assertNotIn("130773", enviar.call_args.kwargs["body"])
-        self.assertIn("2486", enviar.call_args.kwargs["body"])
+        cuerpo = enviar.call_args.kwargs["body"]
+        self.assertNotIn("130773", cuerpo)
+        self.assertIn("2308", cuerpo)    # urbanización
+        self.assertIn("2486", cuerpo)    # cajetín de llaves
 
     def test_token_incorrecto(self):
         r, enviar = self._post({"id": 5, "roomId": 702399}, token="mal")

@@ -72,6 +72,7 @@ def solicitar_acceso():
 
 
 CODIGO_PORTAL = "130773"   # puerta de la calle del hostal; el mismo que muestra la web de check-in
+CODIGO_URBANIZACION = "2308"   # urbanización Costa Hispania (La Casa de la Primavera); el mismo que muestra la web de check-in
 ROOM_ID_PRIMAVERA = "720841"
 
 
@@ -100,8 +101,10 @@ def enviar_codigos():
     cfg = ROOM_CONFIG.get(str(booking.get("roomId", "")), {})
     if not cfg.get("pin"):
         return jsonify({"ok": False, "error": "habitacion_sin_codigo"}), 409
-    portal = None if str(booking.get("roomId", "")) == ROOM_ID_PRIMAVERA else CODIGO_PORTAL   # la Casa de la Primavera usa cajetín de llaves
-    asunto, cuerpo = correo_codigos(idioma, url_checkin(booking.get("id"), idioma), cfg.get("nombre", ""), cfg["pin"], portal)
+    primavera = str(booking.get("roomId", "")) == ROOM_ID_PRIMAVERA   # urbanización + cajetín de llaves, sin portal del hostal
+    asunto, cuerpo = correo_codigos(idioma, url_checkin(booking.get("id"), idioma), cfg.get("nombre", ""), cfg["pin"],
+                                    codigo_portal=None if primavera else CODIGO_PORTAL,
+                                    codigo_urbanizacion=CODIGO_URBANIZACION if primavera else None)
     try:
         enviar_email(to=email, subject=asunto, body=cuerpo)
     except Exception as e:
