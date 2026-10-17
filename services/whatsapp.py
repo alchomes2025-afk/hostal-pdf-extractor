@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
 from config import (
-    AVISOS_EMAIL, CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
+    AVISOS_CLIENTE, AVISOS_EMAIL, CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
 )
 
@@ -22,12 +22,25 @@ def _lista(texto):
     return [x.strip() for x in str(texto or "").replace(";", ",").split(",") if x.strip()]
 
 
+def cabecera_aviso(mensaje):
+    """Línea que dice de qué cliente y propiedad es un aviso: «📍 HostalFácil · ALC Homes · Hostal · La Casa de la Primavera».
+    La propiedad se deduce del texto (el hostal tiene «habitaciones»; «Primavera» es la casa); un aviso general del sistema no
+    nombra ninguna y sale solo con el cliente. Para varios clientes la etiqueta de propiedad deberá venir ya en cada aviso."""
+    t = mensaje.lower()
+    propiedades = []
+    if "habitaci" in t or "hostal" in t:
+        propiedades.append("Hostal")
+    if "primavera" in t:
+        propiedades.append("La Casa de la Primavera")
+    return " · ".join(["📍 HostalFácil", AVISOS_CLIENTE] + propiedades)
+
+
 def _enviar_telegram(mensaje):
     """Mensaje por el bot de Telegram a cada chat de TELEGRAM_CHAT_ID. Lanza excepción si alguno no se entrega."""
     errores = []
     for chat in _lista(TELEGRAM_CHAT_ID):
         resp = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-                             json={"chat_id": chat, "text": mensaje[:4000]}, timeout=15)
+                             json={"chat_id": chat, "text": (cabecera_aviso(mensaje) + "\n\n" + mensaje)[:4000]}, timeout=15)
         try:
             ok = resp.ok and resp.json().get("ok") is True
         except Exception:
@@ -46,9 +59,9 @@ def _enviar_correo_aviso(mensaje):
     asunto = (ETIQUETA_ASUNTO + (mensaje.strip().splitlines() or ["Aviso"])[0])[:110]
     for destino in _lista(AVISOS_EMAIL):
         if puente_plataforma.configurado():   # desde la cuenta de la plataforma (hostalfacil@gmail.com)
-            puente_plataforma.correo(destino, asunto, mensaje)
+            puente_plataforma.correo(destino, asunto, cabecera_aviso(mensaje) + "\n\n" + mensaje)
         else:                                  # sin puente: por el buzón de huéspedes, como hasta ahora
-            enviar_email(to=destino, subject=asunto, body=mensaje)
+            enviar_email(to=destino, subject=asunto, body=cabecera_aviso(mensaje) + "\n\n" + mensaje)
 
 
 def _enviar_respaldos(mensaje):

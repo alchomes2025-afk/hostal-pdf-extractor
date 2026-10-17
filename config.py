@@ -149,6 +149,8 @@ CHECKIN_LINK_SECRET = os.environ.get("CHECKIN_LINK_SECRET", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 AVISOS_EMAIL       = os.environ.get("AVISOS_EMAIL", "")
+# Nombre del cliente que sale en la cabecera de los avisos por Telegram y correo («📍 HostalFácil · ALC Homes · …»).
+AVISOS_CLIENTE     = os.environ.get("AVISOS_CLIENTE", "ALC Homes")
 
 # ── Puente de la plataforma (HostalFácil): Drive y correo de los avisos ───────
 # Un Apps Script de la cuenta de la PLATAFORMA (hostalfacil@gmail.com) publicado como aplicación web (puente_hostalfacil.js).
