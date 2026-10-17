@@ -236,7 +236,7 @@ def reserva_en_rpv(room_id, fecha_entrada_iso):
     return False
 
 
-_pasadas = {}   # (api_key, fecha_entrada) -> {"t": epoch, "resultado": "completado" | "pendiente" | None}
+_pasadas = {}   # (api_key, fecha_entrada) -> {"t": epoch, "estados": {(room_id, fecha_entrada): estado normalizado}}
 
 
 def parte_comprobado_estancia_iniciada(room_id, fecha_entrada_iso):
@@ -252,17 +252,26 @@ def parte_comprobado_estancia_iniciada(room_id, fecha_entrada_iso):
     if not prop or not key:
         return None
     copia = _pasadas.get((key, fecha_entrada_iso))
-    if copia and (copia["resultado"] == "completado" or time.time() - copia["t"] < TTL_CHECKIN):
-        return copia["resultado"]
+    if copia:
+        parte = copia["estados"].get((room_id, fecha_entrada_iso))
+        if (parte and parte["completado"]) or time.time() - copia["t"] < TTL_CHECKIN:
+            return _resultado_parte(parte)
     try:
         estados = _normalizar(_pedir_partes(key, desde=fecha_entrada_iso, hasta=fecha_entrada_iso))
     except Exception as e:
         logger.error(f"[RPV] No se pudo comprobar el parte de una estancia iniciada ({fecha_entrada_iso}): {e}")
         return None
-    parte = estados.get((room_id, fecha_entrada_iso))
-    resultado = None if parte is None else ("completado" if parte["completado"] else "pendiente")
-    _pasadas[(key, fecha_entrada_iso)] = {"t": time.time(), "resultado": resultado}
-    return resultado
+    if copia:
+        # un parte completado no se deshace: se conserva aunque RPV ya no lo devuelva
+        for clave, previo in copia["estados"].items():
+            if previo["completado"] and clave not in estados:
+                estados[clave] = previo
+    _pasadas[(key, fecha_entrada_iso)] = {"t": time.time(), "estados": estados}
+    return _resultado_parte(estados.get((room_id, fecha_entrada_iso)))
+
+
+def _resultado_parte(parte):
+    return None if parte is None else ("completado" if parte["completado"] else "pendiente")
 
 
 def comprobar_cuentas(max_age=TTL_SEGUNDO_PLANO):
