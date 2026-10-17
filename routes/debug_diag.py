@@ -6,7 +6,7 @@ import requests
 from datetime import timedelta
 from flask import Blueprint, request, jsonify
 
-from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID
+from config import API_TOKEN, TEST_TOKEN, BEDS24_API_BASE, BEDS24_PROPERTY_ID, BEDS24_PROPERTY_IDS
 from services.acceso_enlace import crear_token, habilitado as enlaces_habilitados, verificar_token
 from services.beds24 import buscar_booking_por_id, get_beds24_access_token, _ref_en_booking
 from services.fechas import hoy_madrid
@@ -483,3 +483,57 @@ def ver_reservas_dia_beds24():
         "primeros_10_items": resumen_items[:10],
         "todos_los_items_resumidos": resumen_items,
     }), 200
+
+
+@debug_bp.route("/diag-contacto", methods=["GET"])
+def diag_contacto():
+    """
+    Diagnóstico de solo lectura: datos de contacto y de canal que Beds24 da de las reservas con entrada de hace
+    5 días a +60 (ambas propiedades), para decidir cuándo un huésped no puede recibir mensajes por la plataforma.
+    Con `ref` devuelve además el JSON crudo de la reserva cuyo id, apiReference o referencia lo contenga.
+
+    Uso: /diag-contacto?token=<TOKEN>[&canal=expedia][&ref=2577279377]
+    """
+    token = request.args.get("token", "")
+    if token not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    canal = request.args.get("canal", "").strip().lower()
+    ref = request.args.get("ref", "").strip().lower()
+    try:
+        access_token = get_beds24_access_token()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Beds24 auth: {e}"}), 500
+    hoy = hoy_madrid()
+    reservas, crudas, errores = [], [], []
+    for property_id in BEDS24_PROPERTY_IDS:
+        try:
+            resp = requests.get(
+                f"{BEDS24_API_BASE}/bookings",
+                headers={"token": access_token, "accept": "application/json"},
+                params={"propertyId": property_id, "includePersonalInfo": "true",
+                        "arrivalFrom": (hoy - timedelta(days=5)).isoformat(),
+                        "arrivalTo": (hoy + timedelta(days=60)).isoformat()},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+        except Exception as e:
+            errores.append(f"property {property_id}: {e}")
+            continue
+        for b in data:
+            guest = b.get("guest") or {}
+            fila = {
+                "id": b.get("id"), "apiReference": b.get("apiReference"), "apiSource": b.get("apiSource"),
+                "channel": b.get("channel"), "referer": b.get("referer"), "status": b.get("status"),
+                "llegada": b.get("arrival"), "salida": b.get("departure"), "roomId": b.get("roomId"),
+                "nombre": f"{guest.get('firstName') or b.get('firstName') or ''} {guest.get('lastName') or b.get('lastName') or ''}".strip(),
+                "email": guest.get("email") or b.get("email"),
+                "telefono": guest.get("phone") or b.get("phone"), "movil": guest.get("mobile") or b.get("mobile"),
+                "pais": guest.get("country") or b.get("country"),
+            }
+            if ref and ref in str(b).lower():
+                crudas.append(b)
+            if canal and canal not in f"{fila['apiSource']} {fila['channel']}".lower():
+                continue
+            reservas.append(fila)
+    return jsonify({"ok": True, "total": len(reservas), "reservas": reservas, "crudas": crudas, "errores": errores}), 200
