@@ -64,3 +64,25 @@ def correo_no_localizada(idioma):
     """(asunto, cuerpo) del correo cuando no se ha encontrado la reserva."""
     asunto, cuerpo = _NO_LOCALIZADA.get(idioma) or _NO_LOCALIZADA["es"]
     return asunto, cuerpo.format(tel=TELEFONO)
+
+
+def correo_codigos(idioma, url, nombre_habitacion, pin_habitacion, codigo_portal=None):
+    """(asunto, cuerpo) con los códigos de acceso de un huésped ya alojado: portal del hostal (si lo hay) y habitación.
+    Lo envía el equipo a mano en una emergencia (POST /enviar-codigos); solo en español e inglés."""
+    es = idioma == "es"
+    lineas = []
+    if codigo_portal:
+        lineas.append(f"• Puerta de la calle (portal): {codigo_portal}# — introduce el código y empuja la puerta." if es
+                      else f"• Street door (building): {codigo_portal}# — enter the code and push the door.")
+    lineas.append(f"• Tu habitación ({nombre_habitacion}): {pin_habitacion} — introdúcelo en el teclado de la puerta. "
+                  "Pulsa el triángulo para cerrar desde fuera." if es
+                  else f"• Your room ({nombre_habitacion}): {pin_habitacion} — enter it on the door keypad. "
+                       "Press the triangle to lock from outside.")
+    codigos = "\n".join(lineas)
+    if es:
+        return ("Tus códigos de acceso — ALC Homes",
+                f"Hola,\n\nEstos son tus códigos de acceso:\n\n{codigos}\n\nTu enlace personal de check-in: {url}\n\n"
+                f"Si tienes cualquier problema, llama al teléfono de atención al cliente {TELEFONO} (24 h).\n\nEquipo ALC Homes")
+    return ("Your access codes — ALC Homes",
+            f"Hello,\n\nHere are your access codes:\n\n{codigos}\n\nYour personal check-in link: {url}\n\n"
+            f"If you have any problem, call customer service on {TELEFONO} (24 h).\n\nALC Homes Team")
