@@ -31,29 +31,24 @@ def es_email_relay_ota(email):
     return (email or "").rsplit("@", 1)[-1].strip().lower() in DOMINIOS_RELAY_OTA
 
 
-def enviar_email(to, subject, body):
+def enviar_email(to, subject, body, nombre=None):
     """
     Envía un email de texto plano pidiéndoselo al Web App de Apps Script
     (APPS_SCRIPT_EMAIL_URL en Render). El secreto compartido
     (APPS_SCRIPT_EMAIL_SECRET) debe coincidir con el SECRET_ESPERADO puesto
     dentro del script — si no, el script responde {"ok": false}.
     No envía a direcciones de reenvío de Booking/Airbnb (ver DOMINIOS_RELAY_OTA).
+    `nombre` (opcional): nombre visible del remitente (la dirección no cambia); el script lo usa solo si viene en la petición.
     """
     if es_email_relay_ota(to):
         raise DestinoNoPermitido("dirección de reenvío de Booking/Airbnb: el correo rebotaría")
     if not APPS_SCRIPT_EMAIL_URL:
         raise Exception("APPS_SCRIPT_EMAIL_URL no configurada en Render")
 
-    resp = requests.post(
-        APPS_SCRIPT_EMAIL_URL,
-        json={
-            "to": to,
-            "subject": subject,
-            "body": body,
-            "secret": APPS_SCRIPT_EMAIL_SECRET,
-        },
-        timeout=15,
-    )
+    carga = {"to": to, "subject": subject, "body": body, "secret": APPS_SCRIPT_EMAIL_SECRET}
+    if nombre:
+        carga["nombre"] = nombre
+    resp = requests.post(APPS_SCRIPT_EMAIL_URL, json=carga, timeout=15)
     try:
         data = resp.json()
     except Exception:

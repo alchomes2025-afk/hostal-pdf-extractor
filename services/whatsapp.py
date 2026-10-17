@@ -15,6 +15,7 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+NOMBRE_REMITENTE_AVISOS = "Avisos del sistema"   # nombre visible del remitente de los avisos por correo
 ETIQUETA_ASUNTO = "[Aviso ALCHOMES] "   # prefijo fijo del asunto de los avisos por correo (para el filtro de Gmail)
 
 
@@ -61,7 +62,8 @@ def _enviar_correo_aviso(mensaje):
         if puente_plataforma.configurado():   # desde la cuenta de la plataforma (hostalfacil@gmail.com)
             puente_plataforma.correo(destino, asunto, cabecera_aviso(mensaje) + "\n\n" + mensaje)
         else:                                  # sin puente: por el buzón de huéspedes, como hasta ahora
-            enviar_email(to=destino, subject=asunto, body=cabecera_aviso(mensaje) + "\n\n" + mensaje)
+            enviar_email(to=destino, subject=asunto, body=cabecera_aviso(mensaje) + "\n\n" + mensaje,
+                         nombre=NOMBRE_REMITENTE_AVISOS)
 
 
 def _enviar_respaldos(mensaje):
