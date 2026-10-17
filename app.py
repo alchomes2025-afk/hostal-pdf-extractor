@@ -14,6 +14,7 @@ from flask import Flask
 from flask_cors import CORS
 
 from mobile_routes import mobile_bp
+from mobile_facturas import facturas_bp
 
 from config import (
     BEDS24_REFRESH_TOKEN, RPV_API_KEY, CALLMEBOT_PHONE, CALLMEBOT_API_KEY, GROQ_API_KEY,
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.register_blueprint(mobile_bp)
+app.register_blueprint(facturas_bp)
 for _bp in (
     misc_bp, chat_bp, checkin_bp,
     resumen_bp, historial_bp, watchdog_bp, debug_bp, rebotes_bp, acceso_bp,
