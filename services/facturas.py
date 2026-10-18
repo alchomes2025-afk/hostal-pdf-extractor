@@ -329,6 +329,20 @@ def ya_guardada(cliente_id, h):
         return None
 
 
+def misma_factura(cliente_id, datos):
+    """Factura ya guardada con el mismo número y total (aunque venga de otro archivo, p. ej. un extracto o una copia): su resumen o None."""
+    col = _coleccion()
+    if col is None or not datos.get("numero") or datos.get("total") is None:
+        return None
+    try:
+        for d in col.where("cliente", "==", cliente_id).where("numero", "==", datos["numero"]).where("total", "==", datos["total"]).stream():
+            x = d.to_dict()
+            return {k: x.get(k) for k in ("fecha", "proveedor", "total", "url")}
+    except Exception as e:
+        logger.error(f"[facturas] Error buscando duplicadas por número: {e}")
+    return None
+
+
 def leer(cliente_id, propiedad_id, archivo, es_admin):
     """Propuesta de datos de una factura para que el cliente la revise: {datos, avisos, duplicado}."""
     c = cliente(cliente_id)
@@ -350,6 +364,11 @@ def leer(cliente_id, propiedad_id, archivo, es_admin):
     duplicado = {k: previa.get(k) for k in ("fecha", "proveedor", "total", "url")} if previa else None
     if duplicado:
         avisos.insert(0, "Esta misma factura ya se subió antes.")
+    else:
+        otra = misma_factura(cliente_id, datos)
+        if otra:
+            duplicado = otra
+            avisos.insert(0, "Ya hay una factura guardada con el mismo número y total (de otro archivo): puede ser un duplicado.")
     return {"datos": datos, "avisos": avisos, "duplicado": duplicado}
 
 

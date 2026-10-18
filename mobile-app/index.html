@@ -2339,6 +2339,36 @@ async function fxLeerUna(archivo) {
   } catch (err) { return {status: 0, d: {ok: false, error: "Error de conexión."}}; }
 }
 
+async function fxLeerConReintentos(it, r, estado, lote, maximo, esperaMs) {
+  for (let intento = 0; !r.d.ok && [0, 429, 502, 503, 504].includes(r.status) && intento < maximo && !lote.cancelado; intento++) {
+    estado.textContent = `⏳ La IA está ocupada: reintento en ${Math.round(esperaMs / 1000)} segundos…`;
+    await fxEspera(esperaMs);
+    estado.textContent = "⏳ Leyendo otra vez…";
+    r = await fxLeerUna(it.archivo);
+  }
+  return r;
+}
+
+function fxAnotar(it, r) {
+  it.estatus = r.status;
+  if (r.d.ok) { it.lectura = {datos: r.d.datos, avisos: r.d.avisos || [], duplicado: r.d.duplicado}; it.estado = "leida"; it.error = ""; }
+  else { it.lectura = null; it.error = r.d.error || "No se pudo leer"; it.estado = "error"; }
+}
+
+// Dos documentos de la misma tanda con el mismo proveedor, número y total son la misma factura (p. ej. la factura y su copia o su extracto)
+function fxMarcarDuplicadas(lote) {
+  const vistas = {};
+  lote.items.forEach(it => {
+    const d = it.lectura && it.lectura.datos;
+    if (!d || !d.numero || d.total == null) return;
+    const clave = `${(d.proveedor || "").toLowerCase()}|${d.numero}|${d.total}`;
+    if (vistas[clave] && !it.lectura.duplicado) {
+      it.lectura.duplicado = {proveedor: d.proveedor, fecha: d.fecha, total: d.total, url: null};
+      it.lectura.avisos = [`Posible duplicado de «${vistas[clave]}» (mismo proveedor, número y total).`, ...it.lectura.avisos];
+    } else if (!vistas[clave]) vistas[clave] = it.archivo.nombre;
+  });
+}
+
 async function fxLeerLote() {
   const lote = FX.lote, n = lote.items.length;
   for (let i = 0; i < n; i++) {
@@ -2353,15 +2383,27 @@ async function fxLeerLote() {
     const parar = fxEl("button", "fx-sec", "Parar y revisar lo leído", body);
     parar.onclick = () => { lote.cancelado = true; };
     let r = await fxLeerUna(it.archivo);
-    for (let intento = 0; !r.d.ok && [0, 429, 502, 503, 504].includes(r.status) && intento < 2 && !lote.cancelado; intento++) {
-      estado.textContent = "⏳ La IA está ocupada: reintento en 20 segundos…";
-      await fxEspera(20000);
-      estado.textContent = "⏳ Leyendo otra vez…";
-      r = await fxLeerUna(it.archivo);
-    }
-    if (r.d.ok) { it.lectura = {datos: r.d.datos, avisos: r.d.avisos || [], duplicado: r.d.duplicado}; it.estado = "leida"; }
-    else { it.lectura = null; it.error = r.d.error || "No se pudo leer"; it.estado = "error"; }
+    r = await fxLeerConReintentos(it, r, estado, lote, 3, 25000);
+    fxAnotar(it, r);
   }
+  // segunda pasada: las que fallaron por límite de la IA o por tiempo se vuelven a intentar una vez, con calma
+  const transitorios = lote.items.filter(it => it.estado === "error" && [0, 429, 502, 503, 504].includes(it.estatus));
+  if (transitorios.length && !lote.cancelado) {
+    const body = $("#fx-body");
+    body.textContent = "";
+    $("#fx-title").textContent = "🧾 Reintentando";
+    fxEl("div", "fx-p", `Vuelvo a intentar las ${transitorios.length} que no se pudieron leer.`, body);
+    const estado = fxEl("div", "fx-note", "⏳ Esperando 30 segundos a que la IA se libere…", body);
+    const parar = fxEl("button", "fx-sec", "Parar y revisar lo leído", body);
+    parar.onclick = () => { lote.cancelado = true; };
+    await fxEspera(30000);
+    for (let k = 0; k < transitorios.length && !lote.cancelado; k++) {
+      estado.textContent = `⏳ Leyendo otra vez ${k + 1} de ${transitorios.length}: ${transitorios[k].archivo.nombre}`;
+      const r = await fxLeerConReintentos(transitorios[k], await fxLeerUna(transitorios[k].archivo), estado, lote, 2, 25000);
+      fxAnotar(transitorios[k], r);
+    }
+  }
+  fxMarcarDuplicadas(lote);
   if (n === 1) return fxAbrirItem(0, true);
   fxResumenLote();
 }
@@ -2419,7 +2461,7 @@ function fxResumenLote() {
     const d = it.lectura && it.lectura.datos;
     fxEl("b", "", d && d.proveedor ? d.proveedor : it.archivo.nombre, main);
     const dup = it.lectura && it.lectura.duplicado;
-    const texto = {guardada: "✓ guardada", omitida: "omitida", error: "✖ no se pudo leer: toca para rellenar a mano"}[it.estado] ||
+    const texto = {guardada: "✓ guardada", omitida: "omitida", error: "✖ " + (it.error || "no se pudo leer") + " · toca para rellenar a mano"}[it.estado] ||
                   (dup ? "♻ ya estaba subida" : fxListo(it) ? "✓ lista para guardar" : "⚠ revisa los datos");
     fxEl("small", "", [d && d.fecha, d && d.numero, texto].filter(Boolean).join(" · "), main);
     if (d && d.total != null) fxEl("div", "f-tot" + (d.tipo === "ingreso" ? " ing" : ""), fxEur(d.total), row);
