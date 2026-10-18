@@ -2355,12 +2355,41 @@ $("#fx-file").addEventListener("change", async (e) => {
   body.textContent = "";
   $("#fx-title").textContent = "🧾 Preparando…";
   fxEl("div", "fx-note", "Preparando los archivos…", body);
-  const {docs, avisos} = await fxExpandir(files);
-  if (docs.length > FX_MAX_LOTE) { avisos.push(`Se han leído solo las primeras ${FX_MAX_LOTE} de ${docs.length}: sube el resto en otra tanda.`); docs.length = FX_MAX_LOTE; }
-  if (!docs.length) { await fxLista(); body.prepend(...avisos.map(a => fxEl("div", "fx-note err", a))); return; }
+  const todos = await fxExpandir(files);
+  const avisos = todos.avisos;
+  // Los que ya están guardados (misma huella del archivo) se saltan antes de gastar IA: se puede volver a subir el ZIP entero y solo se leen los nuevos
+  const ya = await fxConocidas(todos.docs);
+  const docs = todos.docs.filter(d => !ya.has(d.huella));
+  if (ya.size) avisos.unshift(`${ya.size} ya estaban guardadas y se han omitido` + (docs.length ? `: solo se leen las ${docs.length} nuevas.` : "."));
+  if (docs.length > FX_MAX_LOTE) { avisos.push(`Se han leído solo las primeras ${FX_MAX_LOTE} de ${docs.length} nuevas: sube el resto en otra tanda.`); docs.length = FX_MAX_LOTE; }
+  if (!docs.length) {
+    await fxLista();
+    body.prepend(...avisos.map(a => fxEl("div", ya.size ? "fx-note ok" : "fx-note err", ya.size && !todos.docs.length ? a : a)));
+    return;
+  }
   FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false};
   await fxLeerLote();
 });
+
+// Huella SHA-256 del contenido que se sube (la misma que calcula el servidor): sirve para reconocer lo ya guardado.
+async function fxHuella(base64) {
+  const bin = atob(base64), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  const h = await crypto.subtle.digest("SHA-256", u);
+  return [...new Uint8Array(h)].map(x => x.toString(16).padStart(2, "0")).join("");
+}
+
+async function fxConocidas(docs) {
+  const conocidas = new Set();
+  try {
+    if (!(window.crypto && crypto.subtle)) return conocidas;   // sin contexto seguro no se puede calcular: se leen todas
+    for (const d of docs) d.huella = await fxHuella(d.base64);
+    if (!docs.length) return conocidas;
+    const {d} = await fxApi("/conocidas", {method: "POST", body: JSON.stringify({pin: PIN, huellas: docs.map(x => x.huella)})});
+    if (d.ok) (d.conocidas || []).forEach(h => conocidas.add(h));
+  } catch (e) { /* si falla la comprobación, simplemente se leen todas */ }
+  return conocidas;
+}
 
 async function fxLeerUna(archivo) {
   try {
@@ -2452,7 +2481,8 @@ function fxAbrirItem(i, unica) {
     },
     alOmitir: () => { if (unica) { FX.lote = null; fxLista(); return; } it.estado = "omitida"; if (ctx.seguido) fxSiguiente(); else fxResumenLote(); }};
   ctx.seguido = !!lote.seguido;
-  if (it.lectura) fxFormulario(it.lectura.datos, it.lectura.avisos, it.lectura.duplicado, "", ctx);
+  const previos = unica ? lote.avisos : [];   // con una sola factura no hay resumen: los avisos de la tanda (p. ej. «N ya estaban guardadas») van en su formulario
+  if (it.lectura) fxFormulario(it.lectura.datos, [...previos, ...it.lectura.avisos], it.lectura.duplicado, "", ctx);
   else fxFormulario({tipo: "gasto"}, [], null, (it.error || "No se pudo leer la factura") + ". Puedes rellenar los datos a mano.", ctx);
 }
 

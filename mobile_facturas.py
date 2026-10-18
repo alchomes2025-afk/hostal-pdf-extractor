@@ -8,6 +8,7 @@ Primavera); con el de administración, todas. La app de gestión actual es de un
   GET  /mobile/facturas/config                         → propiedades visibles, categorías y si está habilitado
   POST /mobile/facturas/leer     {propiedad_id, archivo:{nombre,mime,base64}}            → propuesta para revisar
   POST /mobile/facturas/guardar  {propiedad_id, archivo, datos, usuario}                 → guardada en el Drive
+  POST /mobile/facturas/conocidas {huellas:[sha256…]}                                    → las que ya están guardadas (volver a subir un ZIP salta lo ya hecho)
   GET  /mobile/facturas/meses?propiedad_id=349341                                      → meses con facturas (cuántas y totales)
   GET  /mobile/facturas?propiedad_id=349341&mes=2026-10                                  → facturas y totales del mes
   POST /mobile/facturas/extracto {propiedad_id, archivo:{nombre,mime,base64}, usuario}    → extracto bancario guardado en el Drive (para el cotejo)
@@ -104,6 +105,15 @@ def subir_extracto():
                                                                usuario=body.get("usuario"))})
     except facturas.FacturaError as e:
         return _error(e)
+
+
+@facturas_bp.route("/conocidas", methods=["POST"])
+def facturas_conocidas():
+    """Qué archivos de una tanda ya están guardados (por su huella): la app los salta antes de gastar IA en leerlos."""
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    body = request.get_json(silent=True) or {}
+    return jsonify({"ok": True, "conocidas": facturas.conocidas(CLIENTE_APP, body.get("huellas"))})
 
 
 @facturas_bp.route("/meses", methods=["GET"])

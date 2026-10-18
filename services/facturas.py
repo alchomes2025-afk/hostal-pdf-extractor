@@ -360,6 +360,23 @@ def ya_guardada(cliente_id, h):
         return None
 
 
+def conocidas(cliente_id, huellas):
+    """De estas huellas SHA-256 de archivos, las que ya están guardadas (así se puede volver a subir un ZIP entero y que solo se lean las nuevas)."""
+    col = _coleccion()
+    encontradas = []
+    if col is None:
+        return encontradas
+    for h in list(dict.fromkeys(str(x) for x in (huellas or [])))[:200]:
+        if not re.fullmatch(r"[0-9a-f]{64}", h):
+            continue
+        try:
+            if col.document(_doc_id(cliente_id, h)).get().exists:
+                encontradas.append(h)
+        except Exception as e:
+            logger.error(f"[facturas] Error consultando una huella: {e}")
+    return encontradas
+
+
 def misma_factura(cliente_id, datos):
     """Factura ya guardada con el mismo número y total (aunque venga de otro archivo, p. ej. un extracto o una copia): su resumen o None."""
     col = _coleccion()
