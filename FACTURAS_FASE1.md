@@ -9,13 +9,15 @@ gastos, ingresos e IVA; el Drive manda (lo que se meta a mano en la carpeta tamb
 leídos antes de guardar.
 
 ## Arquitectura
-- Cada cliente comparte su carpeta de facturas con la cuenta de la plataforma (hostalfacil@gmail.com).
+- Cada cliente comparte UNA carpeta con la cuenta de la plataforma (hostalfacil@gmail.com): para ALC Homes, **«HostalFácil-Gestión»** en su Drive. El
+  sistema crea él solo, la primera vez que se guarda una factura, todo lo que cuelga de ahí (`Facturas/<Propiedad>/<Año>/<nT>/<Gastos|Ingresos>/` y
+  la hoja «Registro de facturas <Año>»): el cliente no crea ninguna otra carpeta.
 - Un Apps Script de esa cuenta (`apps-script/puente_hostalfacil.js`, aplicación web) hace de puente: `ocr` (lee texto de una
   foto o PDF escaneado con la conversión de Google Drive, gratis), `guardar` (archivo + fila en la hoja de registro),
   `ping` y `correo` (esta última ya está en producción en `main` para los avisos).
 - `services/puente_plataforma.py` (en `main`) llama al puente; `services/facturas.py` lee (PDF con texto → pdfplumber; si no,
   OCR), pregunta a Groq, normaliza y comprueba (base + IVA − retención = total), guarda en
-  `<raíz>/<Propiedad>/<Año>/<nT>/<Gastos|Ingresos>/AAAA-MM-DD_Proveedor_Total€.ext` y en la hoja «Registro de facturas <año>»,
+  `<raíz>/Facturas/<Propiedad>/<Año>/<nT>/<Gastos|Ingresos>/AAAA-MM-DD_Proveedor_Total€.ext` y en la hoja «Registro de facturas <año>»,
   e indexa en Firestore (`facturas`, id = cliente + huella: detecta duplicados).
 - `mobile_facturas.py`: endpoints `/mobile/facturas/{config,leer,guardar}` y listado del mes, con las mismas reglas de PIN que
   Finanzas (PIN normal: solo La Casa de la Primavera).
@@ -31,8 +33,8 @@ leídos antes de guardar.
 - Sin Drive configurado la pantalla se ve pero la subida sale desactivada (`habilitado` = false): fusionar a `main` no cambia nada hasta que se configure.
 
 ## Falta
-1. **Pasos de Adrián:** crear la carpeta raíz de facturas en SU Drive y compartirla (editor) con hostalfacil@gmail.com; poner en Render
-   `FACTURAS_DRIVE_RAIZ_ALC` (id de la carpeta), `PUENTE_URL` (URL `/exec` del Apps Script «Puente HostalFácil», cuenta hostalfacil) y `PUENTE_SECRETO`
+1. **Pasos de Adrián:** compartir (editor) su carpeta «HostalFácil-Gestión» con hostalfacil@gmail.com; poner en Render
+   `FACTURAS_DRIVE_RAIZ_ALC` (el id de esa carpeta, lo que va tras `/folders/` en su dirección), `PUENTE_URL` (URL `/exec` del Apps Script «Puente HostalFácil», cuenta hostalfacil) y `PUENTE_SECRETO`
    (el mismo valor que la propiedad `SECRETO` del script).
 2. Probar con una factura real (PDF con texto y foto de un tique) y comprobar carpeta, nombre del archivo y hoja «Registro de facturas».
 3. **Fase 2:** sustituir en `_informe_financiero` los costes estimados por los de las facturas; revisión periódica de la carpeta del Drive (el Drive manda)

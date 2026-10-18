@@ -50,6 +50,10 @@ CATEGORIAS = {
     "ingreso": ["Alojamiento", "Otros ingresos"],
 }
 
+# Carpeta que crea el propio sistema, la primera vez que se guarda una factura, dentro de la carpeta compartida por el cliente
+# (FACTURAS_DRIVE_RAIZ_ALC = «HostalFácil-Gestión»); de ahí cuelgan <Propiedad>/<Año>/<nT>/<Gastos|Ingresos> (el puente crea lo que falte).
+CARPETA_FACTURAS = "Facturas"
+
 MIMES = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_BYTES = 10 * 1024 * 1024
 CABECERA_REGISTRO = ["Fecha", "Tipo", "Proveedor / Cliente", "NIF", "Nº factura", "Concepto", "Categoría",
@@ -314,8 +318,8 @@ def guardar(cliente_id, propiedad_id, archivo, datos_formulario, es_admin, usuar
             datos["concepto"], datos["categoria"], datos["base_imponible"], datos["iva_pct"], datos["cuota_iva"],
             datos["retencion_pct"], datos["retencion"], datos["total"], "{{ENLACE}}", ahora, str(usuario or "")[:40], doc_id]
     try:
-        r = puente_plataforma.guardar(c["drive_raiz"], [propiedad, anio, trimestre, carpeta_tipo], nombre, mime, contenido,
-                                 registro={"ruta": [propiedad, anio], "titulo": f"Registro de facturas {anio}",
+        r = puente_plataforma.guardar(c["drive_raiz"], [CARPETA_FACTURAS, propiedad, anio, trimestre, carpeta_tipo], nombre, mime, contenido,
+                                 registro={"ruta": [CARPETA_FACTURAS, propiedad, anio], "titulo": f"Registro de facturas {anio}",
                                            "cabecera": CABECERA_REGISTRO, "fila": fila},
                                  descripcion=f"{datos['categoria']} · {datos['concepto']}")
     except puente_plataforma.PuenteError as e:

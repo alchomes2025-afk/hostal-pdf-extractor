@@ -130,7 +130,7 @@ facturas.texto_de = lambda contenido, mime: facturas.puente_plataforma.ocr(conte
 datos = {**RESPUESTA}
 f = facturas.guardar("alc-homes", "349341", archivo(), datos, False, usuario="Adrián")
 g = GUARDADOS[-1]
-comprobar("15. se guarda en <Propiedad>/<Año>/<Trimestre>/Gastos", g["ruta"] == ["La Casa de la Primavera", "2026", "4T", "Gastos"] and g["raiz"] == "RAIZ")
+comprobar("15. se guarda en Facturas/<Propiedad>/<Año>/<Trimestre>/Gastos (carpeta creada por el sistema)", g["ruta"] == ["Facturas", "La Casa de la Primavera", "2026", "4T", "Gastos"] and g["raiz"] == "RAIZ")
 comprobar("15b. el nombre es fecha_proveedor_total", g["nombre"] == "2026-10-14_IBERDROLA CLIENTES SAU_158,22€.pdf")
 comprobar("15c. la hoja de registro es la del año con su cabecera y la fila completa", g["registro"]["titulo"] == "Registro de facturas 2026" and len(g["registro"]["fila"]) == len(facturas.CABECERA_REGISTRO) and "{{ENLACE}}" in g["registro"]["fila"])
 doc = config.db.datos.get(f["id"])
@@ -148,7 +148,7 @@ comprobar("16c. con «forzar» se guarda aunque sea duplicada", len(GUARDADOS) =
 
 ingreso = {**RESPUESTA, "tipo": "ingreso", "proveedor": "Cliente S.L.", "categoria": "Alojamiento", "fecha": "2026-01-05"}
 facturas.guardar("alc-homes", "349341", archivo(b"%PDF otra"), ingreso, False)
-comprobar("17. un ingreso de enero va a 1T/Ingresos", GUARDADOS[-1]["ruta"][2:] == ["1T", "Ingresos"])
+comprobar("17. un ingreso de enero va a 1T/Ingresos", GUARDADOS[-1]["ruta"][3:] == ["1T", "Ingresos"])
 try:
     facturas.guardar("alc-homes", "349341", archivo(b"%PDF mas"), {**RESPUESTA, "fecha": None}, False)
     comprobar("18. sin fecha no se guarda", False)
