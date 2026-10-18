@@ -23,8 +23,9 @@ from datetime import date, datetime
 import requests
 
 import config
-from config import FACTURAS_DRIVE_RAIZ_ALC, GROQ_API_KEY, GROQ_API_KEY_INTERNA, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
+from config import FACTURAS_DRIVE_RAIZ_ALC, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
 from services import puente_plataforma
+from services.groq_claves import clave_gestion
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ def _prompt(c, texto):
 
 
 def _preguntar_ia(prompt):
-    clave = GROQ_API_KEY_INTERNA or GROQ_API_KEY   # uso interno: la cuenta de Groq separada de la que atiende a los huéspedes
+    clave = clave_gestion()   # la cuenta de Groq de GESTIÓN del cliente (no la de los huéspedes ni la interna de HostalFácil)
     if not clave:
         raise FacturaError("la lectura automática no está disponible (sin clave de IA)", 503)
     for modelo in (GROQ_MODEL_PRI, GROQ_MODEL_FALL):

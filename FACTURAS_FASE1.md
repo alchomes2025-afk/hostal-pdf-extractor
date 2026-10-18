@@ -27,7 +27,7 @@ leídos antes de guardar.
   (gastos, ingresos, IVA soportado y repercutido), gastos por categoría y lista del mes con enlace al Drive; «＋ Subir factura» (foto o PDF; las fotos
   se reducen a ≤2000 px antes de subir) → formulario de revisión con los datos leídos (recálculo de cuota y total, comprobación «cuadra», aviso de
   duplicado, tipo gasto/ingreso con sus categorías) → «Guardar en el Drive». Si la lectura falla se puede rellenar a mano. Probada en Chrome contra un
-  servidor simulado. La lectura usa la cuenta de Groq interna (`GROQ_API_KEY_INTERNA`).
+  servidor simulado. La lectura usa la cuenta de Groq de gestión del cliente (`GROQ_API_KEY_GESTION`, vía `services/groq_claves.py`).
 - Sin Drive configurado la pantalla se ve pero la subida sale desactivada (`habilitado` = false): fusionar a `main` no cambia nada hasta que se configure.
 
 ## Falta
