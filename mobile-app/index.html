@@ -2687,12 +2687,26 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
   const ret = campo("retencion", "Retención (€)", "text", datos.retencion || "", d3);
   const total = campo("total", "TOTAL (€)", "text", datos.total, d3);
   const estado = fxEl("div", "fx-note", "", form);
+  // Talonarios y tiques suelen dar solo el total: este botón saca la base y la cuota suponiendo que el total YA lleva el IVA (por defecto 21 %).
+  const incluido = fxEl("button", "fx-sec", "El total ya incluye el IVA: calcular base y cuota", form);
+  incluido.type = "button";
+  incluido.style.display = "none";
+  incluido.onclick = () => {
+    const t = fxNum(total.value);
+    if (t == null) return;
+    let p = fxNum(iva.value);
+    if (p == null || p <= 0) { p = 21; iva.value = "21"; }
+    const b = fxR2(t / (1 + p / 100));
+    base.value = b; cuota.value = fxR2(t - b);
+    cuadra();
+  };
   const rect = fxEl("label", "chk", null, form);
   const chk = fxEl("input", "", null, rect); chk.type = "checkbox"; chk.checked = !!datos.es_rectificativa;
   fxEl("span", "", "Es un abono o factura rectificativa (resta)", rect);
 
   const cuadra = () => {
     const b = fxNum(base.value), c = fxNum(cuota.value), r = fxNum(ret.value) || 0, t = fxNum(total.value);
+    incluido.style.display = (t != null && c == null) ? "block" : "none";   // solo cuando hay total pero no hay cuota de IVA
     if (b == null || c == null || t == null) { estado.className = "fx-note"; estado.textContent = "Completa base, cuota y total para comprobar que cuadra."; return; }
     const ok = Math.abs(b + c - r - t) <= 0.05;
     estado.className = "fx-note " + (ok ? "ok" : "err");
