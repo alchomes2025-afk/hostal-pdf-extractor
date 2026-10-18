@@ -2353,7 +2353,7 @@ async function fxLeerLote() {
     const parar = fxEl("button", "fx-sec", "Parar y revisar lo leído", body);
     parar.onclick = () => { lote.cancelado = true; };
     let r = await fxLeerUna(it.archivo);
-    for (let intento = 0; !r.d.ok && [0, 429, 502, 503].includes(r.status) && intento < 2 && !lote.cancelado; intento++) {
+    for (let intento = 0; !r.d.ok && [0, 429, 502, 503, 504].includes(r.status) && intento < 2 && !lote.cancelado; intento++) {
       estado.textContent = "⏳ La IA está ocupada: reintento en 20 segundos…";
       await fxEspera(20000);
       estado.textContent = "⏳ Leyendo otra vez…";

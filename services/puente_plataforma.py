@@ -27,11 +27,11 @@ def configurado():
     return bool(PUENTE_URL and PUENTE_SECRETO)
 
 
-def _llamar(accion, **datos):
+def _llamar(accion, timeout=None, **datos):
     if not configurado():
         raise PuenteError("puente de la plataforma sin configurar (PUENTE_URL / PUENTE_SECRETO)")
     try:
-        resp = requests.post(PUENTE_URL, json={"secret": PUENTE_SECRETO, "accion": accion, **datos}, timeout=TIMEOUT)
+        resp = requests.post(PUENTE_URL, json={"secret": PUENTE_SECRETO, "accion": accion, **datos}, timeout=timeout or TIMEOUT)
         data = resp.json()
     except Exception as e:
         raise PuenteError(f"el puente de la plataforma no responde: {e}")
@@ -50,9 +50,9 @@ def estructura(raiz_id, rutas):
     return _llamar("estructura", raiz_id=raiz_id, rutas=rutas).get("rutas")
 
 
-def ocr(contenido, mime):
+def ocr(contenido, mime, timeout=None):
     """Texto de una imagen o PDF escaneado."""
-    return _llamar("ocr", mime=mime, base64=base64.b64encode(contenido).decode()).get("texto") or ""
+    return _llamar("ocr", timeout=timeout, mime=mime, base64=base64.b64encode(contenido).decode()).get("texto") or ""
 
 
 def correo(to, asunto, cuerpo):

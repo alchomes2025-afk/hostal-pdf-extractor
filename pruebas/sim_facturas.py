@@ -60,7 +60,7 @@ def guardar_falso(raiz, ruta, nombre, mime, contenido, registro=None, descripcio
 
 
 puente_plataforma.guardar = guardar_falso
-puente_plataforma.ocr = lambda contenido, mime: (OCR.append(mime), "FACTURA Iberdrola Clientes SAU 14/10/2026 Base 130,76 IVA 21% 27,46 TOTAL 158,22")[1]
+puente_plataforma.ocr = lambda contenido, mime, timeout=None: (OCR.append(mime), "FACTURA Iberdrola Clientes SAU 14/10/2026 Base 130,76 IVA 21% 27,46 TOTAL 158,22")[1]
 facturas.texto_de = lambda contenido, mime: facturas.puente_plataforma.ocr(contenido, mime)
 RESPUESTA = {"tipo": "gasto", "emisor": "IBERDROLA CLIENTES SAU", "nif_emisor": "a95758389", "numero": "FA-123", "fecha": "2026-10-14",
              "concepto": "Suministro eléctrico", "base_imponible": 130.76, "iva_pct": 21, "cuota_iva": 27.46, "total": 158.22,

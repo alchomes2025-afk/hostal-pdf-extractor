@@ -18,6 +18,8 @@ import io
 import json
 import logging
 import re
+import threading
+import time
 from datetime import date, datetime
 
 import requests
@@ -63,6 +65,10 @@ CABECERA_REGISTRO = ["Fecha", "Tipo", "Proveedor / Cliente", "NIF", "Nº factura
                      "Base imponible", "IVA %", "Cuota IVA", "Retención %", "Retención", "Total", "Archivo",
                      "Subida", "Usuario", "ID"]
 TOLERANCIA = 0.05
+# Leer una factura nunca puede pasar de este tiempo: gunicorn mata la petición a los 60 s y el usuario vería la app «colgada». El OCR y la IA
+# se reparten lo que quede, y si no llega para otra llamada se devuelve un error claro (la app reintenta).
+PRESUPUESTO_LEER_SEG = 50
+_plazo = threading.local()
 
 
 class FacturaError(Exception):
@@ -144,6 +150,11 @@ def a_fecha(v):
 
 
 # ── Lectura ──────────────────────────────────────────────────────────────────
+def _restante():
+    fin = getattr(_plazo, "fin", None)
+    return (fin - time.time()) if fin else 45.0
+
+
 def texto_de(contenido, mime):
     """Texto de la factura: capa de texto del PDF (gratis, en el servidor) y, si no hay o es una imagen, OCR de Drive."""
     if mime == "application/pdf":
@@ -155,7 +166,10 @@ def texto_de(contenido, mime):
                 return texto
         except Exception as e:
             logger.warning(f"[facturas] No se pudo leer el texto del PDF: {e}")
-    return puente_plataforma.ocr(contenido, mime)
+    restante = _restante()
+    if restante < 12:
+        raise FacturaError("la lectura tarda demasiado; vuelve a intentarlo", 504)
+    return puente_plataforma.ocr(contenido, mime, timeout=min(30, restante - 10))
 
 
 def _prompt(c, texto):
@@ -174,7 +188,7 @@ def _prompt(c, texto):
         f"- categoria (gasto): una de {json.dumps(CATEGORIAS['gasto'], ensure_ascii=False)}; "
         f"(ingreso): una de {json.dumps(CATEGORIAS['ingreso'], ensure_ascii=False)}.\n"
         "- Si un dato no aparece, null. No inventes nada.\n\n"
-        f"TEXTO:\n{texto[:12000]}"
+        f"TEXTO:\n{texto[:8000]}"
     )
 
 
@@ -183,10 +197,13 @@ def _preguntar_ia(prompt):
     if not clave:
         raise FacturaError("la lectura automática no está disponible (sin clave de IA)", 503)
     for modelo in (GROQ_MODEL_PRI, GROQ_MODEL_FALL):
+        restante = _restante()
+        if restante < 6:
+            raise FacturaError("la lectura tarda demasiado; vuelve a intentarlo", 504)
         try:
             resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {clave}", "Content-Type": "application/json"},
-                                 json={"model": modelo, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 2000},
-                                 timeout=45)
+                                 json={"model": modelo, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 800},
+                                 timeout=min(30, restante - 2))
             if resp.status_code in (429, 503):
                 continue
             resp.raise_for_status()
@@ -318,14 +335,18 @@ def leer(cliente_id, propiedad_id, archivo, es_admin):
     comprobar_propiedad(cliente_id, propiedad_id, es_admin)
     contenido, mime = _archivo(archivo)
     previa = ya_guardada(cliente_id, huella(contenido))
+    _plazo.fin = time.time() + PRESUPUESTO_LEER_SEG
     try:
-        texto = texto_de(contenido, mime)
-    except puente_plataforma.PuenteError as e:
-        logger.error(f"[facturas] OCR: {e}")
-        raise FacturaError("no se ha podido leer el texto de la imagen; rellena los datos a mano", 502)
-    if len(texto.strip()) < 15:
-        raise FacturaError("la imagen no tiene texto legible; prueba con una foto más nítida o rellena los datos a mano", 422)
-    datos, avisos = normalizar(_preguntar_ia(_prompt(c, texto)))
+        try:
+            texto = texto_de(contenido, mime)
+        except puente_plataforma.PuenteError as e:
+            logger.error(f"[facturas] OCR: {e}")
+            raise FacturaError("no se ha podido leer el texto de la imagen; rellena los datos a mano", 502)
+        if len(texto.strip()) < 15:
+            raise FacturaError("la imagen no tiene texto legible; prueba con una foto más nítida o rellena los datos a mano", 422)
+        datos, avisos = normalizar(_preguntar_ia(_prompt(c, texto)))
+    finally:
+        _plazo.fin = None
     duplicado = {k: previa.get(k) for k in ("fecha", "proveedor", "total", "url")} if previa else None
     if duplicado:
         avisos.insert(0, "Esta misma factura ya se subió antes.")
