@@ -218,6 +218,41 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
   width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
   background:var(--acc);color:#fff;font-size:24px;box-shadow:0 4px 14px rgba(0,0,0,.28);
 }
+#fx-bar{padding:10px 14px 0}
+#fx-bar button{width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:#fff;color:var(--ink);font-weight:800;font-size:13.5px}
+#fx-panel{position:fixed;left:0;right:0;bottom:0;z-index:46;margin:0 auto;width:100%;max-width:520px;height:92vh;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.25);display:none;flex-direction:column}
+#fx-head{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;padding:12px 14px;border-bottom:1.5px solid var(--border);font-weight:800;font-size:14px}
+#fx-head button{background:none;border:none;font-size:17px;cursor:pointer;padding:2px 8px;color:var(--muted)}
+#fx-body{flex:1;overflow-y:auto;padding:12px 14px 24px}
+.fx-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;font-weight:800}
+.fx-nav button{background:#fdf1f8;border:1px solid var(--border);border-radius:10px;font-size:18px;width:38px;height:34px}
+.fx-sum{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+.fx-sum div{background:#fdf1f8;border:1px solid var(--border);border-radius:12px;padding:9px 10px}
+.fx-sum span{display:block;font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.3px}
+.fx-sum b{font-size:16px}
+.fx-big{width:100%;padding:12px;border-radius:12px;border:none;background:var(--acc);color:#fff;font-weight:800;font-size:14px;margin-bottom:12px}
+.fx-big:disabled{opacity:.5}
+.fx-cat{font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6}
+.fx-row{display:flex;gap:8px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border);font-size:12.5px}
+.fx-row .f-main{flex:1;min-width:0}
+.fx-row .f-main b{display:block;overflow-wrap:anywhere}
+.fx-row .f-main small{color:var(--muted);overflow-wrap:anywhere}
+.fx-row .f-tot{font-weight:800;white-space:nowrap}
+.fx-row .f-tot.ing{color:var(--avail)}
+.fx-row a{text-decoration:none;font-size:15px}
+.fx-note{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
+.fx-note.err{background:var(--blocked-bg);border-color:var(--blocked)}
+.fx-note.ok{background:var(--avail-bg);border-color:var(--avail)}
+.fx-form label{display:block;font-size:11px;font-weight:700;color:var(--muted);margin:9px 0 3px;text-transform:uppercase;letter-spacing:.3px}
+.fx-form input,.fx-form select{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:10px;border:1.5px solid var(--border);font-size:14px;background:#fff}
+.fx-form .dos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.fx-form .chk{display:flex;gap:8px;align-items:center;margin:12px 0;font-size:13px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--ink)}
+.fx-form .chk input{width:auto}
+.fx-thumb{max-width:100%;max-height:130px;border-radius:10px;border:1px solid var(--border);display:block;margin-bottom:8px}
+.fx-btns{display:flex;gap:8px;margin-top:14px}
+.fx-btns button{flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:14px}
+.fx-btns button.send{background:var(--acc);color:#fff;border-color:var(--acc)}
+.fx-btns button:disabled{opacity:.5}
 #as-panel{
   position:fixed;left:0;right:0;bottom:0;z-index:45;margin:0 auto;width:100%;max-width:520px;
   height:82vh;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.25);
@@ -595,7 +630,13 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
       <span id="fin-month-text">—</span>
       <button class="fin-nav-btn" onclick="shiftFinanceMonth(1)">›</button>
     </div>
+    <div id="fx-bar"><button type="button" onclick="openFacturas()">🧾 Facturas de este mes</button></div>
     <div id="fin-body"><div id="fin-loading">Cargando…</div></div>
+  </div>
+  <div id="fx-panel">
+    <div id="fx-head"><span id="fx-title">🧾 Facturas</span><button type="button" onclick="closeFacturas()" title="Cerrar">✕</button></div>
+    <div id="fx-body"></div>
+    <input type="file" id="fx-file" accept="application/pdf,image/*" style="display:none">
   </div>
   <button type="button" id="as-fab" title="Preguntar al asistente" onclick="toggleAsistente()">💬</button>
   <div id="as-panel">
@@ -2003,6 +2044,267 @@ function shiftFinanceMonth(delta) {
   if (FIN_MONTH < 1)  { FIN_MONTH = 12; FIN_YEAR--; }
   if (FIN_MONTH > 12) { FIN_MONTH = 1;  FIN_YEAR++; }
   loadFinance();
+}
+
+// ── Facturas (pestaña Finanzas) ─────────────────────────
+// Sube una factura (foto o PDF), el servidor la lee, el usuario revisa los datos y se guarda ordenada en el Drive del cliente
+// (/facturas/leer y /facturas/guardar). La lista del mes y los totales salen de /facturas.
+const FX_MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+const FX = {cfg: null, archivo: null, aviso: ""};
+const fxEur = n => (n == null || isNaN(n)) ? "—" : Number(n).toLocaleString("es-ES", {style: "currency", currency: "EUR"});
+
+function fxEl(tag, cls, text, parent) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  if (parent) parent.appendChild(e);
+  return e;
+}
+
+async function fxApi(path, opciones) {
+  const r = await fetch(`${API}/facturas${path}`, {headers: {"x-app-pin": PIN, "content-type": "application/json"}, ...opciones});
+  let d = {};
+  try { d = await r.json(); } catch (e) { d = {ok: false, error: "Respuesta no válida del servidor"}; }
+  return {status: r.status, d};
+}
+
+function fxPropiedad() {
+  const p = FX.cfg && FX.cfg.propiedades.find(x => String(x.id) === String(FIN_PROPERTY));
+  return p ? p.nombre : "";
+}
+
+async function openFacturas() {
+  $("#fx-panel").style.display = "flex";
+  $("#as-fab").style.display = "none";
+  if (!FX.cfg) {
+    $("#fx-body").textContent = "Cargando…";
+    try {
+      const {d} = await fxApi("/config");
+      if (d.ok) FX.cfg = d;
+      else { $("#fx-body").textContent = d.error || "No se pudo cargar."; return; }
+    } catch (e) { $("#fx-body").textContent = "Error de conexión."; return; }
+  }
+  fxLista();
+}
+
+function closeFacturas() {
+  $("#fx-panel").style.display = "none";
+  if ($("#as-panel").style.display !== "flex") $("#as-fab").style.display = "block";
+}
+
+function fxShift(delta) { shiftFinanceMonth(delta); fxLista(); }
+
+async function fxLista() {
+  const miPeticion = FX.peticion = (FX.peticion || 0) + 1;   // si el usuario cambia de mes mientras carga, solo vale la última
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "🧾 Facturas · " + fxPropiedad();
+  const nav = fxEl("div", "fx-nav", null, body);
+  const prev = fxEl("button", "", "‹", nav);
+  fxEl("span", "", `${FX_MESES[FIN_MONTH - 1]} ${FIN_YEAR}`, nav);
+  const next = fxEl("button", "", "›", nav);
+  prev.onclick = () => fxShift(-1);
+  next.onclick = () => fxShift(1);
+  const subir = fxEl("button", "fx-big", "＋ Subir factura (foto o PDF)", body);
+  if (!FX.cfg.habilitado) {
+    subir.disabled = true;
+    fxEl("div", "fx-note", "La subida de facturas aún no está activada: falta conectar la carpeta del Drive del cliente.", body);
+  }
+  subir.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
+  if (FX.aviso) { fxEl("div", "fx-note ok", FX.aviso, body); FX.aviso = ""; }
+  const carga = fxEl("div", "fx-cat", "Cargando facturas…", body);
+  const mes = `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
+  let r;
+  try { r = await fxApi(`?propiedad_id=${FIN_PROPERTY}&mes=${mes}`); } catch (e) { if (miPeticion === FX.peticion) carga.textContent = "Error de conexión."; return; }
+  if (miPeticion !== FX.peticion) return;
+  if (!r.d.ok) { carga.textContent = r.d.error || "No se pudieron cargar las facturas."; return; }
+  carga.remove();
+  const t = r.d.totales;
+  const sum = fxEl("div", "fx-sum", null, body);
+  [["Gastos", t.gasto.total], ["Ingresos", t.ingreso.total], ["IVA soportado", t.gasto.cuota_iva], ["IVA repercutido", t.ingreso.cuota_iva]].forEach(([k, v]) => {
+    const c = fxEl("div", "", null, sum);
+    fxEl("span", "", k, c);
+    fxEl("b", "", fxEur(v), c);
+  });
+  const cats = Object.entries(t.gasto.por_categoria || {});
+  if (cats.length) fxEl("div", "fx-cat", "Gastos por categoría: " + cats.map(([k, v]) => `${k} ${fxEur(v)}`).join(" · "), body);
+  if (!r.d.facturas.length) { fxEl("div", "fx-cat", "Este mes no hay facturas subidas.", body); return; }
+  r.d.facturas.forEach(f => {
+    const row = fxEl("div", "fx-row", null, body);
+    const main = fxEl("div", "f-main", null, row);
+    fxEl("b", "", f.proveedor || "(sin nombre)", main);
+    fxEl("small", "", [f.fecha, f.numero, f.categoria].filter(Boolean).join(" · "), main);
+    fxEl("div", "f-tot" + (f.tipo === "ingreso" ? " ing" : ""), (f.es_rectificativa ? "−" : "") + fxEur(f.total), row);
+    if (f.url) { const a = fxEl("a", "", "📎", row); a.href = f.url; a.target = "_blank"; a.rel = "noopener"; a.title = "Abrir en el Drive"; }
+  });
+}
+
+// Una foto del móvil puede pesar 5-10 MB: se reduce a ≤2000 px (JPEG) antes de subirla. Los PDF van tal cual.
+function fxLeerArchivo(file) {
+  return new Promise((ok, fail) => {
+    const base = file.name.replace(/\.[^.]+$/, "");
+    if (file.type === "application/pdf") {
+      if (file.size > 10 * 1024 * 1024) return fail(new Error("El PDF pesa más de 10 MB."));
+      const fr = new FileReader();
+      fr.onload = () => ok({nombre: file.name, mime: "application/pdf", base64: String(fr.result).split(",")[1], vista: null});
+      fr.onerror = () => fail(new Error("No se pudo leer el archivo."));
+      fr.readAsDataURL(file);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 2000 / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      const data = c.toDataURL("image/jpeg", 0.85);
+      URL.revokeObjectURL(url);
+      ok({nombre: base + ".jpg", mime: "image/jpeg", base64: data.split(",")[1], vista: data});
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); fail(new Error("No se pudo abrir la imagen: sube una foto JPG o PNG, o un PDF.")); };
+    img.src = url;
+  });
+}
+
+$("#fx-file").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const body = $("#fx-body");
+  body.textContent = "";
+  fxEl("div", "fx-note", "Leyendo la factura… puede tardar unos 20 segundos.", body);
+  try {
+    FX.archivo = await fxLeerArchivo(file);
+  } catch (err) { fxLista(); FX.aviso = ""; body.prepend(fxEl("div", "fx-note err", err.message)); return; }
+  let r;
+  try {
+    r = await fxApi("/leer", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, archivo: {nombre: FX.archivo.nombre, mime: FX.archivo.mime, base64: FX.archivo.base64}})});
+  } catch (err) { r = {d: {ok: false, error: "Error de conexión."}}; }
+  if (r.d.ok) fxFormulario(r.d.datos, r.d.avisos || [], r.d.duplicado, "");
+  else fxFormulario({tipo: "gasto"}, [], null, (r.d.error || "No se pudo leer la factura") + ". Puedes rellenar los datos a mano.");
+});
+
+const fxNum = s => { const n = parseFloat(String(s || "").replace(",", ".")); return isNaN(n) ? null : n; };
+const fxR2 = n => Math.round(n * 100) / 100;
+
+function fxFormulario(datos, avisos, duplicado, errorLectura) {
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "🧾 Revisa la factura";
+  if (errorLectura) fxEl("div", "fx-note err", errorLectura, body);
+  avisos.forEach(a => fxEl("div", "fx-note", a, body));
+  if (FX.archivo && FX.archivo.vista) { const im = fxEl("img", "fx-thumb", null, body); im.src = FX.archivo.vista; im.alt = "Vista previa"; }
+  else if (FX.archivo) fxEl("div", "fx-cat", "📄 " + FX.archivo.nombre, body);
+  const form = fxEl("div", "fx-form", null, body);
+  const campo = (id, etiqueta, tipo, valor, padre) => {
+    const p = padre ? fxEl("div", "", null, padre) : form;   // en una fila de dos columnas, cada campo va con su etiqueta en su celda
+    fxEl("label", "", etiqueta, p).htmlFor = "fx-" + id;
+    const i = fxEl("input", "", null, p);
+    i.id = "fx-" + id; i.type = tipo; i.value = valor == null ? "" : valor;
+    if (tipo === "text" && /_pct|base|cuota|retencion|total/.test(id)) i.inputMode = "decimal";
+    return i;
+  };
+  const dos = () => fxEl("div", "dos", null, form);
+  fxEl("label", "", "Tipo", form);
+  const tipo = fxEl("select", "", null, form);
+  tipo.id = "fx-tipo";
+  [["gasto", "Gasto (me la han emitido)"], ["ingreso", "Ingreso (la he emitido yo)"]].forEach(([v, t]) => { const o = fxEl("option", "", t, tipo); o.value = v; });
+  tipo.value = datos.tipo === "ingreso" ? "ingreso" : "gasto";
+  const fecha = campo("fecha", "Fecha de la factura", "date", datos.fecha || "");
+  const prov = campo("proveedor", tipo.value === "gasto" ? "Proveedor" : "Cliente", "text", datos.proveedor || "");
+  const g = dos();
+  campo("nif", "NIF / CIF", "text", datos.nif || "", g);
+  campo("numero", "Nº de factura", "text", datos.numero || "", g);
+  campo("concepto", "Concepto", "text", datos.concepto || "");
+  fxEl("label", "", "Categoría", form);
+  const cat = fxEl("select", "", null, form);
+  cat.id = "fx-categoria";
+  const llenarCat = (t, sel) => {
+    cat.textContent = "";
+    (FX.cfg.categorias[t] || []).forEach(c => { const o = fxEl("option", "", c, cat); o.value = c; });
+    if (sel && (FX.cfg.categorias[t] || []).includes(sel)) cat.value = sel;
+  };
+  llenarCat(tipo.value, datos.categoria);
+  const d1 = dos();
+  const base = campo("base_imponible", "Base imponible (€)", "text", datos.base_imponible, d1);
+  const iva = campo("iva_pct", "IVA (%)", "text", datos.iva_pct, d1);
+  const d2 = dos();
+  const cuota = campo("cuota_iva", "Cuota de IVA (€)", "text", datos.cuota_iva, d2);
+  const retPct = campo("retencion_pct", "Retención IRPF (%)", "text", datos.retencion_pct || "", d2);
+  const d3 = dos();
+  const ret = campo("retencion", "Retención (€)", "text", datos.retencion || "", d3);
+  const total = campo("total", "TOTAL (€)", "text", datos.total, d3);
+  const estado = fxEl("div", "fx-note", "", form);
+  const rect = fxEl("label", "chk", null, form);
+  const chk = fxEl("input", "", null, rect); chk.type = "checkbox"; chk.checked = !!datos.es_rectificativa;
+  fxEl("span", "", "Es un abono o factura rectificativa (resta)", rect);
+
+  const cuadra = () => {
+    const b = fxNum(base.value), c = fxNum(cuota.value), r = fxNum(ret.value) || 0, t = fxNum(total.value);
+    if (b == null || c == null || t == null) { estado.className = "fx-note"; estado.textContent = "Completa base, cuota y total para comprobar que cuadra."; return; }
+    const ok = Math.abs(b + c - r - t) <= 0.05;
+    estado.className = "fx-note " + (ok ? "ok" : "err");
+    estado.textContent = ok ? "✓ Cuadra: base + IVA − retención = total" : `No cuadra: ${fxEur(fxR2(b + c - r))} calculado, pero el total es ${fxEur(t)}.`;
+  };
+  const recalcular = (origen) => {
+    const b = fxNum(base.value), p = fxNum(iva.value);
+    if (origen === "base" || origen === "iva") { if (b != null && p != null) cuota.value = fxR2(b * p / 100); }
+    if (origen === "base" || origen === "ret_pct") { const rp = fxNum(retPct.value); if (b != null && rp != null && rp > 0) ret.value = fxR2(b * rp / 100); }
+    if (origen !== "total") {
+      const bb = fxNum(base.value), cc = fxNum(cuota.value), rr = fxNum(ret.value) || 0;
+      if (bb != null && cc != null) total.value = fxR2(bb + cc - rr);
+    }
+    cuadra();
+  };
+  base.oninput = () => recalcular("base"); iva.oninput = () => recalcular("iva"); retPct.oninput = () => recalcular("ret_pct");
+  cuota.oninput = () => recalcular("cuota"); ret.oninput = () => recalcular("ret"); total.oninput = () => recalcular("total");
+  tipo.onchange = () => { llenarCat(tipo.value); form.querySelector("label[for=fx-proveedor]").textContent = tipo.value === "gasto" ? "Proveedor" : "Cliente"; };
+  cuadra();
+
+  let forzar = null;
+  const hayDup = !!duplicado;
+  if (hayDup) {
+    const l = fxEl("label", "chk", null, form);
+    forzar = fxEl("input", "", null, l); forzar.type = "checkbox";
+    fxEl("span", "", "Ya está subida: guardarla de todas formas (se creará una copia)", l);
+  }
+  const msg = fxEl("div", "fx-note err", "", form);
+  msg.style.display = "none";
+  const btns = fxEl("div", "fx-btns", null, form);
+  const guardar = fxEl("button", "send", "Guardar en el Drive", btns);
+  const cancelar = fxEl("button", "", "Cancelar", btns);
+  cancelar.onclick = () => { FX.archivo = null; fxLista(); };
+  guardar.onclick = async () => {
+    const f = {tipo: tipo.value, fecha: fecha.value, proveedor: prov.value.trim(), nif: $("#fx-nif").value.trim(), numero: $("#fx-numero").value.trim(),
+               concepto: $("#fx-concepto").value.trim(), categoria: cat.value, base_imponible: base.value, iva_pct: iva.value, cuota_iva: cuota.value,
+               retencion_pct: retPct.value, retencion: ret.value, total: total.value, es_rectificativa: chk.checked};
+    if (forzar && forzar.checked) f.forzar = true;
+    if (!f.fecha || !f.proveedor || !fxNum(f.total)) { msg.textContent = "Faltan la fecha, el " + (f.tipo === "gasto" ? "proveedor" : "cliente") + " o el total."; msg.style.display = "block"; return; }
+    guardar.disabled = cancelar.disabled = true;
+    guardar.textContent = "Guardando…";
+    msg.style.display = "none";
+    let r;
+    try {
+      r = await fxApi("/guardar", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, datos: f,
+                                                                      archivo: {nombre: FX.archivo.nombre, mime: FX.archivo.mime, base64: FX.archivo.base64}})});
+    } catch (e) { r = {status: 0, d: {ok: false, error: "Error de conexión. Comprueba la lista antes de reintentar."}}; }
+    if (r.d.ok) {
+      FX.archivo = null;
+      FX.aviso = `✓ Guardada en el Drive: ${r.d.factura.archivo || r.d.factura.proveedor}`;
+      fxLista();
+      return;
+    }
+    msg.textContent = r.d.error || "No se pudo guardar.";
+    if (r.status === 409 && !forzar) {   // ya estaba guardada: ofrecer guardarla igualmente
+      const l = fxEl("label", "chk", null, form);
+      forzar = fxEl("input", "", null, l); forzar.type = "checkbox";
+      fxEl("span", "", "Guardarla de todas formas (se creará una copia)", l);
+      form.insertBefore(l, msg);
+    }
+    msg.style.display = "block";
+    guardar.disabled = cancelar.disabled = false;
+    guardar.textContent = "Guardar en el Drive";
+  };
 }
 
 // ── Asistente ───────────────────────────────────────────

@@ -23,7 +23,7 @@ from datetime import date, datetime
 import requests
 
 import config
-from config import FACTURAS_DRIVE_RAIZ_ALC, GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
+from config import FACTURAS_DRIVE_RAIZ_ALC, GROQ_API_KEY, GROQ_API_KEY_INTERNA, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
 from services import puente_plataforma
 
 logger = logging.getLogger(__name__)
@@ -159,11 +159,12 @@ def _prompt(c, texto):
 
 
 def _preguntar_ia(prompt):
-    if not GROQ_API_KEY:
+    clave = GROQ_API_KEY_INTERNA or GROQ_API_KEY   # uso interno: la cuenta de Groq separada de la que atiende a los huéspedes
+    if not clave:
         raise FacturaError("la lectura automática no está disponible (sin clave de IA)", 503)
     for modelo in (GROQ_MODEL_PRI, GROQ_MODEL_FALL):
         try:
-            resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {clave}", "Content-Type": "application/json"},
                                  json={"model": modelo, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 2000},
                                  timeout=45)
             if resp.status_code in (429, 503):

@@ -22,18 +22,22 @@ leídos antes de guardar.
 - Variables de Render: `PUENTE_URL`, `PUENTE_SECRETO` (ya definidas en `config.py`) y `FACTURAS_DRIVE_RAIZ_ALC`.
 
 ## Hecho
-Servicio, endpoints y puente escritos. `python -X utf8 -I pruebas/sim_facturas.py` → 36 comprobaciones en verde (puente, IA y
-Firestore simulados).
+- Servicio, endpoints y puente escritos. `python -X utf8 -I pruebas/sim_facturas.py` → 36 comprobaciones en verde (puente, IA y Firestore simulados).
+- **Pantalla en la app (2026-10-18)**, `mobile-app/index.html`: botón «🧾 Facturas de este mes» en Finanzas → panel con navegación de mes, totales
+  (gastos, ingresos, IVA soportado y repercutido), gastos por categoría y lista del mes con enlace al Drive; «＋ Subir factura» (foto o PDF; las fotos
+  se reducen a ≤2000 px antes de subir) → formulario de revisión con los datos leídos (recálculo de cuota y total, comprobación «cuadra», aviso de
+  duplicado, tipo gasto/ingreso con sus categorías) → «Guardar en el Drive». Si la lectura falla se puede rellenar a mano. Probada en Chrome contra un
+  servidor simulado. La lectura usa la cuenta de Groq interna (`GROQ_API_KEY_INTERNA`).
+- Sin Drive configurado la pantalla se ve pero la subida sale desactivada (`habilitado` = false): fusionar a `main` no cambia nada hasta que se configure.
 
 ## Falta
-1. **Pantalla en la app** (`mobile-app/index.html`, pestaña Finanzas): subir (foto o PDF), formulario de revisión de los datos
-   leídos, lista del mes con totales de gastos, ingresos e IVA.
-2. **Pasos de Adrián:** montar el script del puente en la cuenta hostalfacil, compartir la carpeta de facturas con esa cuenta y
-   poner `FACTURAS_DRIVE_RAIZ_ALC` en Render.
-3. Probar con una factura real; commit/fusión; documentar en `claude.md` y en la memoria.
-4. **Fase 2:** sustituir en `_informe_financiero` los costes estimados por los de las facturas; revisión periódica de la carpeta
-   del Drive (el Drive manda) y reparto por propiedad.
-5. Portarlo al monorepo `hostalfacil/plataforma` (la conversación de migración lo tendrá que incluir).
+1. **Pasos de Adrián:** crear la carpeta raíz de facturas en SU Drive y compartirla (editor) con hostalfacil@gmail.com; poner en Render
+   `FACTURAS_DRIVE_RAIZ_ALC` (id de la carpeta), `PUENTE_URL` (URL `/exec` del Apps Script «Puente HostalFácil», cuenta hostalfacil) y `PUENTE_SECRETO`
+   (el mismo valor que la propiedad `SECRETO` del script).
+2. Probar con una factura real (PDF con texto y foto de un tique) y comprobar carpeta, nombre del archivo y hoja «Registro de facturas».
+3. **Fase 2:** sustituir en `_informe_financiero` los costes estimados por los de las facturas; revisión periódica de la carpeta del Drive (el Drive manda)
+   y reparto por propiedad.
+4. Portarlo al monorepo `hostalfacil/plataforma` (la conversación de migración lo tendrá que incluir).
 
 ## Fuente de ideas
 `C:\Users\monis.HPIKU\Downloads\Contabilidad_Web_v15_8.html`: herramienta personal de Adrián que concilia extractos bancarios
