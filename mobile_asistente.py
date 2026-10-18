@@ -36,7 +36,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import requests
 
-from config import GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
+from config import GROQ_API_KEY, GROQ_API_KEY_INTERNA, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
 from routes.acceso import ErrorCodigos, redactar_codigos, _EMAIL as EMAIL_VALIDO
 from services.beds24 import buscar_booking_por_id
 from services.email_send import es_email_relay_ota
@@ -81,6 +81,11 @@ PAISES = {"ES": "España", "FR": "Francia", "DE": "Alemania", "GB": "Reino Unido
           "TR": "Turquía", "IL": "Israel", "HU": "Hungría", "GR": "Grecia", "LT": "Lituania", "LV": "Letonia", "EE": "Estonia"}
 
 _cache = {}   # property_id -> {"t": epoch, "reservas": [...], "canceladas": [...], "incompleto": bool}
+
+
+def clave_groq():
+    """Clave de Groq del asistente: la cuenta interna (GROQ_API_KEY_INTERNA) y, si no está definida, la general."""
+    return GROQ_API_KEY_INTERNA or GROQ_API_KEY
 
 
 class ErrorHerramienta(Exception):
@@ -758,9 +763,11 @@ HERRAMIENTAS = {"preparar_correo_codigos": _t_preparar_correo_codigos, "listar_r
                 "cancelaciones": _t_cancelaciones, "agenda": _t_agenda, "partes": _t_partes, "disponibilidad": _t_disponibilidad,
                 "parte_huesped": _t_parte_huesped, "retraso_rpv": _t_retraso_rpv, "finanzas_mes": _t_finanzas_mes}
 
-_PROP = {"type": "string", "enum": ["hostal", "primavera"], "description": "hostal = Hostal ALC Homes San Blas; primavera = La Casa de la Primavera"}
-_PROP_OPC = {"type": "string", "enum": ["hostal", "primavera"], "description": "Si se omite, las dos propiedades"}
-_FECHA = {"type": "string", "description": "Fecha ISO YYYY-MM-DD"}
+# Descripciones mínimas: este esquema se reenvía al modelo en CADA ronda y Groq limita los tokens por minuto (las fechas son YYYY-MM-DD y
+# las propiedades «hostal»/«primavera»: ya lo explica el prompt del sistema).
+_PROP = {"type": "string", "enum": ["hostal", "primavera"]}
+_PROP_OPC = {"type": "string", "enum": ["hostal", "primavera"], "description": "Por defecto, las dos"}
+_FECHA = {"type": "string"}
 _AGRUPAR = {"type": "string", "enum": list(AGRUPACIONES)}
 
 
@@ -783,13 +790,12 @@ TOOLS = [
         ["propiedad"]),
     _herramienta(
         "resumen",
-        "Cifras de un periodo: reservas, noches, estancia media, antelación media de la reserva (días), ocupación %, noches libres, ingresos brutos/comisiones/netos, precio medio por noche y RevPAR. "
-        "Agrupadas por canal, habitación, tipo de habitación, mes, país de procedencia del huésped o en total.",
+        "Cifras de un periodo (reservas, noches, estancia y antelación medias, ocupación %, noches libres, ingresos, comisiones, precio medio, RevPAR) agrupadas por canal, habitación, tipo, mes, país o en total.",
         {"propiedad": _PROP, "desde": _FECHA, "hasta": _FECHA, "agrupar_por": _AGRUPAR},
         ["propiedad", "desde", "hasta", "agrupar_por"]),
     _herramienta(
         "grafico",
-        "Dibuja un gráfico en la app calculando él mismo los datos (no pases números). tarta = proporciones (solo métricas que suman: reservas, noches, ingresos, comisiones); barras = comparar grupos; linea = evolución por mes.",
+        "Dibuja un gráfico (los datos los calcula él; no pases números). tarta = proporciones (solo métricas sumables); barras = comparar grupos; linea = evolución por mes.",
         {"tipo": {"type": "string", "enum": ["tarta", "barras", "linea"]}, "titulo": {"type": "string", "description": "Título corto del gráfico"},
          "propiedad": _PROP, "desde": _FECHA, "hasta": _FECHA,
          "agrupar_por": {"type": "string", "enum": ["canal", "habitacion", "tipo_habitacion", "mes", "pais"]},
@@ -797,7 +803,7 @@ TOOLS = [
         ["tipo", "titulo", "propiedad", "desde", "hasta", "agrupar_por", "metrica"]),
     _herramienta(
         "comparar",
-        "Compara dos periodos (p. ej. este mes con el mismo mes del año pasado, o dos canales entre sí por periodo) y calcula las diferencias y variaciones %. Usa esto en vez de restar tú.",
+        "Compara dos periodos y calcula diferencias y variaciones %. Úsala en vez de restar tú.",
         {"propiedad": _PROP, "desde_a": _FECHA, "hasta_a": _FECHA, "desde_b": _FECHA, "hasta_b": _FECHA,
          "agrupar_por": {"type": "string", "enum": ["total", "canal", "habitacion", "tipo_habitacion", "pais"]}},
         ["propiedad", "desde_a", "hasta_a", "desde_b", "hasta_b"]),
@@ -815,8 +821,7 @@ TOOLS = [
         {"propiedad": _PROP_OPC, "desde": _FECHA, "hasta": _FECHA, "solo_pendientes": {"type": "boolean", "description": "Solo las llegadas cuyo parte aún no está recibido"}}, []),
     _herramienta(
         "parte_huesped",
-        "Para cuando un huésped llama porque no puede hacer el parte de viajeros (o preguntan por él): busca su reserva por nombre, comprueba si ya está en RPV y dice qué decirle "
-        "(«pruebe de nuevo dentro de X»). `que_decir_al_huesped` es la respuesta lista para repetir por teléfono.",
+        "Un huésped no puede hacer el parte de viajeros: busca su reserva por nombre, mira si ya está en RPV y da qué decirle (`que_decir_al_huesped`, lista para repetir por teléfono).",
         {"huesped": {"type": "string", "description": "Nombre o apellido del huésped"}, "propiedad": _PROP_OPC}, ["huesped"]),
     _herramienta(
         "retraso_rpv",
@@ -833,9 +838,8 @@ TOOLS = [
         {"propiedad": _PROP, "mes": {"type": "string", "description": "YYYY-MM"}}, ["propiedad", "mes"]),
     _herramienta(
         "preparar_correo_codigos",
-        "EMERGENCIAS (solo administrador): prepara el BORRADOR del correo con los códigos de acceso (portal y habitación, o urbanización y cajetín en Primavera) de una reserva. "
-        "No envía nada: la app muestra el borrador con un botón «Enviar» que pulsa el usuario. Necesita el número de reserva de Beds24 (campo numero_reserva de listar_reservas o agenda), "
-        "el correo del destinatario y el idioma.",
+        "EMERGENCIAS (admin): prepara el BORRADOR del correo con los códigos de acceso de una reserva. No envía nada: la app lo muestra con un botón «Enviar» que pulsa el usuario. "
+        "Necesita numero_reserva (de listar_reservas o agenda), el correo del destinatario y el idioma.",
         {"reserva": {"type": "string", "description": "Número de reserva de Beds24"},
          "email": {"type": "string", "description": "Correo del destinatario, tal como lo ha dado el usuario"},
          "idioma": {"type": "string", "enum": ["es", "en"], "description": "Idioma del correo (por defecto en)"}},
@@ -892,7 +896,7 @@ def _system(ctx):
     hostal = ", ".join(h["nombre"] for h in _habitaciones(mr.PROPERTY_ID))
     return f"""Eres el asistente de la app de gestión de ALC Homes. Ayudas al personal y a la propiedad a entender sus reservas, ocupación y finanzas, y puedes dibujar gráficos. Hoy es {DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}.
 
-Propiedades: «hostal» (Hostal ALC Homes San Blas, habitaciones: {hostal}) y «primavera» (La Casa de la Primavera, una vivienda completa que se alquila entera).
+Propiedades: «hostal» (Hostal ALC Homes San Blas, habitaciones: {hostal}) y «primavera» (La Casa de la Primavera, una vivienda completa que se alquila entera). Las fechas de las herramientas van en formato YYYY-MM-DD.
 
 Reglas:
 1. Todas las cifras, fechas y nombres salen de las herramientas: nunca calcules de cabeza ni inventes. Si no hay datos, dilo.
@@ -933,7 +937,7 @@ def _llamar_groq(messages, deadline, con_herramientas, ctx=None):
             if con_herramientas:
                 cuerpo["tools"] = herramientas_para(ctx or {})
                 cuerpo["tool_choice"] = "auto"
-            resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {clave_groq()}", "Content-Type": "application/json"},
                                  json=cuerpo, timeout=min(30, restante))
             if _herramienta_mal_formada(resp):
                 logger.warning(f"[asistente] {modelo} generó una llamada a herramienta mal formada, se reintenta")

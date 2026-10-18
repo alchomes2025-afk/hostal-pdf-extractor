@@ -29,8 +29,7 @@ from services.fechas import hoy_madrid
 from flask import Blueprint, request, jsonify, Response
 import re
 
-from config import GROQ_API_KEY
-from mobile_asistente import ErrorHerramienta, borrador_codigos, responder as asistente_responder
+from mobile_asistente import ErrorHerramienta, borrador_codigos, clave_groq, responder as asistente_responder
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
 
@@ -1871,7 +1870,7 @@ def mobile_assistant():
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
-    if not GROQ_API_KEY:
+    if not clave_groq():
         return jsonify({"ok": False, "error": "GROQ_API_KEY no configurada en Render"}), 500
 
     data = request.get_json(force=True) or {}

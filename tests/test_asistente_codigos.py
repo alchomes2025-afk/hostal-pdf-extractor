@@ -146,6 +146,28 @@ class Conversacion(Base):
         red.assert_not_called()
 
 
+class ClaveGroq(unittest.TestCase):
+    """El asistente usa la cuenta de Groq interna si existe; si no, la general (la que atiende a los huéspedes)."""
+    def test_interna_si_existe(self):
+        with mock.patch.object(asistente, "GROQ_API_KEY_INTERNA", "interna"), mock.patch.object(asistente, "GROQ_API_KEY", "general"):
+            self.assertEqual(asistente.clave_groq(), "interna")
+
+    def test_sin_interna_usa_la_general(self):
+        with mock.patch.object(asistente, "GROQ_API_KEY_INTERNA", ""), mock.patch.object(asistente, "GROQ_API_KEY", "general"):
+            self.assertEqual(asistente.clave_groq(), "general")
+
+    def test_la_llamada_a_groq_lleva_la_clave_interna(self):
+        visto = {}
+
+        def post(url, headers=None, json=None, timeout=None):
+            visto.update(headers)
+            return mock.Mock(status_code=200, text="", json=lambda: {"choices": [{"message": {"content": "hola"}}]})
+        with mock.patch.object(asistente, "GROQ_API_KEY_INTERNA", "interna"), mock.patch.object(asistente.requests, "post", post),              mock.patch.object(asistente, "_habitaciones", return_value=[]), mock.patch.object(asistente, "_mr"):
+            res, _ = asistente.responder([{"role": "user", "content": "hola"}], NORMAL)
+        self.assertTrue(res["ok"])
+        self.assertEqual(visto["Authorization"], "Bearer interna")
+
+
 class BotonEnviar(Base):
     PIN, PIN_ADMIN = "1111", "9999"
 

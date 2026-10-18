@@ -118,6 +118,9 @@ RPV_API_KEY_MAP = {
 }
 
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
+# Cuenta de Groq SEPARADA para el uso interno (asistente de la app de gestión y pruebas): así el personal y el desarrollo no gastan
+# el cupo por minuto de la cuenta que atiende a los huéspedes (chat de la web de check-in). Sin definir, el asistente usa GROQ_API_KEY.
+GROQ_API_KEY_INTERNA = os.environ.get("GROQ_API_KEY_INTERNA", "")
 GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL_PRI  = "openai/gpt-oss-120b"
 GROQ_MODEL_FALL = "openai/gpt-oss-20b"
