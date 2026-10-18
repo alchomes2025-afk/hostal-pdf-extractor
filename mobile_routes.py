@@ -29,8 +29,7 @@ from services.fechas import hoy_madrid
 from flask import Blueprint, request, jsonify, Response
 import re
 
-from config import GROQ_API_KEY
-from mobile_asistente import responder as asistente_responder
+from mobile_asistente import ErrorHerramienta, borrador_codigos, clave_groq, responder as asistente_responder
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
 
@@ -1871,7 +1870,7 @@ def mobile_assistant():
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
-    if not GROQ_API_KEY:
+    if not clave_groq():
         return jsonify({"ok": False, "error": "GROQ_API_KEY no configurada en Render"}), 500
 
     data = request.get_json(force=True) or {}
@@ -1882,6 +1881,77 @@ def mobile_assistant():
         finanzas = True
     resultado, status = asistente_responder(mensajes, {"es_admin": _es_pin_admin(), "finanzas": finanzas})
     return jsonify(resultado), status
+
+
+def _autorizar_codigos(data):
+    """Quién puede preparar y enviar el correo de códigos del asistente: el PIN de administrador, o el PIN normal de la app MÁS el PIN de
+    seguridad (config.PIN_ENVIO_CODIGOS, campo `pin_envio`). Tras 5 PIN de seguridad incorrectos se bloquea una hora (para todos los que
+    no son administrador). Devuelve None si puede, o (respuesta, status) si no."""
+    import hmac
+    from config import PIN_ENVIO_CODIGOS
+    from services.limites import anotar, cantidad
+    if _es_pin_admin():
+        return None
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    if cantidad("asistente-pin-envio-fallos", 3600) >= 5:
+        return jsonify({"ok": False, "error": "Demasiados intentos con el PIN de seguridad: espera una hora o pídeselo al administrador"}), 429
+    recibido = str(data.get("pin_envio") or "")
+    if not PIN_ENVIO_CODIGOS or not hmac.compare_digest(recibido.encode(), PIN_ENVIO_CODIGOS.encode()):
+        anotar("asistente-pin-envio-fallos")
+        return jsonify({"ok": False, "error": "PIN de seguridad incorrecto"}), 403
+    return None
+
+
+@mobile_bp.route("/assistant/preparar-codigos", methods=["POST"])
+def mobile_assistant_preparar_codigos():
+    """
+    Segundo paso del correo de códigos para quien NO es administrador: comprueba el PIN de seguridad y, solo entonces, consulta la reserva y
+    devuelve el borrador completo (con los códigos). Cuerpo: {"reserva", "email", "idioma", "pin_envio"}. Ver `_autorizar_codigos`.
+    """
+    data = request.get_json(silent=True) or {}
+    fallo = _autorizar_codigos(data)
+    if fallo:
+        return fallo
+    try:
+        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"))
+    except ErrorHerramienta as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, "borrador": borrador})
+
+
+@mobile_bp.route("/assistant/enviar-codigos", methods=["POST"])
+def mobile_assistant_enviar_codigos():
+    """
+    Envía el correo de emergencia con los códigos de acceso de una reserva. Es el botón «Enviar» bajo el borrador que
+    prepara el asistente (herramienta preparar_correo_codigos): el modelo nunca envía nada por sí mismo.
+
+    Con el PIN de administrador, o con el PIN normal de la app MÁS el PIN de seguridad (`pin_envio`, ver `_autorizar_codigos`).
+    Cuerpo: {"reserva": "<nº Beds24>", "email": "...", "idioma": "es"|"en", "pin_envio": "..."}.
+    El correo se vuelve a redactar aquí con los mismos datos, así que lo enviado es lo mostrado. Máx. 10 al día.
+    """
+    from services.email_send import enviar_email
+    from services.limites import permitir
+    data = request.get_json(silent=True) or {}
+    fallo = _autorizar_codigos(data)
+    if fallo:
+        return fallo
+    if not permitir([("asistente-codigos-dia", 10, 86400)]):
+        return jsonify({"ok": False, "error": "Demasiados envíos hoy: espera o envíalo a mano"}), 429
+    try:
+        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"))
+    except ErrorHerramienta as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    try:
+        enviar_email(to=borrador["email"], subject=borrador["asunto"], body=borrador["cuerpo"])
+    except Exception as e:
+        logger.error(f"[asistente] No se pudo enviar el correo de códigos: {e}")
+        return jsonify({"ok": False, "error": "No se pudo enviar el correo. Inténtalo de nuevo."}), 502
+    log_action(str(data.get("userName") or "Admin"), str(data.get("deviceId") or ""), "enviar_codigos_correo",
+               {"reserva": borrador["reserva"], "habitacion": borrador["habitacion"], "idioma": borrador["idioma"],
+                "con": "pin_admin" if _es_pin_admin() else "pin_envio"})
+    logger.info(f"[asistente] Códigos enviados por correo (reserva {borrador['reserva']}, idioma {borrador['idioma']})")
+    return jsonify({"ok": True})
 
 
 @mobile_bp.route("/all-data", methods=["GET"])

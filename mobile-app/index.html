@@ -243,6 +243,18 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 #as-send:disabled{opacity:.5}
 .as-chart{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;align-self:stretch}
 .as-chart-title{font-weight:800;font-size:12.5px;margin-bottom:10px}
+.as-draft{background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);padding:12px;align-self:stretch;font-size:12.5px}
+.as-draft-head{font-weight:800;margin-bottom:6px}
+.as-draft-meta{color:#8a7690;margin-bottom:2px;overflow-wrap:anywhere}
+.as-draft-body{white-space:pre-wrap;overflow-wrap:anywhere;background:#fdf1f8;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin:8px 0;max-height:220px;overflow:auto}
+.as-draft-pinrow{display:flex;gap:8px;margin-bottom:8px}
+.as-draft-pin{flex:1;min-width:0;box-sizing:border-box;padding:9px 10px;border-radius:10px;border:1.5px solid var(--border);font-size:14px}
+.as-draft-eye{padding:0 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-size:12.5px;font-weight:700;white-space:nowrap}
+.as-draft-btns{display:flex;gap:8px}
+.as-draft-btns button{flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:13px}
+.as-draft-btns button.send{background:var(--bk2);color:#fff;border-color:var(--bk2)}
+.as-draft-btns button:disabled{opacity:.55}
+.as-draft-state{margin-top:8px;font-weight:700}
 .as-legend{display:flex;flex-direction:column;gap:5px;margin-top:10px;font-size:12px}
 .as-legend-row{display:flex;align-items:center;gap:7px}
 .as-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0}
@@ -2172,6 +2184,110 @@ function asChart(spec) {
   return card;
 }
 
+// Correo con los códigos de acceso (herramienta del asistente). NO se envía solo: solo el botón «Enviar» lo manda. Con PIN de administrador llega
+// ya el borrador; sin él llega primero una solicitud del PIN de seguridad (asPinRequest) y el borrador solo se enseña si el servidor lo acepta.
+function asDraft(b, pinSeguridad) {
+  const card = document.createElement("div");
+  card.className = "as-draft";
+  const add = (cls, text) => { const el = document.createElement("div"); el.className = cls; el.textContent = text; card.appendChild(el); return el; };
+  add("as-draft-head", "✉️ Borrador — sin enviar");
+  add("as-draft-meta", "Para: " + b.email);
+  add("as-draft-meta", "Asunto: " + b.asunto);
+  add("as-draft-meta", [b.habitacion, b.huesped, b.llegada && b.salida ? `${b.llegada} → ${b.salida}` : ""].filter(Boolean).join(" · "));
+  add("as-draft-body", b.cuerpo);
+  const btns = document.createElement("div");
+  btns.className = "as-draft-btns";
+  const send = document.createElement("button");
+  send.type = "button"; send.className = "send"; send.textContent = "Enviar";
+  const discard = document.createElement("button");
+  discard.type = "button"; discard.textContent = "Descartar";
+  btns.append(send, discard);
+  card.appendChild(btns);
+  const state = add("as-draft-state", "");
+  discard.addEventListener("click", () => { card.remove(); });
+  send.addEventListener("click", async () => {
+    send.disabled = discard.disabled = true;      // un solo envío por borrador
+    state.textContent = "Enviando…";
+    try {
+      const r = await fetch(`${API}/assistant/enviar-codigos`, {
+        method: "POST",
+        headers: {"x-app-pin": PIN, "content-type": "application/json"},
+        body: JSON.stringify({reserva: b.reserva, email: b.email, idioma: b.idioma, pin: PIN, pin_envio: pinSeguridad}),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        state.textContent = "✓ Enviado a " + b.email;
+        btns.remove();
+        AS_HISTORY.push({role: "assistant", content: `(El usuario ha pulsado Enviar: el correo de códigos de la reserva ${b.reserva} se envió a ${b.email}.)`});
+      } else {
+        state.textContent = "No se envió: " + (d.error || "error");
+        send.disabled = discard.disabled = false;
+      }
+    } catch (e) {
+      state.textContent = "No se envió (error de conexión). Comprueba antes de reintentar.";
+      send.disabled = discard.disabled = false;
+    }
+  });
+  return card;
+}
+
+// Cuadro «Introduce el PIN de seguridad»: se valida en el servidor y el PIN nunca pasa por el chat ni por el modelo.
+function asPinRequest(s) {
+  const card = document.createElement("div");
+  card.className = "as-draft";
+  const head = document.createElement("div");
+  head.className = "as-draft-head";
+  head.textContent = "🔒 Introduce el PIN de seguridad";
+  const input = document.createElement("input");
+  input.type = "text"; input.inputMode = "numeric"; input.autocomplete = "off"; input.placeholder = "PIN de seguridad";   // visible; el botón de al lado lo oculta
+  input.className = "as-draft-pin";
+  const fila = document.createElement("div");
+  fila.className = "as-draft-pinrow";
+  const ojo = document.createElement("button");
+  ojo.type = "button"; ojo.className = "as-draft-eye"; ojo.textContent = "🙈 Ocultar"; ojo.title = "Mostrar u ocultar el PIN";
+  ojo.addEventListener("click", () => {
+    const oculto = input.type === "password";
+    input.type = oculto ? "text" : "password";
+    ojo.textContent = oculto ? "🙈 Ocultar" : "👁 Mostrar";
+  });
+  fila.append(input, ojo);
+  const btns = document.createElement("div");
+  btns.className = "as-draft-btns";
+  const go = document.createElement("button");
+  go.type = "button"; go.className = "send"; go.textContent = "Continuar";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.textContent = "Cancelar";
+  btns.append(go, cancel);
+  const state = document.createElement("div");
+  state.className = "as-draft-state";
+  card.append(head, fila, btns, state);
+  cancel.addEventListener("click", () => { card.remove(); });
+  const continuar = async () => {
+    const pin = input.value.trim();
+    if (!pin) { state.textContent = "Introduce el PIN."; input.focus(); return; }
+    go.disabled = cancel.disabled = true;
+    state.textContent = "Comprobando…";
+    try {
+      const r = await fetch(`${API}/assistant/preparar-codigos`, {
+        method: "POST",
+        headers: {"x-app-pin": PIN, "content-type": "application/json"},
+        body: JSON.stringify({reserva: s.reserva, email: s.email, idioma: s.idioma, pin: PIN, pin_envio: pin}),
+      });
+      const d = await r.json();
+      if (d.ok) { card.replaceWith(asDraft(d.borrador, pin)); $("#as-messages").scrollTop = $("#as-messages").scrollHeight; return; }
+      state.textContent = d.error || "No se pudo preparar el borrador.";
+    } catch (e) {
+      state.textContent = "Error de conexión, inténtalo de nuevo.";
+    }
+    go.disabled = cancel.disabled = false;
+    input.value = ""; input.focus();
+  };
+  go.addEventListener("click", continuar);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); continuar(); } });
+  setTimeout(() => input.focus(), 50);
+  return card;
+}
+
 async function sendAsistente() {
   if (AS_BUSY) return;
   const input = $("#as-input");
@@ -2196,6 +2312,7 @@ async function sendAsistente() {
       AS_HISTORY.push({role: "assistant", content: d.respuesta});
       asAppend("bot", d.respuesta);
       (d.graficos || []).forEach(g => { $("#as-messages").appendChild(asChart(g)); });
+      (d.borradores || []).forEach(b => { $("#as-messages").appendChild(b.solicitud_pin ? asPinRequest(b) : asDraft(b)); });
       $("#as-messages").scrollTop = $("#as-messages").scrollHeight;
     } else {
       fallo = d.error || "No se pudo responder.";

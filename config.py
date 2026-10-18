@@ -118,6 +118,12 @@ RPV_API_KEY_MAP = {
 }
 
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
+# Cuenta de Groq SEPARADA para el uso interno (asistente de la app de gestión y pruebas): así el personal y el desarrollo no gastan
+# el cupo por minuto de la cuenta que atiende a los huéspedes (chat de la web de check-in). Sin definir, el asistente usa GROQ_API_KEY.
+GROQ_API_KEY_INTERNA = os.environ.get("GROQ_API_KEY_INTERNA", "")
+# PIN que teclea el personal SIN PIN de administrador para enviar desde el asistente el correo con los códigos de acceso (el administrador
+# no lo necesita y el asistente se lo da si lo pide). Se puede cambiar con la variable de entorno de Render.
+PIN_ENVIO_CODIGOS = os.environ.get("PIN_ENVIO_CODIGOS", "1432")
 GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL_PRI  = "openai/gpt-oss-120b"
 GROQ_MODEL_FALL = "openai/gpt-oss-20b"
@@ -149,6 +155,8 @@ CHECKIN_LINK_SECRET = os.environ.get("CHECKIN_LINK_SECRET", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 AVISOS_EMAIL       = os.environ.get("AVISOS_EMAIL", "")
+# Nombre del cliente que sale en la cabecera de los avisos por Telegram y correo («📍 HostalFácil · ALC Homes · …»).
+AVISOS_CLIENTE     = os.environ.get("AVISOS_CLIENTE", "ALC Homes")
 
 # ── Puente de la plataforma (HostalFácil): Drive y correo de los avisos ───────
 # Un Apps Script de la cuenta de la PLATAFORMA (hostalfacil@gmail.com) publicado como aplicación web (puente_hostalfacil.js).

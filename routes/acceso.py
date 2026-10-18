@@ -16,9 +16,10 @@ import re
 
 from flask import Blueprint, jsonify, request
 
-from services.acceso_correos import correo_enlace, correo_no_localizada
+from config import API_TOKEN, ROOM_CONFIG, TEST_TOKEN
+from services.acceso_correos import correo_codigos, correo_enlace, correo_no_localizada
 from services.acceso_enlace import IDIOMAS, habilitado, url_checkin
-from services.beds24 import buscar_booking_por_nombre, buscar_booking_por_ref
+from services.beds24 import buscar_booking_por_id, buscar_booking_por_nombre, buscar_booking_por_ref
 from services.email_send import enviar_email, es_email_relay_ota
 from services.limites import ip_cliente, permitir
 
@@ -67,4 +68,64 @@ def solicitar_acceso():
         logger.error(f"[acceso] No se pudo enviar el correo: {e}")
         return jsonify({"ok": False, "error": "no_enviado"}), 502
     logger.info(f"[acceso] Solicitud atendida (reserva {'encontrada' if booking else 'no encontrada'}, idioma {idioma})")
+    return jsonify({"ok": True})
+
+
+CODIGO_PORTAL = "130773"   # puerta de la calle del hostal; el mismo que muestra la web de check-in
+CODIGO_URBANIZACION = "2308"   # urbanización Costa Hispania (La Casa de la Primavera); el mismo que muestra la web de check-in
+ROOM_ID_PRIMAVERA = "720841"
+
+
+class ErrorCodigos(Exception):
+    """No se puede redactar el correo de códigos: `codigo` es el error que ve el cliente, `status` el HTTP."""
+    def __init__(self, codigo, status):
+        super().__init__(codigo)
+        self.codigo, self.status = codigo, status
+
+
+def redactar_codigos(booking, idioma):
+    """(asunto, cuerpo, nombre de la habitación) del correo de emergencia con los códigos de acceso de esa reserva.
+    La usan POST /enviar-codigos y el asistente de la app (borrador + botón de confirmar)."""
+    cfg = ROOM_CONFIG.get(str(booking.get("roomId", "")), {})
+    if not cfg.get("pin"):
+        raise ErrorCodigos("habitacion_sin_codigo", 409)
+    primavera = str(booking.get("roomId", "")) == ROOM_ID_PRIMAVERA   # urbanización + cajetín de llaves, sin portal del hostal
+    asunto, cuerpo = correo_codigos(idioma, url_checkin(booking.get("id"), idioma), cfg.get("nombre", ""), cfg["pin"],
+                                    codigo_portal=None if primavera else CODIGO_PORTAL,
+                                    codigo_urbanizacion=CODIGO_URBANIZACION if primavera else None)
+    return asunto, cuerpo, cfg.get("nombre", "")
+
+
+@acceso_bp.route("/enviar-codigos", methods=["POST"])
+def enviar_codigos():
+    """
+    Administración: envía por correo los códigos de acceso (portal + habitación) de UNA reserva concreta. Para
+    huéspedes que no pueden usar la web (p. ej. reservas sin mensajería de plataforma).
+
+    POST /enviar-codigos  { "token": "<admin>", "book_id": 94362309, "email": "...", "idioma": "en" }
+    """
+    data = request.get_json(silent=True) or {}
+    if str(data.get("token") or "") not in [t for t in (API_TOKEN, TEST_TOKEN) if t]:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    email = str(data.get("email") or "").strip()
+    if len(email) > 254 or not _EMAIL.fullmatch(email):
+        return jsonify({"ok": False, "error": "email_no_valido"}), 400
+    idioma = "es" if data.get("idioma") == "es" else "en"
+    try:
+        booking = buscar_booking_por_id(data.get("book_id"))
+    except Exception as e:
+        logger.error(f"[acceso] Error buscando la reserva para enviar códigos: {e}")
+        return jsonify({"ok": False, "error": "error_interno"}), 500
+    if not booking:
+        return jsonify({"ok": False, "error": "reserva_no_encontrada"}), 404
+    try:
+        asunto, cuerpo, _habitacion = redactar_codigos(booking, idioma)
+    except ErrorCodigos as e:
+        return jsonify({"ok": False, "error": e.codigo}), e.status
+    try:
+        enviar_email(to=email, subject=asunto, body=cuerpo)
+    except Exception as e:
+        logger.error(f"[acceso] No se pudieron enviar los códigos: {e}")
+        return jsonify({"ok": False, "error": "no_enviado"}), 502
+    logger.info(f"[acceso] Códigos enviados (reserva {booking.get('id')}, idioma {idioma})")
     return jsonify({"ok": True})

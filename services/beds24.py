@@ -710,6 +710,12 @@ def obtener_bookings_rango_beds24(fecha_desde_iso, fecha_hasta_iso, tipo="checki
                 "modificada": b.get("modifiedTime"),
                 "status": b.get("status"),
                 "master_id": b.get("masterId"),
+                "referer": b.get("referer"),
+                "api_reference": b.get("apiReference"),
+                "nombre_huesped": {"nombre": guest.get("firstName") or b.get("firstName") or "",
+                                   "apellidos": guest.get("lastName") or b.get("lastName") or ""},
+                "telefono": guest.get("phone") or b.get("phone"),
+                "movil": guest.get("mobile") or b.get("mobile"),
             })
 
     return resultado
