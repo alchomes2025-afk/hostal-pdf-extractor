@@ -179,31 +179,26 @@ class Conversacion(Base):
 
 
 class ClaveGroq(unittest.TestCase):
-    """Cada parte usa su cuenta de Groq: gestión (asistente y facturas) ≠ huéspedes ≠ interna de HostalFácil."""
-    def _claves(self, gestion="", interna="", general=""):
-        return (mock.patch.object(groq_claves, "GROQ_API_KEY_GESTION", gestion), mock.patch.object(groq_claves, "GROQ_API_KEY_INTERNA", interna),
-                mock.patch.object(groq_claves, "GROQ_API_KEY", general))
-
-    def _con(self, **claves):
-        ps = self._claves(**claves)
-        for p in ps:
+    """Cada parte usa su cuenta de Groq: gestión (asistente y facturas) ≠ huéspedes (la interna de HostalFácil no existe en el backend)."""
+    def _con(self, gestion="", general=""):
+        for p in (mock.patch.object(groq_claves, "GROQ_API_KEY_GESTION", gestion), mock.patch.object(groq_claves, "GROQ_API_KEY", general)):
             p.start()
             self.addCleanup(p.stop)
 
     def test_gestion_manda(self):
-        self._con(gestion="gestion", interna="interna", general="huespedes")
+        self._con(gestion="gestion", general="huespedes")
         self.assertEqual(asistente.clave_groq(), "gestion")
 
-    def test_respaldo_temporal_sin_gestion_usa_la_interna_y_nunca_antes_la_de_huespedes(self):
-        self._con(interna="interna", general="huespedes")
-        self.assertEqual(asistente.clave_groq(), "interna")
-
-    def test_ultimo_recurso_la_general(self):
+    def test_sin_gestion_cae_a_la_de_huespedes_para_no_dejar_sin_servicio(self):
         self._con(general="huespedes")
         self.assertEqual(asistente.clave_groq(), "huespedes")
 
+    def test_el_backend_no_conoce_la_cuenta_interna(self):
+        import config
+        self.assertFalse(hasattr(config, "GROQ_API_KEY_INTERNA"))
+
     def test_la_llamada_a_groq_lleva_la_clave_de_gestion(self):
-        self._con(gestion="gestion", interna="interna", general="huespedes")
+        self._con(gestion="gestion", general="huespedes")
         visto = {}
 
         def post(url, headers=None, json=None, timeout=None):
