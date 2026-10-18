@@ -1883,30 +1883,59 @@ def mobile_assistant():
     return jsonify(resultado), status
 
 
+def _autorizar_codigos(data):
+    """Quién puede preparar y enviar el correo de códigos del asistente: el PIN de administrador, o el PIN normal de la app MÁS el PIN de
+    seguridad (config.PIN_ENVIO_CODIGOS, campo `pin_envio`). Tras 5 PIN de seguridad incorrectos se bloquea una hora (para todos los que
+    no son administrador). Devuelve None si puede, o (respuesta, status) si no."""
+    import hmac
+    from config import PIN_ENVIO_CODIGOS
+    from services.limites import anotar, cantidad
+    if _es_pin_admin():
+        return None
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    if cantidad("asistente-pin-envio-fallos", 3600) >= 5:
+        return jsonify({"ok": False, "error": "Demasiados intentos con el PIN de seguridad: espera una hora o pídeselo al administrador"}), 429
+    recibido = str(data.get("pin_envio") or "")
+    if not PIN_ENVIO_CODIGOS or not hmac.compare_digest(recibido.encode(), PIN_ENVIO_CODIGOS.encode()):
+        anotar("asistente-pin-envio-fallos")
+        return jsonify({"ok": False, "error": "PIN de seguridad incorrecto"}), 403
+    return None
+
+
+@mobile_bp.route("/assistant/preparar-codigos", methods=["POST"])
+def mobile_assistant_preparar_codigos():
+    """
+    Segundo paso del correo de códigos para quien NO es administrador: comprueba el PIN de seguridad y, solo entonces, consulta la reserva y
+    devuelve el borrador completo (con los códigos). Cuerpo: {"reserva", "email", "idioma", "pin_envio"}. Ver `_autorizar_codigos`.
+    """
+    data = request.get_json(silent=True) or {}
+    fallo = _autorizar_codigos(data)
+    if fallo:
+        return fallo
+    try:
+        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"))
+    except ErrorHerramienta as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    return jsonify({"ok": True, "borrador": borrador})
+
+
 @mobile_bp.route("/assistant/enviar-codigos", methods=["POST"])
 def mobile_assistant_enviar_codigos():
     """
     Envía el correo de emergencia con los códigos de acceso de una reserva. Es el botón «Enviar» bajo el borrador que
     prepara el asistente (herramienta preparar_correo_codigos): el modelo nunca envía nada por sí mismo.
 
-    Con el PIN de administrador, o con el PIN normal de la app MÁS el PIN de envío (config.PIN_ENVIO_CODIGOS, campo `pin_envio`).
-    Tras 5 PIN de envío incorrectos se bloquea una hora. Cuerpo: {"reserva": "<nº Beds24>", "email": "...", "idioma": "es"|"en", "pin_envio": "..."}.
+    Con el PIN de administrador, o con el PIN normal de la app MÁS el PIN de seguridad (`pin_envio`, ver `_autorizar_codigos`).
+    Cuerpo: {"reserva": "<nº Beds24>", "email": "...", "idioma": "es"|"en", "pin_envio": "..."}.
     El correo se vuelve a redactar aquí con los mismos datos, así que lo enviado es lo mostrado. Máx. 10 al día.
     """
-    import hmac
-    from config import PIN_ENVIO_CODIGOS
     from services.email_send import enviar_email
-    from services.limites import anotar, cantidad, permitir
+    from services.limites import permitir
     data = request.get_json(silent=True) or {}
-    if not _es_pin_admin():
-        if not check_pin():
-            return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
-        if cantidad("asistente-pin-envio-fallos", 3600) >= 5:
-            return jsonify({"ok": False, "error": "Demasiados intentos con el PIN de envío: espera una hora o pídeselo al administrador"}), 429
-        recibido = str(data.get("pin_envio") or "")
-        if not PIN_ENVIO_CODIGOS or not hmac.compare_digest(recibido.encode(), PIN_ENVIO_CODIGOS.encode()):
-            anotar("asistente-pin-envio-fallos")
-            return jsonify({"ok": False, "error": "PIN de envío incorrecto"}), 403
+    fallo = _autorizar_codigos(data)
+    if fallo:
+        return fallo
     if not permitir([("asistente-codigos-dia", 10, 86400)]):
         return jsonify({"ok": False, "error": "Demasiados envíos hoy: espera o envíalo a mano"}), 429
     try:

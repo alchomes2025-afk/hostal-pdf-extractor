@@ -61,15 +61,21 @@ class Herramienta(Base):
         self.assertIn("2308", cuerpo)
         self.assertNotIn("130773", cuerpo)
 
-    def test_sin_pin_admin_el_borrador_no_ensena_los_codigos_y_pide_pin(self):
+    def test_sin_pin_admin_primero_se_pide_el_pin_y_no_se_elabora_borrador(self):
         res, ctx = self._preparar(NORMAL)
-        self.assertTrue(res["borrador_preparado"])
+        self.assertTrue(res["pin_solicitado"])
+        self.assertNotIn("borrador_preparado", res)
         (b,) = ctx["borradores"]
-        self.assertIsNone(b["cuerpo"])                      # los códigos no se muestran al personal sin PIN de administrador
-        self.assertTrue(b["requiere_pin"])
-        self.assertNotIn("213456", json.dumps(res))         # ni el modelo ni la respuesta los llevan
-        self.assertNotIn("1432", json.dumps(res))           # y el modelo no recibe el PIN de envío
-        self.assertIn("No le pidas el PIN por el chat", res["nota"])
+        self.assertEqual(b, {"solicitud_pin": True, "reserva": "5", "email": "huesped@gmail.com", "idioma": "es"})
+        asistente.buscar_booking_por_id.assert_not_called()       # ni siquiera se consulta la reserva antes del PIN
+        self.assertNotIn("213456", json.dumps(res))               # ni el modelo ni la respuesta llevan los códigos
+        self.assertNotIn("1432", json.dumps(res))                 # y el modelo no recibe el PIN
+        self.assertIn("Introduce el PIN de seguridad", res["nota"])
+
+    def test_sin_pin_admin_tambien_se_validan_los_datos(self):
+        res, ctx = self._preparar(NORMAL, email="mal")
+        self.assertIn("no es válido", res["error"])
+        self.assertEqual(ctx["borradores"], [])
 
     def test_el_admin_obtiene_el_pin_de_envio_y_el_resto_no(self):
         res = asistente.ejecutar_herramienta("pin_envio_codigos", "{}", _ctx(ADMIN))
@@ -115,11 +121,11 @@ class ReglaSiete(Base):
         self.assertIn("preparar_correo_codigos", texto)
         self.assertIn("nunca digas que lo has enviado", texto)
 
-    def test_resto_envia_con_pin_de_envio(self):
+    def test_resto_envia_con_pin_de_seguridad(self):
         texto = self._system(NORMAL)
         self.assertIn("7. Solo lees datos", texto)
         self.assertIn("preparar_correo_codigos", texto)
-        self.assertIn("PIN de envío", texto)
+        self.assertIn("«Introduce el PIN de seguridad.»", texto)
         self.assertNotIn("pin_envio_codigos", texto)        # no sabe cómo conseguir el PIN
         self.assertNotIn("1432", texto)
 
@@ -157,12 +163,12 @@ class Conversacion(Base):
         red.assert_not_called()
         self.assertIn("preparar_correo_codigos", [t["function"]["name"] for t in enviados[0]["tools"]])
 
-    def test_sin_pin_admin_el_borrador_llega_sin_codigos_y_con_pin_de_envio(self):
+    def test_sin_pin_admin_llega_la_solicitud_del_pin_y_no_un_borrador(self):
         res, status, enviados, red = self._responder(NORMAL)
         self.assertEqual(status, 200)
         (b,) = res["borradores"]
-        self.assertIsNone(b["cuerpo"])
-        self.assertTrue(b["requiere_pin"])
+        self.assertTrue(b["solicitud_pin"])
+        self.assertNotIn("cuerpo", b)
         nombres = [t["function"]["name"] for t in enviados[0]["tools"]]
         self.assertIn("preparar_correo_codigos", nombres)
         self.assertNotIn("pin_envio_codigos", nombres)
@@ -239,6 +245,37 @@ class BotonEnviar(Base):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(self.enviar.call_count, 1)
         self.assertEqual(mobile_routes.log_action.call_args.args[3]["con"], "pin_envio")
+
+    def _preparar_codigos(self, pin, **extra):
+        cuerpo = {"reserva": "5", "email": "huesped@gmail.com", "idioma": "es", **extra}
+        return self.cliente.post("/mobile/assistant/preparar-codigos", json=cuerpo, headers={"x-app-pin": pin} if pin else {})
+
+    def test_preparar_codigos_solo_devuelve_el_borrador_con_el_pin_de_seguridad(self):
+        self.assertEqual(self._preparar_codigos(None, pin_envio="1432").status_code, 401)
+        for extra in ({}, {"pin_envio": "0000"}, {"pin_envio": self.PIN_ADMIN}):
+            r = self._preparar_codigos(self.PIN, **extra)
+            self.assertEqual(r.status_code, 403)
+            self.assertNotIn("213456", r.get_data(as_text=True))                       # nada de códigos con un PIN malo
+        asistente.buscar_booking_por_id.assert_not_called()
+        r = self._preparar_codigos(self.PIN, pin_envio="1432")
+        self.assertEqual(r.status_code, 200)
+        b = r.get_json()["borrador"]
+        self.assertIn("213456", b["cuerpo"])
+        self.assertEqual(b["email"], "huesped@gmail.com")
+        self.enviar.assert_not_called()                                                # preparar nunca envía
+
+    def test_preparar_codigos_el_admin_no_necesita_pin_de_seguridad(self):
+        self.assertEqual(self._preparar_codigos(self.PIN_ADMIN).status_code, 200)
+
+    def test_preparar_codigos_datos_malos(self):
+        self.assertEqual(self._preparar_codigos(self.PIN, pin_envio="1432", email="mal").status_code, 400)
+
+    def test_los_fallos_de_preparar_y_de_enviar_cuentan_juntos(self):
+        for _ in range(3):
+            self._preparar_codigos(self.PIN, pin_envio="0000")
+        for _ in range(2):
+            self._post(self.PIN, pin_envio="0000")
+        self.assertEqual(self._preparar_codigos(self.PIN, pin_envio="1432").status_code, 429)
 
     def test_cinco_pin_de_envio_incorrectos_bloquean(self):
         for _ in range(5):

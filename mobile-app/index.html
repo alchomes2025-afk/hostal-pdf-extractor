@@ -2182,8 +2182,9 @@ function asChart(spec) {
   return card;
 }
 
-// Borrador de correo con los códigos de acceso (herramienta del asistente, solo admin): NO se envía solo; solo este botón lo manda.
-function asDraft(b) {
+// Correo con los códigos de acceso (herramienta del asistente). NO se envía solo: solo el botón «Enviar» lo manda. Con PIN de administrador llega
+// ya el borrador; sin él llega primero una solicitud del PIN de seguridad (asPinRequest) y el borrador solo se enseña si el servidor lo acepta.
+function asDraft(b, pinSeguridad) {
   const card = document.createElement("div");
   card.className = "as-draft";
   const add = (cls, text) => { const el = document.createElement("div"); el.className = cls; el.textContent = text; card.appendChild(el); return el; };
@@ -2191,14 +2192,7 @@ function asDraft(b) {
   add("as-draft-meta", "Para: " + b.email);
   add("as-draft-meta", "Asunto: " + b.asunto);
   add("as-draft-meta", [b.habitacion, b.huesped, b.llegada && b.salida ? `${b.llegada} → ${b.salida}` : ""].filter(Boolean).join(" · "));
-  add("as-draft-body", b.cuerpo != null ? b.cuerpo : `El correo llevará los códigos de acceso de ${b.habitacion || "la habitación"} (no se muestran). Teclea el PIN de envío para mandarlo.`);
-  let pinEnvio = null;
-  if (b.requiere_pin) {
-    pinEnvio = document.createElement("input");
-    pinEnvio.type = "password"; pinEnvio.inputMode = "numeric"; pinEnvio.autocomplete = "off"; pinEnvio.placeholder = "PIN de envío";
-    pinEnvio.className = "as-draft-pin";
-    card.appendChild(pinEnvio);
-  }
+  add("as-draft-body", b.cuerpo);
   const btns = document.createElement("div");
   btns.className = "as-draft-btns";
   const send = document.createElement("button");
@@ -2210,14 +2204,13 @@ function asDraft(b) {
   const state = add("as-draft-state", "");
   discard.addEventListener("click", () => { card.remove(); });
   send.addEventListener("click", async () => {
-    if (pinEnvio && !pinEnvio.value.trim()) { state.textContent = "Teclea el PIN de envío."; pinEnvio.focus(); return; }
     send.disabled = discard.disabled = true;      // un solo envío por borrador
     state.textContent = "Enviando…";
     try {
       const r = await fetch(`${API}/assistant/enviar-codigos`, {
         method: "POST",
         headers: {"x-app-pin": PIN, "content-type": "application/json"},
-        body: JSON.stringify({reserva: b.reserva, email: b.email, idioma: b.idioma, pin: PIN, pin_envio: pinEnvio ? pinEnvio.value.trim() : undefined}),
+        body: JSON.stringify({reserva: b.reserva, email: b.email, idioma: b.idioma, pin: PIN, pin_envio: pinSeguridad}),
       });
       const d = await r.json();
       if (d.ok) {
@@ -2233,6 +2226,53 @@ function asDraft(b) {
       send.disabled = discard.disabled = false;
     }
   });
+  return card;
+}
+
+// Cuadro «Introduce el PIN de seguridad»: se valida en el servidor y el PIN nunca pasa por el chat ni por el modelo.
+function asPinRequest(s) {
+  const card = document.createElement("div");
+  card.className = "as-draft";
+  const head = document.createElement("div");
+  head.className = "as-draft-head";
+  head.textContent = "🔒 Introduce el PIN de seguridad";
+  const input = document.createElement("input");
+  input.type = "password"; input.inputMode = "numeric"; input.autocomplete = "off"; input.placeholder = "PIN de seguridad";
+  input.className = "as-draft-pin";
+  const btns = document.createElement("div");
+  btns.className = "as-draft-btns";
+  const go = document.createElement("button");
+  go.type = "button"; go.className = "send"; go.textContent = "Continuar";
+  const cancel = document.createElement("button");
+  cancel.type = "button"; cancel.textContent = "Cancelar";
+  btns.append(go, cancel);
+  const state = document.createElement("div");
+  state.className = "as-draft-state";
+  card.append(head, input, btns, state);
+  cancel.addEventListener("click", () => { card.remove(); });
+  const continuar = async () => {
+    const pin = input.value.trim();
+    if (!pin) { state.textContent = "Introduce el PIN."; input.focus(); return; }
+    go.disabled = cancel.disabled = true;
+    state.textContent = "Comprobando…";
+    try {
+      const r = await fetch(`${API}/assistant/preparar-codigos`, {
+        method: "POST",
+        headers: {"x-app-pin": PIN, "content-type": "application/json"},
+        body: JSON.stringify({reserva: s.reserva, email: s.email, idioma: s.idioma, pin: PIN, pin_envio: pin}),
+      });
+      const d = await r.json();
+      if (d.ok) { card.replaceWith(asDraft(d.borrador, pin)); $("#as-messages").scrollTop = $("#as-messages").scrollHeight; return; }
+      state.textContent = d.error || "No se pudo preparar el borrador.";
+    } catch (e) {
+      state.textContent = "Error de conexión, inténtalo de nuevo.";
+    }
+    go.disabled = cancel.disabled = false;
+    input.value = ""; input.focus();
+  };
+  go.addEventListener("click", continuar);
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); continuar(); } });
+  setTimeout(() => input.focus(), 50);
   return card;
 }
 
@@ -2260,7 +2300,7 @@ async function sendAsistente() {
       AS_HISTORY.push({role: "assistant", content: d.respuesta});
       asAppend("bot", d.respuesta);
       (d.graficos || []).forEach(g => { $("#as-messages").appendChild(asChart(g)); });
-      (d.borradores || []).forEach(b => { $("#as-messages").appendChild(asDraft(b)); });
+      (d.borradores || []).forEach(b => { $("#as-messages").appendChild(b.solicitud_pin ? asPinRequest(b) : asDraft(b)); });
       $("#as-messages").scrollTop = $("#as-messages").scrollHeight;
     } else {
       fallo = d.error || "No se pudo responder.";
