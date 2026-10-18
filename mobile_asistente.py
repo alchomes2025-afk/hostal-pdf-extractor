@@ -36,7 +36,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import requests
 
-from config import GROQ_API_KEY, GROQ_API_KEY_INTERNA, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
+from config import GROQ_API_KEY, GROQ_API_KEY_INTERNA, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, PIN_ENVIO_CODIGOS
 from routes.acceso import ErrorCodigos, redactar_codigos, _EMAIL as EMAIL_VALIDO
 from services.beds24 import buscar_booking_por_id
 from services.email_send import es_email_relay_ota
@@ -57,7 +57,7 @@ MAX_MENSAJES = 12         # mensajes de la conversación que se envían al model
 MAX_CHARS_MENSAJE = 1500
 MAX_GRAFICOS = 3
 MAX_BORRADORES = 2
-HERRAMIENTAS_SOLO_ADMIN = ('preparar_correo_codigos',)
+HERRAMIENTAS_SOLO_ADMIN = ('pin_envio_codigos',)
 MAX_LISTADO = 25
 
 DIAS_SEMANA = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -268,8 +268,7 @@ def _t_listar_reservas(a, ctx):
                 "habitacion": r["habitacion"], "huesped": r["huesped"], "canal": r["canal"]}
         if dinero:
             fila["precio_eur"] = round(r["bruto"], 2)
-        if ctx.get("es_admin"):
-            fila["numero_reserva"] = r["id"]
+        fila["numero_reserva"] = r["id"]
         filas.append(fila)
     resultado = {"total_coinciden": len(elegidas), "mostrando": len(filas), "reservas": filas}
     if not dinero:
@@ -545,10 +544,10 @@ def _t_agenda(a, ctx):
         resultado[clave] = {
             "llegadas": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "canal": r["canal"], "noches": r["noches"],
                           "sale": r["checkout"].isoformat(), "parte": _parte(r, fecha, estados, sin_verificar, hoy),
-                          **({"numero_reserva": r["id"]} if ctx.get("es_admin") else {})} for r in llegadas[:MAX_AGENDA]],
+                          "numero_reserva": r["id"]} for r in llegadas[:MAX_AGENDA]],
             "salidas": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "canal": r["canal"]} for r in salidas[:MAX_AGENDA]],
             "se_quedan": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "sale": r["checkout"].isoformat(),
-                           **({"numero_reserva": r["id"]} if ctx.get("es_admin") else {})} for r in se_quedan[:MAX_AGENDA]],
+                           "numero_reserva": r["id"]} for r in se_quedan[:MAX_AGENDA]],
             "habitaciones_ocupadas_esa_noche": len(llegadas) + len(se_quedan),
             "habitaciones_en_total": len(_habitaciones(property_id)),
         }
@@ -748,18 +747,29 @@ def borrador_codigos(reserva, email, idioma):
 
 
 def _t_preparar_correo_codigos(a, ctx):
-    if not ctx.get("es_admin"):
-        raise ErrorHerramienta("Enviar los códigos de acceso requiere el PIN de administrador")
     if len(ctx["borradores"]) >= MAX_BORRADORES:
         raise ErrorHerramienta(f"Ya hay {MAX_BORRADORES} borradores en esta respuesta: que el usuario los envíe o los descarte antes de preparar más")
     borrador = borrador_codigos(a.get("reserva"), a.get("email"), a.get("idioma"))
-    ctx["borradores"].append(borrador)
+    if ctx.get("es_admin"):
+        ctx["borradores"].append(borrador)
+        nota = "NO se ha enviado nada. El borrador aparece en la app con un botón «Enviar»: dile al usuario que lo revise y lo pulse."
+    else:   # sin PIN de administrador no se enseñan los códigos y para enviar hay que teclear el PIN de envío en la tarjeta
+        ctx["borradores"].append({**borrador, "cuerpo": None, "requiere_pin": True})
+        nota = ("NO se ha enviado nada. La app muestra la tarjeta del borrador (sin los códigos) con un campo para el PIN de envío y un botón «Enviar»: "
+                "dile que teclee ahí el PIN y lo pulse. No le pidas el PIN por el chat ni lo menciones: tú no lo conoces.")
     return {"borrador_preparado": True, "para": borrador["email"], "huesped": borrador["huesped"], "habitacion": borrador["habitacion"],
-            "llegada": borrador["llegada"], "salida": borrador["salida"], "idioma": borrador["idioma"],
-            "nota": "NO se ha enviado nada. El borrador aparece en la app con un botón «Enviar»: dile al usuario que lo revise y lo pulse."}
+            "llegada": borrador["llegada"], "salida": borrador["salida"], "idioma": borrador["idioma"], "nota": nota}
 
 
-HERRAMIENTAS = {"preparar_correo_codigos": _t_preparar_correo_codigos, "listar_reservas": _t_listar_reservas, "resumen": _t_resumen, "grafico": _t_grafico, "comparar": _t_comparar,
+def _t_pin_envio_codigos(a, ctx):
+    """El PIN con el que el personal sin PIN de administrador envía los correos de códigos. Solo se da al administrador."""
+    if not ctx.get("es_admin"):
+        raise ErrorHerramienta("Solo el administrador puede conocer el PIN de envío de códigos")
+    return {"pin_envio_codigos": PIN_ENVIO_CODIGOS,
+            "nota": "Díselo solo a este usuario administrador, porque lo ha pedido. Es el PIN que debe teclear el resto del personal en la tarjeta del borrador."}
+
+
+HERRAMIENTAS = {"preparar_correo_codigos": _t_preparar_correo_codigos, "pin_envio_codigos": _t_pin_envio_codigos, "listar_reservas": _t_listar_reservas, "resumen": _t_resumen, "grafico": _t_grafico, "comparar": _t_comparar,
                 "cancelaciones": _t_cancelaciones, "agenda": _t_agenda, "partes": _t_partes, "disponibilidad": _t_disponibilidad,
                 "parte_huesped": _t_parte_huesped, "retraso_rpv": _t_retraso_rpv, "finanzas_mes": _t_finanzas_mes}
 
@@ -838,12 +848,16 @@ TOOLS = [
         {"propiedad": _PROP, "mes": {"type": "string", "description": "YYYY-MM"}}, ["propiedad", "mes"]),
     _herramienta(
         "preparar_correo_codigos",
-        "EMERGENCIAS (admin): prepara el BORRADOR del correo con los códigos de acceso de una reserva. No envía nada: la app lo muestra con un botón «Enviar» que pulsa el usuario. "
+        "EMERGENCIAS: prepara el BORRADOR del correo con los códigos de acceso de una reserva. No envía nada: la app lo muestra con un botón «Enviar» que pulsa el usuario. "
         "Necesita numero_reserva (de listar_reservas o agenda), el correo del destinatario y el idioma.",
         {"reserva": {"type": "string", "description": "Número de reserva de Beds24"},
          "email": {"type": "string", "description": "Correo del destinatario, tal como lo ha dado el usuario"},
          "idioma": {"type": "string", "enum": ["es", "en"], "description": "Idioma del correo (por defecto en)"}},
         ["reserva", "email"]),
+    _herramienta(
+        "pin_envio_codigos",
+        "Solo administrador: da el PIN de envío que teclea el resto del personal para enviar los correos de códigos. Úsala solo si el usuario pide ese PIN.",
+        {}, []),
 ]
 
 
@@ -889,10 +903,13 @@ def _system(ctx):
         regla7 = ("7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app. "
                   "ÚNICA excepción: preparar_correo_codigos, que NO envía nada: deja un borrador del correo de emergencia con los códigos de acceso y la app lo muestra con un botón «Enviar» que pulsa el usuario; "
                   "tú nunca envías correos y nunca digas que lo has enviado. Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario "
-                  "y el idioma (es o en): si falta algo, haz UNA pregunta corta. Después dile en una frase que revise el borrador y pulse «Enviar».")
+                  "y el idioma (es o en): si falta algo, haz UNA pregunta corta. Después dile en una frase que revise el borrador y pulse «Enviar». "
+                  "El resto del personal (sin PIN de administrador) también puede enviarlos, pero tecleando en la tarjeta un PIN de envío: si el usuario te pide ese PIN, dáselo con pin_envio_codigos; si no lo pide, no lo menciones.")
     else:
         regla7 = ("7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app. "
-                  "Tampoco puedes enviar correos con los códigos de acceso: eso requiere el PIN de administrador.")
+                  "ÚNICA excepción: preparar_correo_codigos, que NO envía nada: deja un borrador del correo de emergencia con los códigos de acceso (la app lo muestra con un botón «Enviar» y un campo para el PIN de envío que teclea el usuario); "
+                  "tú nunca envías correos, no conoces ese PIN, nunca lo pidas por el chat y si te lo preguntan di que se lo dé el administrador. Úsala solo si el usuario lo pide; antes necesitas el número de reserva "
+                  "(de listar_reservas o agenda), el correo del destinatario y el idioma (es o en): si falta algo, haz UNA pregunta corta. Después dile en una frase que teclee el PIN y pulse «Enviar».")
     hostal = ", ".join(h["nombre"] for h in _habitaciones(mr.PROPERTY_ID))
     return f"""Eres el asistente de la app de gestión de ALC Homes. Ayudas al personal y a la propiedad a entender sus reservas, ocupación y finanzas, y puedes dibujar gráficos. Hoy es {DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}.
 

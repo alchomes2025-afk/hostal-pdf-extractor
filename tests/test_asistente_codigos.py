@@ -61,11 +61,22 @@ class Herramienta(Base):
         self.assertIn("2308", cuerpo)
         self.assertNotIn("130773", cuerpo)
 
-    def test_sin_pin_admin_no_hay_borrador(self):
+    def test_sin_pin_admin_el_borrador_no_ensena_los_codigos_y_pide_pin(self):
         res, ctx = self._preparar(NORMAL)
-        self.assertIn("PIN de administrador", res["error"])
-        self.assertEqual(ctx["borradores"], [])
-        asistente.buscar_booking_por_id.assert_not_called()
+        self.assertTrue(res["borrador_preparado"])
+        (b,) = ctx["borradores"]
+        self.assertIsNone(b["cuerpo"])                      # los códigos no se muestran al personal sin PIN de administrador
+        self.assertTrue(b["requiere_pin"])
+        self.assertNotIn("213456", json.dumps(res))         # ni el modelo ni la respuesta los llevan
+        self.assertNotIn("1432", json.dumps(res))           # y el modelo no recibe el PIN de envío
+        self.assertIn("No le pidas el PIN por el chat", res["nota"])
+
+    def test_el_admin_obtiene_el_pin_de_envio_y_el_resto_no(self):
+        res = asistente.ejecutar_herramienta("pin_envio_codigos", "{}", _ctx(ADMIN))
+        self.assertEqual(res["pin_envio_codigos"], "1432")
+        res = asistente.ejecutar_herramienta("pin_envio_codigos", "{}", _ctx(NORMAL))
+        self.assertIn("error", res)
+        self.assertNotIn("1432", json.dumps(res))
 
     def test_validaciones(self):
         for args, texto in (({"reserva": "abc"}, "número de reserva"), ({"email": "no-es-un-correo"}, "no es válido"),
@@ -85,11 +96,12 @@ class Herramienta(Base):
             self.assertTrue(asistente.ejecutar_herramienta("preparar_correo_codigos", args, ctx)["borrador_preparado"])
         self.assertIn("borradores", asistente.ejecutar_herramienta("preparar_correo_codigos", args, ctx)["error"])
 
-    def test_la_herramienta_solo_existe_para_admin(self):
+    def test_herramientas_segun_el_pin(self):
         nombres = lambda ctx: [t["function"]["name"] for t in asistente.herramientas_para(ctx)]
         self.assertIn("preparar_correo_codigos", nombres(ADMIN))
-        self.assertNotIn("preparar_correo_codigos", nombres(NORMAL))
-        self.assertIn("listar_reservas", nombres(NORMAL))
+        self.assertIn("preparar_correo_codigos", nombres(NORMAL))       # el borrador lo puede preparar cualquiera...
+        self.assertIn("pin_envio_codigos", nombres(ADMIN))              # ...pero solo el administrador puede pedir el PIN de envío
+        self.assertNotIn("pin_envio_codigos", nombres(NORMAL))
 
 
 class ReglaSiete(Base):
@@ -103,11 +115,18 @@ class ReglaSiete(Base):
         self.assertIn("preparar_correo_codigos", texto)
         self.assertIn("nunca digas que lo has enviado", texto)
 
-    def test_resto_no_puede(self):
+    def test_resto_envia_con_pin_de_envio(self):
         texto = self._system(NORMAL)
         self.assertIn("7. Solo lees datos", texto)
-        self.assertNotIn("preparar_correo_codigos", texto)
-        self.assertIn("requiere el PIN de administrador", texto)
+        self.assertIn("preparar_correo_codigos", texto)
+        self.assertIn("PIN de envío", texto)
+        self.assertNotIn("pin_envio_codigos", texto)        # no sabe cómo conseguir el PIN
+        self.assertNotIn("1432", texto)
+
+    def test_admin_puede_dar_el_pin(self):
+        texto = self._system(ADMIN)
+        self.assertIn("pin_envio_codigos", texto)
+        self.assertNotIn("1432", texto)                     # el PIN no va en el prompt: sale de la herramienta
 
 
 class Conversacion(Base):
@@ -138,11 +157,18 @@ class Conversacion(Base):
         red.assert_not_called()
         self.assertIn("preparar_correo_codigos", [t["function"]["name"] for t in enviados[0]["tools"]])
 
-    def test_sin_pin_admin_el_modelo_ni_ve_la_herramienta_ni_obtiene_borrador(self):
+    def test_sin_pin_admin_el_borrador_llega_sin_codigos_y_con_pin_de_envio(self):
         res, status, enviados, red = self._responder(NORMAL)
-        self.assertEqual(res["borradores"], [])
-        self.assertNotIn("preparar_correo_codigos", [t["function"]["name"] for t in enviados[0]["tools"]])
-        self.assertIn("PIN de administrador", enviados[1]["messages"][-1]["content"])   # el resultado de la herramienta es un error
+        self.assertEqual(status, 200)
+        (b,) = res["borradores"]
+        self.assertIsNone(b["cuerpo"])
+        self.assertTrue(b["requiere_pin"])
+        nombres = [t["function"]["name"] for t in enviados[0]["tools"]]
+        self.assertIn("preparar_correo_codigos", nombres)
+        self.assertNotIn("pin_envio_codigos", nombres)
+        for peticion in enviados:                            # lo que se manda a Groq no lleva ni los códigos ni el PIN de envío
+            self.assertNotIn("213456", json.dumps(peticion))
+            self.assertNotIn("1432", json.dumps(peticion))
         red.assert_not_called()
 
 
@@ -199,10 +225,27 @@ class BotonEnviar(Base):
         self.assertEqual((kw["to"], kw["subject"], kw["body"]), (borrador["email"], borrador["asunto"], borrador["cuerpo"]))
         mobile_routes.log_action.assert_called_once()
 
-    def test_pin_normal_o_sin_pin_no_envia(self):
-        for pin in (self.PIN, "0000", None):
-            self.assertEqual(self._post(pin).status_code, 401)
+    def test_sin_pin_de_la_app_no_envia(self):
+        for pin in ("0000", None):
+            self.assertEqual(self._post(pin, pin_envio="1432").status_code, 401)
         self.enviar.assert_not_called()
+
+    def test_pin_normal_exige_el_pin_de_envio(self):
+        self.assertEqual(self._post(self.PIN).status_code, 403)                       # sin PIN de envío
+        self.assertEqual(self._post(self.PIN, pin_envio="0000").status_code, 403)      # PIN de envío incorrecto
+        self.assertEqual(self._post(self.PIN, pin_envio=self.PIN_ADMIN).status_code, 403)   # el PIN de administrador no vale como PIN de envío
+        self.enviar.assert_not_called()
+        r = self._post(self.PIN, pin_envio="1432")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.enviar.call_count, 1)
+        self.assertEqual(mobile_routes.log_action.call_args.args[3]["con"], "pin_envio")
+
+    def test_cinco_pin_de_envio_incorrectos_bloquean(self):
+        for _ in range(5):
+            self.assertEqual(self._post(self.PIN, pin_envio="0000").status_code, 403)
+        self.assertEqual(self._post(self.PIN, pin_envio="1432").status_code, 429)     # ni el correcto pasa durante el bloqueo
+        self.enviar.assert_not_called()
+        self.assertEqual(self._post(self.PIN_ADMIN).status_code, 200)                  # el administrador no se ve afectado
 
     def test_datos_malos_no_envian(self):
         self.assertEqual(self._post(self.PIN_ADMIN, email="mal").status_code, 400)

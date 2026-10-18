@@ -1889,14 +1889,24 @@ def mobile_assistant_enviar_codigos():
     Envía el correo de emergencia con los códigos de acceso de una reserva. Es el botón «Enviar» bajo el borrador que
     prepara el asistente (herramienta preparar_correo_codigos): el modelo nunca envía nada por sí mismo.
 
-    Solo con el PIN de administrador. Cuerpo: {"reserva": "<nº Beds24>", "email": "...", "idioma": "es"|"en"}.
+    Con el PIN de administrador, o con el PIN normal de la app MÁS el PIN de envío (config.PIN_ENVIO_CODIGOS, campo `pin_envio`).
+    Tras 5 PIN de envío incorrectos se bloquea una hora. Cuerpo: {"reserva": "<nº Beds24>", "email": "...", "idioma": "es"|"en", "pin_envio": "..."}.
     El correo se vuelve a redactar aquí con los mismos datos, así que lo enviado es lo mostrado. Máx. 10 al día.
     """
-    if not _es_pin_admin():
-        return jsonify({"ok": False, "error": "Solo con el PIN de administrador"}), 401
+    import hmac
+    from config import PIN_ENVIO_CODIGOS
     from services.email_send import enviar_email
-    from services.limites import permitir
+    from services.limites import anotar, cantidad, permitir
     data = request.get_json(silent=True) or {}
+    if not _es_pin_admin():
+        if not check_pin():
+            return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+        if cantidad("asistente-pin-envio-fallos", 3600) >= 5:
+            return jsonify({"ok": False, "error": "Demasiados intentos con el PIN de envío: espera una hora o pídeselo al administrador"}), 429
+        recibido = str(data.get("pin_envio") or "")
+        if not PIN_ENVIO_CODIGOS or not hmac.compare_digest(recibido.encode(), PIN_ENVIO_CODIGOS.encode()):
+            anotar("asistente-pin-envio-fallos")
+            return jsonify({"ok": False, "error": "PIN de envío incorrecto"}), 403
     if not permitir([("asistente-codigos-dia", 10, 86400)]):
         return jsonify({"ok": False, "error": "Demasiados envíos hoy: espera o envíalo a mano"}), 429
     try:
@@ -1909,7 +1919,8 @@ def mobile_assistant_enviar_codigos():
         logger.error(f"[asistente] No se pudo enviar el correo de códigos: {e}")
         return jsonify({"ok": False, "error": "No se pudo enviar el correo. Inténtalo de nuevo."}), 502
     log_action(str(data.get("userName") or "Admin"), str(data.get("deviceId") or ""), "enviar_codigos_correo",
-               {"reserva": borrador["reserva"], "habitacion": borrador["habitacion"], "idioma": borrador["idioma"]})
+               {"reserva": borrador["reserva"], "habitacion": borrador["habitacion"], "idioma": borrador["idioma"],
+                "con": "pin_admin" if _es_pin_admin() else "pin_envio"})
     logger.info(f"[asistente] Códigos enviados por correo (reserva {borrador['reserva']}, idioma {borrador['idioma']})")
     return jsonify({"ok": True})
 

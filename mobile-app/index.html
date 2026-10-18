@@ -247,6 +247,7 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .as-draft-head{font-weight:800;margin-bottom:6px}
 .as-draft-meta{color:#8a7690;margin-bottom:2px;overflow-wrap:anywhere}
 .as-draft-body{white-space:pre-wrap;overflow-wrap:anywhere;background:#fdf1f8;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin:8px 0;max-height:220px;overflow:auto}
+.as-draft-pin{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:10px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px}
 .as-draft-btns{display:flex;gap:8px}
 .as-draft-btns button{flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:13px}
 .as-draft-btns button.send{background:var(--bk2);color:#fff;border-color:var(--bk2)}
@@ -2190,7 +2191,14 @@ function asDraft(b) {
   add("as-draft-meta", "Para: " + b.email);
   add("as-draft-meta", "Asunto: " + b.asunto);
   add("as-draft-meta", [b.habitacion, b.huesped, b.llegada && b.salida ? `${b.llegada} → ${b.salida}` : ""].filter(Boolean).join(" · "));
-  add("as-draft-body", b.cuerpo);
+  add("as-draft-body", b.cuerpo != null ? b.cuerpo : `El correo llevará los códigos de acceso de ${b.habitacion || "la habitación"} (no se muestran). Teclea el PIN de envío para mandarlo.`);
+  let pinEnvio = null;
+  if (b.requiere_pin) {
+    pinEnvio = document.createElement("input");
+    pinEnvio.type = "password"; pinEnvio.inputMode = "numeric"; pinEnvio.autocomplete = "off"; pinEnvio.placeholder = "PIN de envío";
+    pinEnvio.className = "as-draft-pin";
+    card.appendChild(pinEnvio);
+  }
   const btns = document.createElement("div");
   btns.className = "as-draft-btns";
   const send = document.createElement("button");
@@ -2202,13 +2210,14 @@ function asDraft(b) {
   const state = add("as-draft-state", "");
   discard.addEventListener("click", () => { card.remove(); });
   send.addEventListener("click", async () => {
+    if (pinEnvio && !pinEnvio.value.trim()) { state.textContent = "Teclea el PIN de envío."; pinEnvio.focus(); return; }
     send.disabled = discard.disabled = true;      // un solo envío por borrador
     state.textContent = "Enviando…";
     try {
       const r = await fetch(`${API}/assistant/enviar-codigos`, {
         method: "POST",
         headers: {"x-app-pin": PIN, "content-type": "application/json"},
-        body: JSON.stringify({reserva: b.reserva, email: b.email, idioma: b.idioma, pin: PIN}),
+        body: JSON.stringify({reserva: b.reserva, email: b.email, idioma: b.idioma, pin: PIN, pin_envio: pinEnvio ? pinEnvio.value.trim() : undefined}),
       });
       const d = await r.json();
       if (d.ok) {

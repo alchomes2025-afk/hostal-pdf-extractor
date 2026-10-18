@@ -35,6 +35,22 @@ def permitir(reglas, ahora=None):
     return True
 
 
+def cantidad(clave, ventana, ahora=None):
+    """Eventos anotados con esa clave en los últimos `ventana` segundos (no anota nada)."""
+    ahora = time.time() if ahora is None else ahora
+    cola = _eventos.get(clave)
+    if not cola:
+        return 0
+    while cola and ahora - cola[0] > ventana:
+        cola.popleft()
+    return len(cola)
+
+
+def anotar(clave, ahora=None):
+    """Anota un evento con esa clave (p. ej. un intento fallido) sin comprobar ningún máximo."""
+    _eventos.setdefault(clave, deque()).append(time.time() if ahora is None else ahora)
+
+
 def ip_cliente():
     """IP del cliente según X-Forwarded-For (Render va detrás de un proxy); la primera de la lista."""
     primera = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
