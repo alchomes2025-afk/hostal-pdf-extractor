@@ -52,6 +52,15 @@ def anotar(clave, ahora=None):
 
 
 def ip_cliente():
-    """IP del cliente según X-Forwarded-For (Render va detrás de un proxy); la primera de la lista."""
-    primera = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    return primera or request.remote_addr or "desconocida"
+    """
+    IP del visitante para los límites. Revisión de seguridad 2026-10-18: el proxy de Render AÑADE a X-Forwarded-For en
+    vez de reemplazarlo, así que el PRIMER valor lo pone quien llama y cambiándolo en cada petición se saltaba el límite.
+    Se prefiere la cabecera que fija Cloudflare (CF-Connecting-IP / True-Client-IP); si no viene, la ÚLTIMA de
+    X-Forwarded-For (la añadida por el proxy).
+    """
+    for cabecera in ("CF-Connecting-IP", "True-Client-IP"):
+        valor = request.headers.get(cabecera, "").strip()
+        if valor:
+            return valor
+    adelantada = [x.strip() for x in request.headers.get("X-Forwarded-For", "").split(",") if x.strip()]
+    return adelantada[-1] if adelantada else (request.remote_addr or "desconocida")

@@ -537,3 +537,15 @@ def diag_contacto():
                 continue
             reservas.append(fila)
     return jsonify({"ok": True, "total": len(reservas), "reservas": reservas, "crudas": crudas, "errores": errores}), 200
+
+
+@debug_bp.route("/diag-ip", methods=["GET"])
+def diag_ip():
+    """Diagnóstico de solo lectura: qué cabeceras de IP llegan realmente a través de Render y cuál usa el límite de
+    peticiones (services/limites.py::ip_cliente). Uso: /diag-ip?token=<TOKEN>"""
+    from services.limites import ip_cliente
+    if request.args.get("token", "") not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    nombres = ("CF-Connecting-IP", "True-Client-IP", "X-Forwarded-For", "X-Real-IP")
+    return jsonify({"ok": True, "ip_usada": ip_cliente(), "remote_addr": request.remote_addr,
+                    "cabeceras": {n: request.headers.get(n) for n in nombres}}), 200

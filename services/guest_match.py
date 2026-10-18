@@ -16,6 +16,8 @@ import json
 import logging
 import re
 import unicodedata
+from difflib import SequenceMatcher
+
 import requests
 
 from config import GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI, GROQ_MODEL_FALL
@@ -31,13 +33,44 @@ def normalizar_nombre(texto):
     return set(w for w in t.split() if w)
 
 
+PALABRAS_MINIMAS = 2   # palabras que deben coincidir (o el nombre entero, si la reserva solo tiene una)
+PALABRAS_DE_MAS = 1    # palabras de la consulta que pueden no estar en la reserva (p. ej. un segundo apellido)
+
+
+def _coincide(query_tokens, cand):
+    """Revisión de seguridad 2026-10-18: antes bastaba que la consulta estuviera CONTENIDA en el nombre (o al revés), así
+    que escribir solo «Yuka» abría la reserva de la única Yuka alojada y mostraba su código de puerta. Ahora hacen falta
+    al menos DOS palabras en común (o el nombre entero si la reserva solo tiene una) y como mucho UNA palabra de más en
+    la consulta. Tolera orden, acentos y un apellido de más o de menos; no erratas."""
+    if not query_tokens or not cand:
+        return False
+    return len(query_tokens & cand) >= min(PALABRAS_MINIMAS, len(cand)) and len(query_tokens - cand) <= PALABRAS_DE_MAS
+
+
 def _match_exacto(query_tokens, candidatos_tokens):
-    """Índices cuyo conjunto de palabras contiene o está contenido en el de
-    la consulta — tolera que falte o sobre un nombre/apellido, no erratas."""
-    return [
-        i for i, cand in enumerate(candidatos_tokens)
-        if cand and (query_tokens <= cand or cand <= query_tokens)
-    ]
+    """Índices de los candidatos que `_coincide` con la consulta."""
+    return [i for i, cand in enumerate(candidatos_tokens) if _coincide(query_tokens, cand)]
+
+
+def _parecidas(a, b):
+    return a == b or (min(len(a), len(b)) >= 3 and SequenceMatcher(None, a, b).ratio() >= 0.75)
+
+
+def _compatible(consulta, candidato):
+    """Guarda sobre la elección de Groq: lo escrito debe PARECERSE al nombre elegido aunque tenga erratas. Si no, se
+    descarta (el modelo puede equivocarse o ser engañado con el texto que escribe el huésped). Mismas reglas que
+    `_coincide`, comparando palabras parecidas en vez de iguales."""
+    q, c = normalizar_nombre(consulta), normalizar_nombre(candidato)
+    if not q or not c:
+        return False
+    usadas, sin_pareja = set(), 0
+    for palabra in q:
+        pareja = next((w for w in c if w not in usadas and _parecidas(palabra, w)), None)
+        if pareja is None:
+            sin_pareja += 1
+        else:
+            usadas.add(pareja)
+    return len(usadas) >= min(PALABRAS_MINIMAS, len(c)) and sin_pareja <= PALABRAS_DE_MAS
 
 
 def _desambiguar_con_groq(nombre_query, nombres_candidatos):
@@ -133,7 +166,9 @@ def emparejar_nombre(nombre_query, candidatos_con_nombre):
         return None, True
 
     idx = _desambiguar_con_groq(nombre_query, nombres)
-    if idx is not None:
+    if idx is not None and _compatible(nombre_query, nombres[idx]):
         return candidatos_con_nombre[idx][0], False
+    if idx is not None:
+        logger.warning(f"[guest_match] Groq eligió '{nombres[idx]}' para '{nombre_query}', que no se parece: se descarta")
 
     return None, True
