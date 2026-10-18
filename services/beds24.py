@@ -29,28 +29,32 @@ def get_beds24_access_token():
 
 # ── Helper: búsqueda recursiva del número de Booking.com ─────────────────
 
-def _ref_en_booking(obj, ref_norm, _path=""):
-    """
-    Busca ref_norm recursivamente en TODOS los campos del objeto de reserva
-    devuelto por Beds24.
+# Campos de la reserva donde Beds24 guarda el número de confirmación de la plataforma. Revisión de seguridad 2026-10-18:
+# antes se comparaba lo escrito con TODOS los campos, así que «Yuka» (firstName), «new» (status), «booking» (channel), «jp»
+# (país) o un id de habitación o de propiedad abrían la primera reserva que coincidiera y mostraban su código de puerta.
+CAMPOS_REFERENCIA = ("apiReference", "reference", "voucher", "externalId", "guestCode", "channelBookingId")
+LONGITUD_MINIMA_REF = 5
 
-    Beds24 almacena el número de confirmación de Booking.com en un campo
-    cuyo nombre exacto varía según versión de API (externalId, guestCode,
-    channelBookingId…). Esta búsqueda lo encuentra sea cual sea el campo.
+
+def _ref_en_booking(obj, ref_norm, _path="", _clave=""):
+    """
+    Busca ref_norm en los campos de referencia (CAMPOS_REFERENCIA) del objeto de reserva devuelto por Beds24, a cualquier
+    profundidad: el nombre del campo puede variar según versión de API o canal. Solo la igualdad exacta con el VALOR
+    de uno de esos campos cuenta; nombres, correos, teléfonos, estado, canal o ids internos nunca.
 
     Devuelve el path del campo donde se halló (útil para el log) o None.
     """
     if isinstance(obj, dict):
         for k, v in obj.items():
-            r = _ref_en_booking(v, ref_norm, f"{_path}.{k}" if _path else k)
+            r = _ref_en_booking(v, ref_norm, f"{_path}.{k}" if _path else k, k)
             if r is not None:
                 return r
     elif isinstance(obj, list):
         for i, item in enumerate(obj):
-            r = _ref_en_booking(item, ref_norm, f"{_path}[{i}]")
+            r = _ref_en_booking(item, ref_norm, f"{_path}[{i}]", _clave)
             if r is not None:
                 return r
-    elif obj is not None:
+    elif obj is not None and _clave in CAMPOS_REFERENCIA:
         if str(obj).strip().lower() == ref_norm:
             return _path or "raíz"
     return None
@@ -93,6 +97,8 @@ def buscar_booking_por_ref(booking_ref):
     hasta = (hoy + timedelta(days=180)).isoformat()
 
     ref_norm = booking_ref.strip().lower()
+    if len(ref_norm) < LONGITUD_MINIMA_REF:
+        return None   # un número de confirmación real es más largo: «new» o «jp» no pueden abrir ninguna reserva
 
     # Recorre TODAS las propiedades configuradas (hostal + La Casa de la Primavera).
     # El huésped no indica de qué propiedad es su reserva, así que hay que
