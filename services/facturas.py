@@ -214,6 +214,7 @@ def _prompt(c, texto, en_imagen=False):
         "- retencion = retención de IRPF que se descuenta (0 si no hay).\n"
         f"- categoria (gasto): una de {json.dumps(CATEGORIAS['gasto'], ensure_ascii=False)}; "
         f"(ingreso): una de {json.dumps(CATEGORIAS['ingreso'], ensure_ascii=False)}.\n"
+        "- nif_emisor: el NIF/CIF/NIE impreso o sellado del comercio que emite (suele ir bajo su nombre o en un sello), sin espacios.\n"
         "- fecha: si va en casillas separadas DÍA / MES / AÑO (talonarios), júntalas: 19 · 8 · 26 → \"2026-08-19\" (un año de dos cifras es 20xx).\n"
         "- Si un dato no aparece o no se lee, null. No inventes nada.\n\n"
         + ("La factura va en la IMAGEN adjunta; puede ser un talonario escrito a mano o un escaneo: lee con cuidado los datos manuscritos "
@@ -384,6 +385,13 @@ def normalizar(d):
         if datos[k] is not None and datos[k] < 0:
             datos[k], datos["es_rectificativa"] = -datos[k], True
     b, p, c, t, r = datos["base_imponible"], datos["iva_pct"], datos["cuota_iva"], datos["total"], datos["retencion"]
+    iva_no_desglosado = False
+    if p and p > 0 and not c and b is not None and t is not None and abs(b - t) <= TOLERANCIA:
+        # La IA suele rellenar «IVA 21 %» y «cuota 0» en un talonario o tique que solo trae el total: no es que no haya IVA, es que no se desglosa.
+        # Se deja sin base/IVA/cuota para que la app ofrezca calcularlos («el total ya incluye el IVA») en vez de dar por buena una factura sin IVA.
+        datos["iva_pct"] = datos["cuota_iva"] = None
+        p = c = None
+        iva_no_desglosado = True
     if c is None and b is not None and p is not None:
         datos["cuota_iva"] = c = round(b * p / 100, 2)
     if b is None and t is not None and c is not None:
@@ -394,6 +402,8 @@ def normalizar(d):
         datos["iva_pct"] = round(100 * c / b)
 
     avisos = []
+    if iva_no_desglosado:
+        avisos.append("La factura no desglosa el IVA. Si el total ya lo incluye, pulsa «El total ya incluye el IVA» para calcular la base y la cuota.")
     if not datos["fecha"]:
         avisos.append("No se ha leído la fecha.")
     if not datos["proveedor"]:

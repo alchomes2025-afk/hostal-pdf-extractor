@@ -32,5 +32,32 @@ class Fechas(unittest.TestCase):
         self.assertNotIn("No se ha leído la fecha.", avisos)
 
 
+class IvaNoDesglosado(unittest.TestCase):
+    def test_talonario_con_iva_21_y_cuota_0_no_se_da_por_bueno(self):
+        datos, avisos = facturas.normalizar({"tipo": "gasto", "emisor": "Haiteng Liu", "fecha": "19/8/26", "base_imponible": 60, "iva_pct": 21, "cuota_iva": 0, "total": 60})
+        self.assertIsNone(datos["iva_pct"])
+        self.assertIsNone(datos["cuota_iva"])
+        self.assertFalse(datos["cuadra"])                                   # no sale como «lista para guardar»
+        self.assertTrue(any("no desglosa el IVA" in a for a in avisos))
+
+    def test_factura_normal_sin_cambios(self):
+        datos, avisos = facturas.normalizar({"tipo": "gasto", "emisor": "X", "fecha": "2026-10-14", "base_imponible": 100, "iva_pct": 21, "cuota_iva": 21, "total": 121})
+        self.assertEqual((datos["iva_pct"], datos["cuota_iva"], datos["cuadra"]), (21.0, 21.0, True))
+        self.assertEqual(avisos, [])
+
+    def test_exenta_de_verdad_iva_0_no_se_toca(self):
+        datos, avisos = facturas.normalizar({"tipo": "gasto", "emisor": "X", "fecha": "2026-10-14", "base_imponible": 100, "iva_pct": 0, "cuota_iva": 0, "total": 100})
+        self.assertEqual((datos["iva_pct"], datos["cuota_iva"]), (0.0, 0.0))
+        self.assertTrue(datos["cuadra"])
+
+    def test_solo_total_sin_nada_mas_se_completa_como_siempre(self):
+        datos, _ = facturas.normalizar({"tipo": "gasto", "emisor": "X", "fecha": "2026-10-14", "total": 60})
+        self.assertIsNone(datos["cuota_iva"])
+
+    def test_el_prompt_de_vision_pide_el_nif(self):
+        self.assertIn("nif_emisor", facturas._prompt(facturas.CLIENTES["alc-homes"], None, en_imagen=True))
+        self.assertIn("IMAGEN", facturas._prompt(facturas.CLIENTES["alc-homes"], None, en_imagen=True))
+
+
 if __name__ == "__main__":
     unittest.main()
