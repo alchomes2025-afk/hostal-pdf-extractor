@@ -69,14 +69,18 @@ function ping_(p) {
   return { ok: true, raiz: raiz.getName() };
 }
 
-/** Texto de una imagen o PDF: Drive lo convierte a documento de Google con OCR; el temporal va a la papelera. */
+/** Texto de una imagen o PDF: Drive lo convierte a documento de Google con OCR; el temporal se borra del todo. */
 function ocr_(p) {
   const blob = Utilities.newBlob(Utilities.base64Decode(p.base64), p.mime || 'application/octet-stream', 'ocr');
   const temporal = Drive.Files.create({ name: 'ocr-temporal-' + Date.now(), mimeType: MimeType.GOOGLE_DOCS }, blob, { ocrLanguage: 'es' });
   try {
     return { ok: true, texto: DocumentApp.openById(temporal.id).getBody().getText() };
   } finally {
-    DriveApp.getFileById(temporal.id).setTrashed(true);
+    try {
+      Drive.Files.remove(temporal.id);   // borrado definitivo: la cuenta de la plataforma no acumula copias del texto de las facturas
+    } catch (err) {
+      DriveApp.getFileById(temporal.id).setTrashed(true);
+    }
   }
 }
 
@@ -135,6 +139,11 @@ function estructura_(p) {
   }
 }
 
+/** Un texto que empiece por = + - @ se interpretaría como fórmula al abrir la hoja: se deja como texto (apóstrofo delante). */
+function celda_(v) {
+  return (typeof v === 'string' && /^[=+\-@]/.test(v)) ? "'" + v : v;
+}
+
 function guardar_(p) {
   const bloqueo = LockService.getScriptLock();
   bloqueo.waitLock(30000);   // dos subidas a la vez no deben crear carpetas u hojas duplicadas
@@ -148,7 +157,7 @@ function guardar_(p) {
     let hojaUrl = null;
     if (p.registro) {
       const ss = hoja_(carpeta_(raiz, p.registro.ruta), p.registro.titulo, p.registro.cabecera);
-      const fila = (p.registro.fila || []).map(function (v) { return v === '{{ENLACE}}' ? url : v; });
+      const fila = (p.registro.fila || []).map(function (v) { return celda_(v === '{{ENLACE}}' ? url : v); });
       ss.getSheets()[0].appendRow(fila);
       hojaUrl = ss.getUrl();
     }

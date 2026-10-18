@@ -20,7 +20,7 @@ La descripción completa del sistema (endpoints, reglas de negocio, integracione
 ## Despliegue
 
 - Render, despliegue automático al hacer push a `main`.
-- Build: `pip install -r requirements.txt` · Start: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 60` (igual que el `Procfile`).
+- Build: `pip install -r requirements.txt` · Start: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --worker-class gthread --threads 8 --timeout 60` (igual que el `Procfile`).
 - Python 3.11 (`runtime.txt`).
 - Las variables de entorno se configuran solo en el panel de Render; los nombres están en `config.py` y `mobile_routes.py`. No se guardan valores en el repo.
 

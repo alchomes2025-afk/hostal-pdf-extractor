@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 CLIENTES = {
     "alc-homes": {
         "nombre": "ALC Homes",
-        "nombres_fiscales": ["ALC Homes"],
+        "nombres_fiscales": ["ALC Homes"],   # y, si se conocen, "nifs_propios": [...]; una factura de/para uno mismo se avisa para revisarla
         "drive_raiz": FACTURAS_DRIVE_RAIZ_ALC,
         "propiedades": {"339751": "Hostal ALC Homes", "349341": "La Casa de la Primavera"},
         "solo_admin": {"339751"},
@@ -128,6 +128,8 @@ def a_numero(v):
     s = re.sub(r"[^\d,.\-]", "", str(v))
     if not s or s in ("-", ".", ","):
         return None
+    if re.fullmatch(r"-?\d{1,3}(\.\d{3})+", s):   # «1.815» / «12.345.678»: punto de MILES (convención española), no decimal
+        s = s.replace(".", "")
     if "," in s and "." in s:
         s = s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".") else s.replace(",", "")
     elif "," in s:
@@ -377,6 +379,20 @@ def conocidas(cliente_id, huellas):
     return encontradas
 
 
+def _norm(texto):
+    return re.sub(r"[^a-z0-9]", "", str(texto or "").lower())
+
+
+def es_propia_empresa(c, datos):
+    """¿El «proveedor/cliente» leído es el propio negocio? Una compra con ALC Homes como proveedor casi seguro es una lectura equivocada
+    de quién emite (o una factura que no es de gasto): se avisa para revisarla y no sale como «lista para guardar»."""
+    nombre = _norm(datos.get("proveedor"))
+    if nombre and any(_norm(n) and _norm(n) in nombre for n in c.get("nombres_fiscales", [])):
+        return True
+    nif = str(datos.get("nif") or "").strip().upper()
+    return bool(nif) and nif in {str(x).strip().upper() for x in c.get("nifs_propios", [])}
+
+
 def misma_factura(cliente_id, datos):
     """Factura ya guardada con el mismo número y total (aunque venga de otro archivo, p. ej. un extracto o una copia): su resumen o None."""
     col = _coleccion()
@@ -409,6 +425,8 @@ def leer(cliente_id, propiedad_id, archivo, es_admin):
         datos, avisos = normalizar(_preguntar_ia(_prompt(c, texto)))
     finally:
         _plazo.fin = None
+    if es_propia_empresa(c, datos):
+        avisos.insert(0, "El " + ("proveedor" if datos["tipo"] == "gasto" else "cliente") + " leído parece ser tu propia empresa: comprueba quién emite la factura.")
     duplicado = {k: previa.get(k) for k in ("fecha", "proveedor", "total", "url")} if previa else None
     if duplicado:
         avisos.insert(0, "Esta misma factura ya se subió antes.")
@@ -418,6 +436,14 @@ def leer(cliente_id, propiedad_id, archivo, es_admin):
             duplicado = otra
             avisos.insert(0, "Ya hay una factura guardada con el mismo número y total (de otro archivo): puede ser un duplicado.")
     return {"datos": datos, "avisos": avisos, "duplicado": duplicado}
+
+
+def _celda(v):
+    """Valor para la hoja de registro. Un texto leído de una factura que empiece por = + - @ se interpretaría como FÓRMULA al abrir la hoja
+    (inyección de fórmulas): se antepone un apóstrofo para que quede como texto. Los números no se tocan."""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@"):
+        return "'" + v
+    return v
 
 
 def _limpio(texto, maximo=50):
@@ -447,9 +473,9 @@ def guardar(cliente_id, propiedad_id, archivo, datos_formulario, es_admin, usuar
     nombre = f"{datos['fecha']}_{_limpio(datos['proveedor'])}_{total_txt}€{MIMES[mime]}"
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
     doc_id = _doc_id(cliente_id, h)
-    fila = [datos["fecha"], "Gasto" if datos["tipo"] == "gasto" else "Ingreso", datos["proveedor"], datos["nif"], datos["numero"],
-            datos["concepto"], datos["categoria"], datos["base_imponible"], datos["iva_pct"], datos["cuota_iva"],
-            datos["retencion_pct"], datos["retencion"], datos["total"], "{{ENLACE}}", ahora, str(usuario or "")[:40], doc_id]
+    fila = [_celda(v) for v in (datos["fecha"], "Gasto" if datos["tipo"] == "gasto" else "Ingreso", datos["proveedor"], datos["nif"], datos["numero"],
+                                datos["concepto"], datos["categoria"], datos["base_imponible"], datos["iva_pct"], datos["cuota_iva"],
+                                datos["retencion_pct"], datos["retencion"], datos["total"], "{{ENLACE}}", ahora, str(usuario or "")[:40], doc_id)]
     try:
         r = puente_plataforma.guardar(raiz_drive(cliente_id), [CARPETA_FACTURAS, propiedad, anio, trimestre, carpeta_tipo], nombre, mime, contenido,
                                  registro={"ruta": [CARPETA_FACTURAS, propiedad, anio], "titulo": f"Registro de facturas {anio}",

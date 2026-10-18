@@ -2324,13 +2324,15 @@ function fxLeerArchivo(file) {
 // una a una las demás. Un .rar/.7z no se puede abrir desde el navegador (hay que convertirlo a .zip).
 const FX_MAX_LOTE = 30;
 const FX_JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+const FX_JSZIP_SRI = "sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==";
 const fxEspera = ms => new Promise(r => setTimeout(r, ms));
 const FX_EXT_MIME = {pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp"};
 
 function fxScript(url) {
   return new Promise((ok, fail) => {
     const s = document.createElement("script");
-    s.src = url; s.onload = ok; s.onerror = () => fail(new Error("No se pudo cargar el lector de ZIP (¿sin conexión?)."));
+    s.src = url; s.integrity = FX_JSZIP_SRI; s.crossOrigin = "anonymous"; s.referrerPolicy = "no-referrer";   // si el archivo cambiara, el navegador no lo ejecuta
+    s.onload = ok; s.onerror = () => fail(new Error("No se pudo cargar el lector de ZIP (¿sin conexión?)."));
     document.head.appendChild(s);
   });
 }
@@ -2623,7 +2625,14 @@ $("#fx-extracto").addEventListener("change", async (e) => {
   else FX.extractoMsg(r.d.error || "No se pudo guardar el extracto.", false);
 });
 
-const fxNum = s => { const n = parseFloat(String(s || "").replace(",", ".")); return isNaN(n) ? null : n; };
+const fxNum = s => {
+  let t = String(s == null ? "" : s).trim().replace(/[\s€]/g, "");
+  if (/^-?\d{1,3}(\.\d{3})+(,\d+)?$/.test(t)) t = t.replace(/\./g, "").replace(",", ".");   // «1.815» o «1.815,50»: punto de miles
+  else if (t.includes(",") && t.includes(".")) t = t.replace(/\./g, "").replace(",", ".");
+  else t = t.replace(",", ".");
+  const n = parseFloat(t);
+  return isNaN(n) ? null : n;
+};
 const fxR2 = n => Math.round(n * 100) / 100;
 
 function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
