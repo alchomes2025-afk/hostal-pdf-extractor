@@ -247,7 +247,9 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .as-draft-head{font-weight:800;margin-bottom:6px}
 .as-draft-meta{color:#8a7690;margin-bottom:2px;overflow-wrap:anywhere}
 .as-draft-body{white-space:pre-wrap;overflow-wrap:anywhere;background:#fdf1f8;border:1px solid var(--border);border-radius:10px;padding:8px 10px;margin:8px 0;max-height:220px;overflow:auto}
-.as-draft-pin{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:10px;border:1.5px solid var(--border);font-size:14px;margin-bottom:8px}
+.as-draft-pinrow{display:flex;gap:8px;margin-bottom:8px}
+.as-draft-pin{flex:1;min-width:0;box-sizing:border-box;padding:9px 10px;border-radius:10px;border:1.5px solid var(--border);font-size:14px}
+.as-draft-eye{padding:0 10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-size:12.5px;font-weight:700;white-space:nowrap}
 .as-draft-btns{display:flex;gap:8px}
 .as-draft-btns button{flex:1;padding:9px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:13px}
 .as-draft-btns button.send{background:var(--bk2);color:#fff;border-color:var(--bk2)}
@@ -2237,8 +2239,18 @@ function asPinRequest(s) {
   head.className = "as-draft-head";
   head.textContent = "🔒 Introduce el PIN de seguridad";
   const input = document.createElement("input");
-  input.type = "password"; input.inputMode = "numeric"; input.autocomplete = "off"; input.placeholder = "PIN de seguridad";
+  input.type = "text"; input.inputMode = "numeric"; input.autocomplete = "off"; input.placeholder = "PIN de seguridad";   // visible; el botón de al lado lo oculta
   input.className = "as-draft-pin";
+  const fila = document.createElement("div");
+  fila.className = "as-draft-pinrow";
+  const ojo = document.createElement("button");
+  ojo.type = "button"; ojo.className = "as-draft-eye"; ojo.textContent = "🙈 Ocultar"; ojo.title = "Mostrar u ocultar el PIN";
+  ojo.addEventListener("click", () => {
+    const oculto = input.type === "password";
+    input.type = oculto ? "text" : "password";
+    ojo.textContent = oculto ? "🙈 Ocultar" : "👁 Mostrar";
+  });
+  fila.append(input, ojo);
   const btns = document.createElement("div");
   btns.className = "as-draft-btns";
   const go = document.createElement("button");
@@ -2248,7 +2260,7 @@ function asPinRequest(s) {
   btns.append(go, cancel);
   const state = document.createElement("div");
   state.className = "as-draft-state";
-  card.append(head, input, btns, state);
+  card.append(head, fila, btns, state);
   cancel.addEventListener("click", () => { card.remove(); });
   const continuar = async () => {
     const pin = input.value.trim();
