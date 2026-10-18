@@ -255,6 +255,8 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-guia{background:#eef3ff;border:1px solid #b9c8f5;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.55;margin-bottom:10px;color:var(--ink)}
 .fx-guia b{display:block;margin-bottom:3px}
 .fx-guia ul{margin:0;padding-left:18px}
+.fx-det{margin:0 0 10px}
+.fx-det summary{font-weight:800;font-size:13px;cursor:pointer;padding:8px 0}
 .fx-note{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
 .fx-note.err{background:var(--blocked-bg);border-color:var(--blocked)}
 .fx-note.ok{background:var(--avail-bg);border-color:var(--avail)}
@@ -651,7 +653,7 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
   <div id="fx-panel">
     <div id="fx-head"><span id="fx-title">🧾 Facturas</span><button type="button" onclick="closeFacturas()" title="Cerrar">✕</button></div>
     <div id="fx-body"></div>
-    <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z" multiple style="display:none">
+    <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z,.csv,.xls,.xlsx,.txt,text/csv" multiple style="display:none">
     <input type="file" id="fx-extracto" accept=".csv,.xls,.xlsx,.pdf,.txt,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
   </div>
   <button type="button" id="as-fab" title="Preguntar al asistente" onclick="toggleAsistente()">💬</button>
@@ -2153,7 +2155,7 @@ async function fxLista() {
   subir.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
   fxEl("div", "fx-cat", "Puedes elegir varias facturas a la vez o un archivo .zip con todas.", body);
   if (FX.aviso) { fxEl("div", "fx-note ok", FX.aviso, body); FX.aviso = ""; }
-  const extr = fxEl("button", "fx-sec", "📑 Subir extracto bancario (para cotejar)", body);
+  const extr = fxEl("button", "fx-sec", "📑 Cotejar con el extracto bancario", body);
   extr.onclick = () => fxExtracto(false);
   const carga = fxEl("div", "fx-cat", "Cargando facturas…", body);
   const mes = `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
@@ -2327,6 +2329,11 @@ const FX_JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.
 const FX_JSZIP_SRI = "sha512-XMVd28F1oH/O71fzwBnV7HucLxVwtxf26XV8P4wPk26EDxuGZ91N8bsOttmnomcCD3CS5ZMRL50H0GgOHvegtg==";
 const fxEspera = ms => new Promise(r => setTimeout(r, ms));
 const FX_EXT_MIME = {pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp"};
+const FX_EXT_EXTRACTO = {csv: "text/csv", txt: "text/plain", xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"};
+
+function fxBase64(file) {
+  return new Promise((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.onerror = () => fail(new Error("No se pudo leer el archivo.")); fr.readAsDataURL(file); });
+}
 
 function fxScript(url) {
   return new Promise((ok, fail) => {
@@ -2342,6 +2349,12 @@ async function fxExpandir(files) {
   const anadir = async (file, nombre) => {
     try { docs.push(await fxLeerArchivo(file)); } catch (err) { avisos.push(`«${nombre}»: ${err.message}`); }
   };
+  // CSV / Excel: no son facturas, son extractos bancarios (se guardan tal cual y se ofrecen para el cotejo)
+  const anadirExtracto = async (file, nombre, ext) => {
+    if (file.size > 10 * 1024 * 1024) { avisos.push(`«${nombre}»: pesa más de 10 MB.`); return; }
+    try { docs.push({nombre, mime: FX_EXT_EXTRACTO[ext], base64: await fxBase64(file), vista: null, extracto: true}); } catch (err) { avisos.push(`«${nombre}»: ${err.message}`); }
+    if (ext === "xls" || ext === "xlsx") avisos.push(`«${nombre}»: no puedo leer archivos de Excel para el cotejo; ábrelo y guárdalo como CSV, o descarga el extracto en CSV o en PDF.`);
+  };
   for (const file of files) {
     const nombre = file.name, ext = (nombre.split(".").pop() || "").toLowerCase();
     if (ext === "zip" || /zip/.test(file.type)) {
@@ -2352,7 +2365,9 @@ async function fxExpandir(files) {
         for (const e of Object.values(zip.files)) {
           const base = e.name.split("/").pop();
           if (e.dir || e.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
-          const mime = FX_EXT_MIME[(base.split(".").pop() || "").toLowerCase()];
+          const extZip = (base.split(".").pop() || "").toLowerCase();
+          if (FX_EXT_EXTRACTO[extZip]) { await anadirExtracto(new File([await e.async("blob")], base, {type: FX_EXT_EXTRACTO[extZip]}), `${nombre} › ${base}`, extZip); continue; }
+          const mime = FX_EXT_MIME[extZip];
           if (!mime) { omitidos++; continue; }
           const blob = await e.async("blob");
           await anadir(new File([blob], base, {type: mime}), `${nombre} › ${base}`);
@@ -2361,6 +2376,8 @@ async function fxExpandir(files) {
       } catch (err) { avisos.push(`«${nombre}»: no se pudo abrir el ZIP (${err.message}).`); }
     } else if (["rar", "7z", "tar", "gz", "tgz", "bz2"].includes(ext)) {
       avisos.push(`«${nombre}»: este tipo de archivo comprimido no se puede abrir desde la app. Conviértelo a .zip o sube las facturas sueltas.`);
+    } else if (FX_EXT_EXTRACTO[ext]) {
+      await anadirExtracto(file, nombre, ext);
     } else if (FX_EXT_MIME[ext] || file.type === "application/pdf" || /^image\//.test(file.type)) {
       await anadir(file.type ? file : new File([file], nombre, {type: FX_EXT_MIME[ext] || ""}), nombre);
     } else {
@@ -2379,6 +2396,8 @@ $("#fx-file").addEventListener("change", async (e) => {
   fxEl("div", "fx-note", "Preparando los archivos…", body);
   const todos = await fxExpandir(files);
   const avisos = todos.avisos;
+  const extractos = todos.docs.filter(d => d.extracto);
+  todos.docs = todos.docs.filter(d => !d.extracto);
   // Los que ya están guardados (misma huella del archivo) se saltan antes de gastar IA: se puede volver a subir el ZIP entero y solo se leen los nuevos
   const ya = await fxConocidas(todos.docs);
   const docs = todos.docs.filter(d => !ya.has(d.huella));
@@ -2386,11 +2405,12 @@ $("#fx-file").addEventListener("change", async (e) => {
   const fuera = Math.max(0, docs.length - FX_MAX_LOTE);
   if (fuera) { avisos.push(`Se leen solo las primeras ${FX_MAX_LOTE} de ${docs.length} nuevas.`); docs.length = FX_MAX_LOTE; }
   if (!docs.length) {
+    if (extractos.length) { FX.lote = {items: [], avisos, extractos, cancelado: false, fuera: 0}; return fxExtractoPregunta(); }   // solo había un extracto
     await fxLista();
-    body.prepend(...avisos.map(a => fxEl("div", ya.size ? "fx-note ok" : "fx-note err", ya.size && !todos.docs.length ? a : a)));
+    body.prepend(...avisos.map(a => fxEl("div", ya.size ? "fx-note ok" : "fx-note err", a)));
     return;
   }
-  FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false, fuera};
+  FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false, fuera, extractos};
   await fxLeerLote();
 });
 
@@ -2432,6 +2452,11 @@ async function fxLeerConReintentos(it, r, estado, lote, maximo, esperaMs) {
 
 function fxAnotar(it, r) {
   it.estatus = r.status;
+  if (r.d.ok && r.d.extracto) {   // el servidor ha visto que este PDF no es una factura sino un extracto bancario
+    it.estado = "extracto"; it.movimientos = r.d.movimientos; it.error = "";
+    if (FX.lote && !FX.lote.extractos.includes(it.archivo)) FX.lote.extractos.push(it.archivo);
+    return;
+  }
   if (r.d.ok) { it.lectura = {datos: r.d.datos, avisos: r.d.avisos || [], duplicado: r.d.duplicado}; it.estado = "leida"; it.error = ""; }
   else { it.lectura = null; it.error = r.d.error || "No se pudo leer"; it.estado = "error"; }
 }
@@ -2485,6 +2510,7 @@ async function fxLeerLote() {
     }
   }
   fxMarcarDuplicadas(lote);
+  if (lote.items.every(it => it.estado === "extracto")) return fxExtractoPregunta();   // todo lo subido eran extractos
   if (n === 1) return fxAbrirItem(0, true);
   fxResumenLote();
 }
@@ -2526,9 +2552,10 @@ function fxResumenLote() {
   $("#fx-title").textContent = "🧾 Resumen de la subida";
   lote.avisos.forEach(a => fxEl("div", "fx-note", a, body));
   const cuenta = f => lote.items.filter(f).length;
+  const nFacturas = lote.items.filter(it => it.estado !== "extracto").length;
   const listas = lote.items.filter(it => it.estado === "leida" && fxListo(it));
   const porRevisar = cuenta(it => it.estado === "leida" && !fxListo(it)), fallos = cuenta(it => it.estado === "error"), guardadas = cuenta(it => it.estado === "guardada");
-  fxEl("div", "fx-cat", `${lote.items.length} documentos: ✓ ${guardadas} guardadas · ${listas.length} listas para guardar · ⚠ ${porRevisar} por revisar · ✖ ${fallos} sin leer`, body);
+  fxEl("div", "fx-cat", `${nFacturas} documentos: ✓ ${guardadas} guardadas · ${listas.length} listas para guardar · ⚠ ${porRevisar} por revisar · ✖ ${fallos} sin leer`, body);
   if (lote.mensaje) { fxEl("div", "fx-note ok", lote.mensaje, body); lote.mensaje = ""; }
   const sinGuardar = listas.length + porRevisar + fallos;
   const pasos = [];
@@ -2538,6 +2565,16 @@ function fxResumenLote() {
   if (lote.fuera) pasos.push(`Quedan ${lote.fuera} archivos sin leer (el máximo es ${FX_MAX_LOTE} por tanda): cuando termines con estas, vuelve a subir el mismo ZIP; las ya guardadas se saltan y solo se leerán las que faltan.`);
   if (!pasos.length) pasos.push("Todo está guardado. Pulsa «Terminar»; después podrás subir el extracto bancario para cotejar.");
   fxGuia(body, sinGuardar || lote.fuera ? "Qué hacer ahora" : "✓ Todo listo", pasos);
+  if (lote.extractos && lote.extractos.length && !lote.cotejoDescartado) {   // había un extracto bancario entre los archivos: se pregunta si se quiere cotejar
+    const c = fxEl("div", "fx-guia", null, body);
+    fxEl("b", "", "📑 He encontrado un extracto bancario", c);
+    fxEl("div", "", `«${lote.extractos[0].nombre}»${lote.extractos.length > 1 ? ` y ${lote.extractos.length - 1} más` : ""}. ¿Quieres cotejarlo con tus facturas? Así veo qué facturas están pagadas y qué pagos del banco no tienen factura.`, c);
+    if (sinGuardar) fxEl("div", "fx-note", `Aún tienes ${sinGuardar} sin guardar: guárdalas antes (solo cuentan en el cotejo las ya guardadas).`, c);
+    const si = fxEl("button", "fx-big", "Cotejar con mis facturas", c);
+    const no = fxEl("button", "fx-sec", "Ahora no", c);
+    si.onclick = () => fxCotejar(lote.extractos[0]);
+    no.onclick = () => { lote.cotejoDescartado = true; fxResumenLote(); };
+  }
   if (listas.length) {
     const todas = fxEl("button", "fx-big", `Guardar las ${listas.length} que cuadran`, body);
     todas.onclick = () => fxGuardarListas(listas);
@@ -2547,6 +2584,7 @@ function fxResumenLote() {
     uno.onclick = () => fxSiguiente();
   }
   lote.items.forEach((it, i) => {
+    if (it.estado === "extracto") return;   // el extracto no es una fila de facturas: va en su cuadro de «cotejar»
     const row = fxEl("div", "fx-row fx-click", null, body);
     const main = fxEl("div", "f-main", null, row);
     const d = it.lectura && it.lectura.datos;
@@ -2567,8 +2605,9 @@ function fxResumenLote() {
       fxEl("div", "fx-note err", `Aún quedan ${sinGuardar} sin guardar: si sales ahora, hay que volver a subirlas. Pulsa otra vez para salir.`, body);
       return;
     }
+    const habiaExtracto = !!(lote.extractos && lote.extractos.length);
     FX.lote = null;
-    if (guardadas) fxExtracto(true); else fxLista();
+    if (guardadas && !habiaExtracto) fxExtracto(true); else fxLista();   // si ya venía un extracto entre los archivos no se vuelve a preguntar
   };
 }
 
@@ -2593,20 +2632,48 @@ async function fxGuardarListas(listas) {
   fxResumenLote();
 }
 
-// ── Extracto bancario (para cotejar las facturas con los movimientos) ──
-function fxExtracto(trasSubida) {
+// ── Extracto bancario: cotejo con las facturas guardadas ──
+// El extracto se reconoce solo (CSV/Excel por su tipo; un PDF porque el servidor ve que son movimientos, no una factura), aunque venga mezclado con
+// las facturas o dentro de un ZIP. Se pregunta si se quiere cotejar; el cotejo también guarda el extracto en el Drive.
+function fxExtractoPregunta() {
+  const lote = FX.lote;
   const body = $("#fx-body");
   body.textContent = "";
   $("#fx-title").textContent = "📑 Extracto bancario";
-  fxEl("h3", "fx-h", "¿Quieres cotejar las facturas con tu extracto bancario?", body);
-  fxEl("p", "fx-p", "Con el extracto se puede comprobar qué facturas están pagadas y detectar movimientos sin factura. Súbelo en CSV, Excel o PDF; se guarda en tu Drive, en la carpeta «Extractos» de la propiedad.", body);
-  const si = fxEl("button", "fx-big", "Subir el extracto", body);
-  const no = fxEl("button", "fx-sec", trasSubida ? "Ahora no" : "Volver", body);
+  (lote.avisos || []).forEach(a => fxEl("div", "fx-note", a, body));
+  fxEl("h3", "fx-h", "He encontrado un extracto bancario", body);
+  fxEl("p", "fx-p", `«${lote.extractos[0].nombre}». ¿Quieres cotejarlo con tus facturas guardadas? Veré qué facturas están pagadas, cuáles no tienen movimiento y qué pagos del banco no tienen factura.`, body);
+  const si = fxEl("button", "fx-big", "Cotejar con mis facturas", body);
+  const guardar = fxEl("button", "fx-sec", "Solo guardarlo en mi Drive", body);
+  const no = fxEl("button", "fx-sec", "Ahora no (no se guarda)", body);
   const msg = fxEl("div", "fx-note", "", body);
   msg.style.display = "none";
+  si.onclick = () => fxCotejar(lote.extractos[0]);
+  no.onclick = () => { FX.lote = null; fxLista(); };
+  guardar.onclick = async () => {
+    guardar.disabled = true;
+    const a = lote.extractos[0];
+    let r;
+    try { r = await fxApi("/extracto", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, archivo: {nombre: a.nombre, mime: a.mime, base64: a.base64}})}); }
+    catch (err) { r = {d: {ok: false, error: "Error de conexión."}}; }
+    msg.className = "fx-note " + (r.d.ok ? "ok" : "err");
+    msg.textContent = r.d.ok ? "✓ Guardado en tu Drive (carpeta Extractos). Cuando quieras cotejarlo, usa el botón «Cotejar con el extracto bancario»." : (r.d.error || "No se pudo guardar.");
+    msg.style.display = "block";
+    guardar.disabled = r.d.ok;
+  };
+}
+
+// Pregunta suelta (botón de la lista o fin de una tanda sin extracto): elegir el archivo.
+function fxExtracto(trasSubida) {
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "📑 Cotejar con el extracto";
+  fxEl("h3", "fx-h", "¿Quieres cotejar tus facturas con el extracto bancario?", body);
+  fxEl("p", "fx-p", "Subo el extracto y lo comparo con las facturas guardadas: qué facturas están pagadas y qué pagos del banco no tienen factura. Admito el «Extracto Mensual» de BBVA en PDF o cualquier CSV; si es Excel, guárdalo antes como CSV. También se guarda en tu Drive.", body);
+  const si = fxEl("button", "fx-big", "Elegir el extracto", body);
+  const no = fxEl("button", "fx-sec", trasSubida ? "Ahora no" : "Volver", body);
   si.onclick = () => { $("#fx-extracto").value = ""; $("#fx-extracto").click(); };
   no.onclick = () => fxLista();
-  FX.extractoMsg = (texto, ok) => { msg.className = "fx-note " + (ok ? "ok" : "err"); msg.textContent = texto; msg.style.display = "block"; };
 }
 
 $("#fx-extracto").addEventListener("change", async (e) => {
@@ -2614,16 +2681,82 @@ $("#fx-extracto").addEventListener("change", async (e) => {
   if (!file) return;
   const ext = (file.name.split(".").pop() || "").toLowerCase();
   const mime = file.type || {csv: "text/csv", xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", pdf: "application/pdf", txt: "text/plain"}[ext] || "";
-  if (file.size > 10 * 1024 * 1024) return FX.extractoMsg && FX.extractoMsg("El archivo pesa más de 10 MB.", false);
-  FX.extractoMsg && FX.extractoMsg("⏳ Subiendo el extracto…", true);
-  const base64 = await new Promise((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.onerror = fail; fr.readAsDataURL(file); }).catch(() => null);
-  if (!base64) return FX.extractoMsg && FX.extractoMsg("No se pudo leer el archivo.", false);
-  let r;
-  try { r = await fxApi("/extracto", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, archivo: {nombre: file.name, mime, base64}})}); }
-  catch (err) { r = {d: {ok: false, error: "Error de conexión."}}; }
-  if (r.d.ok) FX.extractoMsg("✓ Extracto guardado en tu Drive (" + (r.d.nombre || file.name) + "). El cotejo automático con las facturas llegará en la siguiente fase; ya queda guardado y ordenado. Puedes volver con «Volver» y seguir subiendo facturas.", true);
-  else FX.extractoMsg(r.d.error || "No se pudo guardar el extracto.", false);
+  if (file.size > 10 * 1024 * 1024) { fxExtracto(false); fxEl("div", "fx-note err", "El archivo pesa más de 10 MB.", $("#fx-body")); return; }
+  let base64;
+  try { base64 = await fxBase64(file); } catch (err) { fxExtracto(false); fxEl("div", "fx-note err", err.message, $("#fx-body")); return; }
+  fxCotejar({nombre: file.name, mime, base64});
 });
+
+async function fxCotejar(arch) {
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "📑 Cotejando";
+  fxEl("div", "fx-note", "⏳ Leyendo el extracto y cotejándolo con tus facturas… unos segundos.", body);
+  let r;
+  try { r = await fxApi("/cotejar", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, archivo: {nombre: arch.nombre, mime: arch.mime, base64: arch.base64}})}); }
+  catch (err) { r = {d: {ok: false, error: "Error de conexión."}}; }
+  if (!r.d.ok) {
+    body.textContent = "";
+    $("#fx-title").textContent = "📑 No se ha podido cotejar";
+    fxEl("div", "fx-note err", r.d.error || "No se pudo cotejar.", body);
+    fxGuia(body, "Qué hacer ahora", ["Si el extracto es de otro banco, descárgalo en CSV desde la web del banco y vuelve a subirlo.", "Si el problema es de conexión, vuelve a intentarlo en un momento."]);
+    const otra = fxEl("button", "fx-big", "Elegir otro archivo", body);
+    otra.onclick = () => { $("#fx-extracto").value = ""; $("#fx-extracto").click(); };
+    fxEl("button", "fx-sec", "Volver", body).onclick = () => { FX.lote = null; fxLista(); };
+    return;
+  }
+  fxResultadoCotejo(r.d);
+}
+
+function fxResultadoCotejo(d) {
+  const body = $("#fx-body"), res = d.resumen;
+  body.textContent = "";
+  $("#fx-title").textContent = "📑 Resultado del cotejo";
+  fxEl("div", "fx-cat", `${res.movimientos} movimientos del extracto (${d.periodo.desde} a ${d.periodo.hasta}) · ${d.facturas_consideradas} facturas guardadas en esas fechas`, body);
+  if (d.extracto_guardado) fxEl("div", "fx-note ok", "✓ El extracto se ha guardado en tu Drive (carpeta Extractos).", body);
+  const pasos = [];
+  if (res.conciliadas) pasos.push(`✓ ${res.conciliadas} facturas casan con un pago del banco.`);
+  if (res.facturas_sin_movimiento) pasos.push(`${res.facturas_sin_movimiento} facturas no aparecen en este extracto: pueden haberse pagado en efectivo, con otra cuenta o en otro mes. Compruébalas.`);
+  if (res.cargos_sin_factura) pasos.push(`${res.cargos_sin_factura} pagos del banco (${fxEur(res.importe_cargos_sin_factura)}) no tienen factura: busca esas facturas, súbelas (vuelve a subir el ZIP y solo se leerán las nuevas) y repite el cotejo. Efectivo, nóminas y Seguridad Social no suelen llevar factura.`);
+  if (!res.facturas_sin_movimiento && !res.cargos_sin_factura) pasos.push("Todo cuadra: no queda nada por revisar.");
+  fxGuia(body, "Qué hacer ahora", pasos);
+  const fila = (padre, titulo, detalle, importe, signo, marca) => {
+    const row = fxEl("div", "fx-row", null, padre);
+    const main = fxEl("div", "f-main", null, row);
+    fxEl("b", "", titulo, main);
+    fxEl("small", "", detalle, main);
+    if (importe != null) fxEl("div", "f-tot" + (signo > 0 ? " ing" : ""), fxEur(importe), row);
+    if (marca) fxEl("small", "", marca, row);
+  };
+  const seccion = (titulo, n, abierta) => {
+    const det = fxEl("details", "fx-det", null, body);
+    det.open = !!abierta;
+    fxEl("summary", "", `${titulo} (${n})`, det);
+    return det;
+  };
+  if (d.facturas_sin_movimiento.length) {
+    const det = seccion("⚠ Facturas sin pago en el banco", d.facturas_sin_movimiento.length, true);
+    d.facturas_sin_movimiento.forEach(f => fila(det, f.proveedor || "(sin nombre)", [f.fecha, f.numero, f.propiedad].filter(Boolean).join(" · "), f.total, f.tipo === "ingreso" ? 1 : -1));
+  }
+  if (d.movimientos_sin_factura.length) {
+    const det = seccion("✖ Pagos del banco sin factura", d.movimientos_sin_factura.length, true);
+    const grupos = {};
+    d.movimientos_sin_factura.forEach(m => { (grupos[m.etiqueta || "Compras y otros pagos"] = grupos[m.etiqueta || "Compras y otros pagos"] || []).push(m); });
+    Object.entries(grupos).sort((a, b) => b[1].length - a[1].length).forEach(([etq, ms]) => {
+      fxEl("div", "fx-cat", `${etq}: ${ms.length} · ${fxEur(ms.reduce((t, m) => t + Math.abs(m.importe), 0))}`, det);
+      ms.forEach(m => fila(det, m.concepto.length > 70 ? m.concepto.slice(0, 70) + "…" : m.concepto, m.fecha, Math.abs(m.importe), -1));
+    });
+  }
+  if (d.conciliadas.length) {
+    const det = seccion("✓ Facturas pagadas (conciliadas)", d.conciliadas.length, false);
+    d.conciliadas.forEach(c => fila(det, c.factura.proveedor || "(sin nombre)", `${c.movimiento.fecha} · ${c.movimiento.concepto.slice(0, 60)}`, c.factura.total, -1, c.confianza === "media" ? "⚠ revisa" : ""));
+  }
+  if (res.abonos_sin_factura) fxEl("div", "fx-cat", `Además hay ${res.abonos_sin_factura} cobros en el banco (${fxEur(res.importe_abonos_sin_factura)}) sin factura emitida asociada: reservas, liquidaciones…`, body);
+  const mas = fxEl("button", "fx-sec", "Subir más facturas", body);
+  mas.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
+  const fin = fxEl("button", "fx-sec", "Terminar", body);
+  fin.onclick = () => { FX.lote = null; fxLista(); };
+}
 
 const fxNum = s => {
   let t = String(s == null ? "" : s).trim().replace(/[\s€]/g, "");

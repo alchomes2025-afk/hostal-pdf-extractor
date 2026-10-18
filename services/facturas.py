@@ -20,7 +20,7 @@ import logging
 import re
 import threading
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import requests
 
@@ -534,6 +534,12 @@ def leer(cliente_id, propiedad_id, archivo, es_admin):
     comprobar_propiedad(cliente_id, propiedad_id, es_admin)
     contenido, mime = _archivo(archivo)
     previa = ya_guardada(cliente_id, huella(contenido))
+    capa = capa_de_texto(contenido, mime)
+    if capa:   # un PDF que en realidad es un extracto bancario (subido junto con las facturas): se avisa, sin gastar IA
+        from services import extractos
+        n = extractos.parece_extracto(capa)
+        if n:
+            return {"extracto": True, "movimientos": n, "datos": None, "avisos": [], "duplicado": None}
     _plazo.fin = time.time() + PRESUPUESTO_LEER_SEG
     try:
         crudo = None
@@ -631,6 +637,56 @@ def guardar(cliente_id, propiedad_id, archivo, datos_formulario, es_admin, usuar
         except Exception as e:   # ya está en el Drive, que es la fuente de verdad: no se pierde
             logger.error(f"[facturas] Guardada en Drive pero no en Firestore ({doc_id}): {e}")
     return {"id": doc_id, **factura, "avisos": avisos}
+
+
+def cotejar_extracto(cliente_id, propiedad_id, archivo, es_admin, usuario=""):
+    """Lee el extracto bancario, lo guarda en el Drive y lo coteja con las facturas guardadas (de las propiedades que puede ver este PIN).
+    Devuelve el cotejo; si el formato no se entiende, el extracto queda guardado igualmente y se explica."""
+    from services import extractos
+    import base64 as b64
+    c = cliente(cliente_id)
+    comprobar_propiedad(cliente_id, propiedad_id, es_admin)
+    mime = str((archivo or {}).get("mime") or "").lower()
+    try:
+        contenido = b64.b64decode((archivo or {}).get("base64") or "", validate=False)
+    except Exception:
+        raise FacturaError("archivo dañado")
+    if not contenido or len(contenido) > MAX_BYTES:
+        raise FacturaError("archivo vacío o demasiado grande (máximo 10 MB)")
+    guardado = None
+    try:
+        guardado = guardar_extracto(cliente_id, propiedad_id, archivo, es_admin, usuario)
+    except FacturaError as e:
+        logger.warning(f"[facturas] El extracto no se pudo guardar en el Drive: {e}")
+    try:
+        movimientos = extractos.leer_movimientos(contenido, mime, (archivo or {}).get("nombre", ""))
+    except extractos.ExtractoError as e:
+        raise FacturaError(str(e) + (" El archivo ha quedado guardado en tu Drive." if guardado else ""), 422)
+    fechas = [m["fecha"] for m in movimientos if m.get("fecha")]
+    if not fechas:
+        raise FacturaError("no he podido leer las fechas del extracto", 422)
+    desde = (date.fromisoformat(min(fechas)) - timedelta(days=60)).isoformat()
+    hasta = (date.fromisoformat(max(fechas)) + timedelta(days=7)).isoformat()
+    visibles = set(propiedades_visibles(cliente_id, es_admin))
+    col = _coleccion()
+    facturas_c = []
+    if col is not None:
+        try:
+            for d in col.where("cliente", "==", cliente_id).stream():
+                x = d.to_dict()
+                if x.get("propiedad_id") in visibles and desde <= (x.get("fecha") or "") <= hasta:
+                    facturas_c.append({k: x.get(k) for k in ("tipo", "fecha", "proveedor", "numero", "total", "es_rectificativa", "url", "propiedad_id", "archivo")})
+        except Exception as e:
+            logger.error(f"[facturas] Error cargando facturas para el cotejo: {e}")
+            raise FacturaError("no se han podido cargar las facturas para cotejar", 502)
+    resultado = extractos.cotejar(movimientos, facturas_c)
+    nombres = {pid: n for pid, n in c["propiedades"].items()}
+    for f in facturas_c:
+        f["propiedad"] = nombres.get(f.get("propiedad_id"), "")
+    resultado["periodo"] = {"desde": min(fechas), "hasta": max(fechas)}
+    resultado["extracto_guardado"] = bool(guardado)
+    resultado["facturas_consideradas"] = len(facturas_c)
+    return resultado
 
 
 def meses_con_facturas(cliente_id, propiedad_id, es_admin):

@@ -51,6 +51,18 @@ carpeta por cliente en Firestore (`facturas_config`); la app lo detecta sola. So
   falta decidir el formato de los extractos, repasar la app de cotejo de Adrián (fase de pruebas; no funcionó con Groq) y, si hace falta, IA de pago del cliente.
   Pruebas: `tests/test_facturas_extracto.py`; Chrome contra servidor simulado (lote con ZIP, resumen, guardado en bloque, revisión una a una, extracto).
 
+## Cotejo con el extracto bancario (2026-10-18)
+- **Lectura sin IA** (`services/extractos.py`): PDF «Extracto Mensual» de BBVA con texto (los movimientos se separan por el hueco vertical entre bloques; con el
+  extracto real de agosto: 44 movimientos y la cadena de saldos cuadra en los 43 enlaces) y CSV genérico (separador ;,	, UTF-8/Latin-1, cabecera detectada,
+  importe único o cargo/abono). Excel .xls/.xlsx: «Guardar como» CSV. Otros bancos en PDF: no (pedir CSV).
+- **Reconocimiento automático:** el selector admite CSV/Excel además de PDF/fotos/ZIP; un CSV/Excel es un extracto; un PDF con ≥3 líneas «fecha fecha … importe EUR saldo EUR»
+  lo marca el servidor (`leer()` devuelve `extracto: true` sin gastar IA). Funciona mezclado con facturas y dentro de un ZIP. La app pregunta «¿Quieres cotejarlo con tus facturas?»
+  (resumen de la tanda, o pantalla propia si solo había extracto; «Solo guardarlo en mi Drive» y «Ahora no» también).
+- **Cotejo** (`POST /mobile/facturas/cotejar`, guarda también el extracto en `Extractos/`): cada factura guardada casa con UN movimiento por importe exacto (±0,01), signo
+  correcto (gasto = cargo; rectificativa = abono; ingreso = abono) y fecha de −7 a +60 días; desempata por palabras del proveedor en el concepto (confianza alta / media).
+  Resultado: conciliadas, facturas sin movimiento, pagos sin factura (agrupados: efectivo, nómina, Seguridad Social, comisiones…) y cobros sin factura. Solo cuentan las
+  facturas GUARDADAS de las propiedades que ve el PIN (el PIN normal, solo Primavera). Tests: `tests/test_extractos.py`.
+
 ## Falta
 1. **Pasos de Adrián:** actualizar el puente (nueva versión), crear el conector y poner en Render `PUENTE_URL`, `PUENTE_SECRETO`, `CONECTOR_URL`
    (ver `apps-script/LEEME_conector.md`); fusionar la rama; abrir Facturas con el PIN de administrador y seguir el asistente.
