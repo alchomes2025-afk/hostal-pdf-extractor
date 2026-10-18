@@ -252,6 +252,9 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-chips-t{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
 .fx-chip{padding:5px 9px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px;font-weight:700;color:var(--ink)}
 .fx-chip.act{background:var(--acc);border-color:var(--acc);color:#fff}
+.fx-guia{background:#eef3ff;border:1px solid #b9c8f5;border-radius:10px;padding:9px 11px;font-size:12.5px;line-height:1.55;margin-bottom:10px;color:var(--ink)}
+.fx-guia b{display:block;margin-bottom:3px}
+.fx-guia ul{margin:0;padding-left:18px}
 .fx-note{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
 .fx-note.err{background:var(--blocked-bg);border-color:var(--blocked)}
 .fx-note.ok{background:var(--avail-bg);border-color:var(--avail)}
@@ -2136,6 +2139,7 @@ async function fxLista() {
   const chips = fxEl("div", "fx-chips", null, body);   // meses con facturas ya subidas
   fxApi(`/meses?propiedad_id=${FIN_PROPERTY}`).then(({d}) => {
     if (miPeticion !== FX.peticion || !d.ok || !d.meses.length) return;
+    FX.meses = d.meses;
     chips.appendChild(fxEl("span", "fx-chips-t", "Ya subidas:"));
     d.meses.forEach(m => {
       const [a, n] = m.mes.split("-").map(Number);
@@ -2167,7 +2171,14 @@ async function fxLista() {
   });
   const cats = Object.entries(t.gasto.por_categoria || {});
   if (cats.length) fxEl("div", "fx-cat", "Gastos por categoría: " + cats.map(([k, v]) => `${k} ${fxEur(v)}`).join(" · "), body);
-  if (!r.d.facturas.length) { fxEl("div", "fx-cat", "Este mes no hay facturas subidas.", body); return; }
+  if (!r.d.facturas.length) {
+    const otros = (FX.meses || []).length;
+    fxGuia(body, "Este mes no hay facturas subidas", [
+      "Pulsa «＋ Subir factura» y elige una foto, varios PDF o un archivo .zip con todas.",
+      ...(otros ? ["Hay facturas en otros meses: toca uno de los meses de «Ya subidas», arriba."] : []),
+    ]);
+    return;
+  }
   r.d.facturas.forEach(f => {
     const row = fxEl("div", "fx-row", null, body);
     const main = fxEl("div", "f-main", null, row);
@@ -2271,6 +2282,15 @@ function fxConexionListo() {
   seguir.onclick = () => fxLista();
 }
 
+// Cuadro «Qué hacer ahora»: la pantalla siempre dice cuál es el siguiente paso.
+function fxGuia(padre, titulo, pasos) {
+  const g = fxEl("div", "fx-guia", null, padre);
+  fxEl("b", "", "👉 " + titulo, g);
+  const ul = fxEl("ul", "", null, g);
+  pasos.forEach(p => fxEl("li", "", p, ul));
+  return g;
+}
+
 // Una foto del móvil puede pesar 5-10 MB: se reduce a ≤2000 px (JPEG) antes de subirla. Los PDF van tal cual.
 function fxLeerArchivo(file) {
   return new Promise((ok, fail) => {
@@ -2361,13 +2381,14 @@ $("#fx-file").addEventListener("change", async (e) => {
   const ya = await fxConocidas(todos.docs);
   const docs = todos.docs.filter(d => !ya.has(d.huella));
   if (ya.size) avisos.unshift(`${ya.size} ya estaban guardadas y se han omitido` + (docs.length ? `: solo se leen las ${docs.length} nuevas.` : "."));
-  if (docs.length > FX_MAX_LOTE) { avisos.push(`Se han leído solo las primeras ${FX_MAX_LOTE} de ${docs.length} nuevas: sube el resto en otra tanda.`); docs.length = FX_MAX_LOTE; }
+  const fuera = Math.max(0, docs.length - FX_MAX_LOTE);
+  if (fuera) { avisos.push(`Se leen solo las primeras ${FX_MAX_LOTE} de ${docs.length} nuevas.`); docs.length = FX_MAX_LOTE; }
   if (!docs.length) {
     await fxLista();
     body.prepend(...avisos.map(a => fxEl("div", ya.size ? "fx-note ok" : "fx-note err", ya.size && !todos.docs.length ? a : a)));
     return;
   }
-  FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false};
+  FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false, fuera};
   await fxLeerLote();
 });
 
@@ -2506,6 +2527,15 @@ function fxResumenLote() {
   const listas = lote.items.filter(it => it.estado === "leida" && fxListo(it));
   const porRevisar = cuenta(it => it.estado === "leida" && !fxListo(it)), fallos = cuenta(it => it.estado === "error"), guardadas = cuenta(it => it.estado === "guardada");
   fxEl("div", "fx-cat", `${lote.items.length} documentos: ✓ ${guardadas} guardadas · ${listas.length} listas para guardar · ⚠ ${porRevisar} por revisar · ✖ ${fallos} sin leer`, body);
+  if (lote.mensaje) { fxEl("div", "fx-note ok", lote.mensaje, body); lote.mensaje = ""; }
+  const sinGuardar = listas.length + porRevisar + fallos;
+  const pasos = [];
+  if (listas.length) pasos.push(`Pulsa «Guardar las ${listas.length} que cuadran»: se guardan de golpe en tu Drive.`);
+  if (porRevisar + fallos) pasos.push(`Revisa las ${porRevisar + fallos} restantes con «Revisar una a una»: corrige lo que falte y guárdalas, o pulsa «Omitir» en las que no son facturas (nóminas, justificantes…).`);
+  if (fallos) pasos.push("Las «sin leer» por el límite de la IA se pueden reintentar más tarde: vuelve a subir el mismo ZIP y solo se leerán las que falten.");
+  if (lote.fuera) pasos.push(`Quedan ${lote.fuera} archivos sin leer (el máximo es ${FX_MAX_LOTE} por tanda): cuando termines con estas, vuelve a subir el mismo ZIP; las ya guardadas se saltan y solo se leerán las que faltan.`);
+  if (!pasos.length) pasos.push("Todo está guardado. Pulsa «Terminar»; después podrás subir el extracto bancario para cotejar.");
+  fxGuia(body, sinGuardar || lote.fuera ? "Qué hacer ahora" : "✓ Todo listo", pasos);
   if (listas.length) {
     const todas = fxEl("button", "fx-big", `Guardar las ${listas.length} que cuadran`, body);
     todas.onclick = () => fxGuardarListas(listas);
@@ -2527,7 +2557,17 @@ function fxResumenLote() {
     if (it.estado !== "guardada") row.onclick = () => fxAbrirItem(i, false);
   });
   const fin = fxEl("button", "fx-sec", "Terminar", body);
-  fin.onclick = () => { FX.lote = null; if (guardadas) fxExtracto(true); else fxLista(); };
+  let aviso = false;
+  fin.onclick = () => {
+    if (sinGuardar && !aviso) {   // salir pierde lo leído y no guardado: se pide confirmación con un segundo toque
+      aviso = true;
+      fin.textContent = `Salir sin guardar ${sinGuardar} (se perderán)`;
+      fxEl("div", "fx-note err", `Aún quedan ${sinGuardar} sin guardar: si sales ahora, hay que volver a subirlas. Pulsa otra vez para salir.`, body);
+      return;
+    }
+    FX.lote = null;
+    if (guardadas) fxExtracto(true); else fxLista();
+  };
 }
 
 async function fxGuardarListas(listas) {
@@ -2546,6 +2586,8 @@ async function fxGuardarListas(listas) {
     if (r.d.ok) it.estado = "guardada";
     else { it.estado = "leida"; it.lectura.avisos = [...it.lectura.avisos, "No se pudo guardar: " + (r.d.error || "error")]; }
   }
+  const bien = listas.filter(it => it.estado === "guardada").length;
+  FX.lote.mensaje = `✓ Guardadas ${bien} de ${listas.length} en tu Drive` + (bien < listas.length ? `. ${listas.length - bien} no se pudieron guardar: aparecen abajo con el motivo.` : ".");
   fxResumenLote();
 }
 
@@ -2577,7 +2619,7 @@ $("#fx-extracto").addEventListener("change", async (e) => {
   let r;
   try { r = await fxApi("/extracto", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, archivo: {nombre: file.name, mime, base64}})}); }
   catch (err) { r = {d: {ok: false, error: "Error de conexión."}}; }
-  if (r.d.ok) FX.extractoMsg("✓ Extracto guardado en tu Drive (" + (r.d.nombre || file.name) + "). El cotejo automático con las facturas llegará en la siguiente fase; ya queda guardado y ordenado.", true);
+  if (r.d.ok) FX.extractoMsg("✓ Extracto guardado en tu Drive (" + (r.d.nombre || file.name) + "). El cotejo automático con las facturas llegará en la siguiente fase; ya queda guardado y ordenado. Puedes volver con «Volver» y seguir subiendo facturas.", true);
   else FX.extractoMsg(r.d.error || "No se pudo guardar el extracto.", false);
 });
 
@@ -2591,6 +2633,9 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
   $("#fx-title").textContent = "🧾 Revisa la factura" + (ctx && ctx.etiqueta ? " · " + ctx.etiqueta : "");
   if (errorLectura) fxEl("div", "fx-note err", errorLectura, body);
   avisos.forEach(a => fxEl("div", "fx-note", a, body));
+  fxGuia(body, errorLectura ? "No he podido leerla" : "Revisa los datos", errorLectura
+    ? ["Rellena los datos a mano y pulsa «Guardar en el Drive».", "Si no es una factura (nómina, justificante de pago…), pulsa «Omitir»."]
+    : ["Comprueba proveedor, fecha, importes y categoría; en amarillo está lo que dudo.", "Si todo está bien, pulsa «Guardar en el Drive». Si no es una factura, pulsa «Omitir»."]);
   if (arch && arch.vista) { const im = fxEl("img", "fx-thumb", null, body); im.src = arch.vista; im.alt = "Vista previa"; }
   else if (arch) fxEl("div", "fx-cat", "📄 " + arch.nombre, body);
   const form = fxEl("div", "fx-form", null, body);
