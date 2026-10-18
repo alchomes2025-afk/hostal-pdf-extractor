@@ -45,6 +45,7 @@ function doPost(e) {
     if (p.accion === 'ocr') return json_(ocr_(p));
     if (p.accion === 'correo') return json_(correo_(p));
     if (p.accion === 'guardar') return json_(guardar_(p));
+    if (p.accion === 'descargar') return json_(descargar_(p));
     return json_({ ok: false, error: 'accion_desconocida' });
   } catch (err) {
     return json_({ ok: false, error: 'fallo_interno', detalle: String(err && err.message || err).substring(0, 300) });
@@ -209,6 +210,15 @@ function resumen_(p) {
   } finally {
     bloqueo.releaseLock();
   }
+}
+
+function descargar_(p) {
+  const archivo = DriveApp.getFileById(p.file_id);
+  if (!dentro_(archivo, p.raiz_id)) return { ok: false, error: 'archivo_fuera_de_la_carpeta_del_cliente' };
+  const blob = archivo.getBlob();
+  const bytes = blob.getBytes();
+  if (bytes.length > 6 * 1024 * 1024) return { ok: false, error: 'archivo_demasiado_grande' };
+  return { ok: true, nombre: archivo.getName(), mime: blob.getContentType(), base64: Utilities.base64Encode(bytes) };
 }
 
 function eliminar_(p) {

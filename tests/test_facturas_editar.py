@@ -44,7 +44,7 @@ class Base(unittest.TestCase):
         self.llamadas = []
         for o, n, v in ((mobile_routes, "MOBILE_APP_PIN", self.PIN), (mobile_routes, "MOBILE_APP_PIN_ADMIN", self.ADMIN), (facturas, "_coleccion", lambda: Col(self.db)),
                         (facturas, "habilitado", lambda c: True), (facturas, "raiz_drive", lambda c: "RAIZ"),
-                        (puente_plataforma, "actualizar", self._actualizar), (puente_plataforma, "eliminar", self._eliminar)):
+                        (puente_plataforma, "actualizar", self._actualizar), (puente_plataforma, "eliminar", self._eliminar), (puente_plataforma, "descargar", self._descargar)):
             p = mock.patch.object(o, n, v)
             p.start()
             self.addCleanup(p.stop)
@@ -64,6 +64,11 @@ class Base(unittest.TestCase):
             raise puente_plataforma.PuenteError("caído")
         self.llamadas.append(("eliminar", raiz, file_id, registro))
         return {"ok": True}
+
+    def _descargar(self, raiz, file_id):
+        if self.falla:
+            raise puente_plataforma.PuenteError("caído")
+        return {"nombre": "x.pdf", "mime": "application/pdf", "base64": "JVBER"}
 
     def _post(self, ruta, pin, **cuerpo):
         return self.cliente.post(f"/mobile/facturas/{ruta}", json=cuerpo, headers={"x-app-pin": pin} if pin else {})
@@ -148,3 +153,25 @@ class Lista(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Original(Base):
+    def test_devuelve_el_documento(self):
+        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.PIN})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.get_json()["mime"], "application/pdf")
+
+    def test_sin_pin_no(self):
+        self.assertEqual(self.cliente.get(f"/mobile/facturas/original?id={FID}").status_code, 401)
+
+    def test_propiedad_solo_admin_no_para_pin_normal(self):
+        self.db[FID]["propiedad_id"] = "339751"
+        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.PIN})
+        self.assertGreaterEqual(r.status_code, 400)
+        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.ADMIN})
+        self.assertEqual(r.status_code, 200)
+
+    def test_drive_caido_da_502(self):
+        self.falla = True
+        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.PIN})
+        self.assertEqual(r.status_code, 502)

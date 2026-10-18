@@ -108,3 +108,8 @@ y reglas de inversión del sujeto pasivo (Booking) cuando haya un resumen para e
 ## Fuente de ideas
 `C:\Users\monis.HPIKU\Downloads\Contabilidad_Web_v15_8.html`: herramienta personal de Adrián que concilia extractos bancarios
 con facturas (prompts y reglas de cotejo ya probadas). Contiene una clave real de Anthropic: NO subirlo ni copiarla a ningún repo.
+
+## Documento original, pregunta inteligente del Asesor y ayuda por pantalla (2026-10-18)
+- **Ver el documento original**: en la ficha de una factura guardada, botón «👁 Ver documento original». `GET /mobile/facturas/original?id=` pide el archivo al puente (acción nueva `descargar`, máx. 6 MB, solo dentro de la carpeta del cliente) y la app lo muestra incrustado (imagen o PDF). **Hay que volver a pegar `apps-script/puente_hostalfacil.js` y publicar nueva versión.**
+- **Asesor**: si un concepto ya tiene facturas, `asesor.estado()` devuelve `detectado` (nº, meses, importe mensual mín/máx/medio) y la app pregunta «¿es lo mismo todos los meses?» (o «¿qué importe pongo en los meses sin factura?» si varía) con respuestas de un toque.
+- **Ayuda por pantalla**: botón 💬 en la cabecera de Facturas y Asesor; abre el asistente con el texto visible de la pantalla como contexto (`pantalla` en `POST /mobile/assistant`, acotado a 1500 caracteres y marcado como información, no instrucciones).

@@ -16,6 +16,7 @@ Primavera); con el de administración, todas. La app de gestión actual es de un
   GET  /mobile/facturas/resumen-trimestral?propiedad_id&anio&trimestre[&reservas=1]       → resumen del trimestre para el gestor
   POST /mobile/facturas/resumen-trimestral/hoja {propiedad_id, anio, trimestre}           → hoja de Google en el Drive con ese resumen
   POST /mobile/facturas/editar   {id, propiedad_id, datos, usuario}                       → corrige una factura guardada (la renombra/mueve en el Drive y su fila)
+  GET  /mobile/facturas/original?id=…                                                    → {nombre, mime, base64} del documento original en el Drive
   POST /mobile/facturas/eliminar {id, usuario}                                            → borra una factura guardada (archivo a la papelera, fila fuera)
   POST /mobile/facturas/extracto {propiedad_id, archivo:{nombre,mime,base64}, usuario}    → extracto bancario guardado en el Drive (para el cotejo)
   POST /mobile/facturas/cotejar {propiedad_id, archivo, usuario}                          → cotejo del extracto (PDF BBVA o CSV) con las facturas guardadas
@@ -197,6 +198,16 @@ def editar_factura():
     try:
         return jsonify({"ok": True, "factura": facturas.editar(CLIENTE_APP, body.get("id"), body.get("datos"), body.get("propiedad_id"), _es_pin_admin(),
                                                               usuario=body.get("usuario"))})
+    except facturas.FacturaError as e:
+        return _error(e)
+
+
+@facturas_bp.route("/original", methods=["GET"])
+def original_factura():
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    try:
+        return jsonify({"ok": True, **facturas.original(CLIENTE_APP, request.args.get("id"), _es_pin_admin())})
     except facturas.FacturaError as e:
         return _error(e)
 

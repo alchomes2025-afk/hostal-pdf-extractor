@@ -61,6 +61,12 @@ def eliminar(raiz_id, file_id, registro):
     return _llamar("eliminar", raiz_id=raiz_id, file_id=file_id, registro=registro)
 
 
+def descargar(raiz_id, file_id):
+    """Contenido de un archivo de la carpeta del cliente: {nombre, mime, base64}."""
+    data = _llamar("descargar", raiz_id=raiz_id, file_id=file_id)
+    return {k: data.get(k) for k in ("nombre", "mime", "base64")}
+
+
 def actualizar(raiz_id, file_id, ruta, nombre, registro_viejo, registro_nuevo):
     """Mueve y renombra el archivo de una factura y reemplaza su fila en la hoja de registro. Devuelve {url, nombre, hoja_url}."""
     data = _llamar("actualizar", raiz_id=raiz_id, file_id=file_id, ruta=ruta, nombre=nombre, registro_viejo=registro_viejo, registro_nuevo=registro_nuevo)

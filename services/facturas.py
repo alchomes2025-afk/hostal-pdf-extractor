@@ -759,6 +759,19 @@ def editar(cliente_id, factura_id, datos_formulario, propiedad_id, es_admin, usu
     return {"id": fid, **actual, **cambios, "avisos": avisos}
 
 
+def original(cliente_id, factura_id, es_admin):
+    """El documento original de una factura guardada, leído del Drive: {nombre, mime, base64}."""
+    _, _, actual = _factura_guardada(cliente_id, factura_id)
+    comprobar_propiedad(cliente_id, actual.get("propiedad_id"), es_admin)
+    if not habilitado(cliente_id) or not actual.get("drive_id"):
+        raise FacturaError("el documento no está disponible", 404)
+    try:
+        return puente_plataforma.descargar(raiz_drive(cliente_id), actual["drive_id"])
+    except puente_plataforma.PuenteError as e:
+        logger.error(f"[facturas] Descargar original: {e}")
+        raise FacturaError("no se ha podido abrir el documento en el Drive (¿se borró a mano o es muy grande?)", 502)
+
+
 def eliminar(cliente_id, factura_id, es_admin, usuario=""):
     """Borra una factura guardada: el archivo va a la papelera del Drive (30 días), se quita su fila de la hoja de registro y deja de contar. Se
     puede volver a subir (su huella queda libre)."""

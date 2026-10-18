@@ -218,8 +218,25 @@ def check_in_status():
     if otras:
         respuesta["otras_reservas"] = [{"book_id": b.get("id"), "acceso": crear_token(b.get("id")), "arrival": b.get("arrival"),
                                         "departure": b.get("departure"),
-                                        "room_name": ROOM_CONFIG.get(str(b.get("roomId", "")), {}).get("nombre", "")} for b in otras]
+                                        "room_name": ROOM_CONFIG.get(str(b.get("roomId", "")), {}).get("nombre", ""),
+                                        "parte_pendiente": _parte_pendiente_de_otra(b, ahora_madrid.date())} for b in otras]
     return jsonify(respuesta)
+
+
+def _parte_pendiente_de_otra(booking, hoy):
+    """
+    Para la tarjeta «También tienes esta reserva»: True si esa OTRA reserva (aún sin empezar) tiene el parte de viajeros
+    sin completar, para decirle al huésped que puede hacerlo ya; False si ya está; None si no se sabe o ya empezó.
+    Solo lee la copia de RPV: no usa aviso_parte_no_disponible, que anota el «primer intento» de la reserva y adelantaría
+    su reloj de 1 hora cuando quien mira es otra reserva.
+    """
+    try:
+        if date.fromisoformat(booking.get("arrival", "")) < hoy:
+            return None
+        return not parte_recibido_para(str(booking.get("roomId", "")), booking.get("arrival", ""))
+    except Exception as e:   # es un extra: nunca debe impedir el check-in
+        logger.error(f"[check-in] No se pudo comprobar el parte de la otra reserva: {e}")
+        return None
 
 
 @checkin_bp.route("/diagnostico", methods=["GET"])

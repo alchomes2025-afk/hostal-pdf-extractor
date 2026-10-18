@@ -200,6 +200,17 @@ def costes_fijos_mes(cliente_id, propiedad_id, mes, facturas=None, perfil_=None)
 
 
 # ── Estado para el asistente ─────────────────────────────────────────────────────
+def detectado(facs, categorias):
+    """Lo que dicen las facturas subidas de un concepto: cuántas, qué meses cubren y a cuánto sale al mes cada una (para preguntar si es siempre lo mismo)."""
+    mias = [x for x in facs if x.get("tipo") == "gasto" and x.get("categoria") in categorias and cuenta(x, {})]
+    if not mias:
+        return None
+    mensuales = [round((-1 if x.get("es_rectificativa") else 1) * (x.get("total") or 0) / cobertura(x), 2) for x in mias]
+    return {"facturas": len(mias), "meses": sorted({x.get("mes") for x in mias if x.get("mes")}), "cobertura": sorted({cobertura(x) for x in mias}),
+            "mensual_min": min(mensuales), "mensual_max": max(mensuales), "mensual_medio": round(sum(mensuales) / len(mensuales), 2),
+            "igual": max(mensuales) - min(mensuales) < 0.5}
+
+
 def estado(cliente_id, propiedad_id, es_admin, mes_ref):
     """Lo que el asistente necesita: cada concepto con su origen y su importe mensual en el mes de referencia, y la configuración de limpieza."""
     c = fac.cliente(cliente_id)
@@ -213,7 +224,8 @@ def estado(cliente_id, propiedad_id, es_admin, mes_ref):
         decl = (p["conceptos"] or {}).get(def_["id"])
         conceptos.append({"id": def_["id"], "nombre": def_["nombre"], "pregunta": def_["pregunta"], "ayuda": def_["ayuda"], "modo_sugerido": def_["modo"],
                           "origen": x["origen"], "mensual": x["importe"], "facturas_en_el_mes": x["facturas"], "declarado": decl,
-                          "tiene_facturas": any(f.get("tipo") == "gasto" and f.get("categoria") in def_["categorias"] for f in facs)})
+                          "tiene_facturas": any(f.get("tipo") == "gasto" and f.get("categoria") in def_["categorias"] for f in facs),
+                          "detectado": detectado(facs, def_["categorias"])})
     es_hostal = propiedad_id == "339751"
     compras = {}
     for x in facs:

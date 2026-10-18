@@ -283,11 +283,13 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-form .dos{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .fx-form .chk{display:flex;gap:8px;align-items:center;margin:12px 0;font-size:13px;font-weight:600;text-transform:none;letter-spacing:0;color:var(--ink)}
 .fx-form .chk input{width:auto}
+.fx-original{width:100%;border-radius:10px;border:1px solid var(--border);display:block;margin:8px 0}.fx-marco{height:70vh;background:#fff}.fx-link{display:block;margin-bottom:10px;font-size:14px}
 .fx-thumb{max-width:100%;max-height:130px;border-radius:10px;border:1px solid var(--border);display:block;margin-bottom:8px}
 .fx-btns{display:flex;gap:8px;margin-top:14px}
 .fx-btns button{flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:14px}
 .fx-btns button.send{background:var(--acc);color:#fff;border-color:var(--acc)}
 .fx-btns button:disabled{opacity:.5}
+#as-panel.encima{z-index:60}
 #as-panel{
   position:fixed;left:0;right:0;bottom:0;z-index:45;margin:0 auto;width:100%;max-width:520px;
   height:82vh;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.25);
@@ -669,13 +671,13 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div id="fin-body"><div id="fin-loading">Cargando…</div></div>
   </div>
   <div id="fx-panel">
-    <div id="fx-head"><span id="fx-title">🧾 Facturas</span><button type="button" onclick="closeFacturas()" title="Cerrar">✕</button></div>
+    <div id="fx-head"><span id="fx-title">🧾 Facturas</span><span><button type="button" onclick="ayudaPantalla('fx')" title="Preguntar al asistente sobre esta pantalla">💬</button><button type="button" onclick="closeFacturas()" title="Cerrar">✕</button></span></div>
     <div id="fx-body"></div>
     <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z,.csv,.xls,.xlsx,.txt,text/csv" multiple style="display:none">
     <input type="file" id="fx-extracto" accept=".csv,.xls,.xlsx,.pdf,.txt,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
   </div>
   <div id="ac-panel">
-    <div id="ac-head"><span id="ac-title">🧮 Asesor Contable</span><button type="button" onclick="closeAsesor()" title="Cerrar">✕</button></div>
+    <div id="ac-head"><span id="ac-title">🧮 Asesor Contable</span><span><button type="button" onclick="ayudaPantalla('ac')" title="Preguntar al asistente sobre esta pantalla">💬</button><button type="button" onclick="closeAsesor()" title="Cerrar">✕</button></span></div>
     <div id="ac-body"></div>
   </div>
   <button type="button" id="as-fab" title="Preguntar al asistente" onclick="toggleAsistente()">💬</button>
@@ -2333,8 +2335,35 @@ function acConcepto(ids, k, enFlujo) {
   acEl("div", "fx-paso", ids.length > 1 ? `Concepto ${k + 1} de ${ids.length}` : "Concepto", body);
   acEl("h3", "fx-h", c.pregunta, body);
   acEl("p", "fx-p", c.ayuda, body);
-  if (c.tiene_facturas) acEl("div", "fx-note ok", "Ya hay facturas subidas de este concepto; las uso cuando cubren el mes. Esta respuesta solo vale para los meses sin factura.", body);
+  const det = c.detectado;
   let modo = (c.declarado && c.declarado.modo) || c.modo_sugerido;
+  if (det) {
+    const cuantas = det.facturas === 1 ? "1 factura" : `${det.facturas} facturas`;
+    acEl("div", "fx-note ok", det.igual
+      ? `He encontrado ${cuantas} de este concepto y salen a ${acEur(det.mensual_medio)} al mes. Las uso en los meses que cubren; para el resto de meses necesito saber qué suele ser.`
+      : `He encontrado ${cuantas} de este concepto y el importe cambia: de ${acEur(det.mensual_min)} a ${acEur(det.mensual_max)} al mes (media ${acEur(det.mensual_medio)}). Las uso en los meses que cubren; para el resto necesito saber qué suele ser.`, body);
+    acEl("h3", "fx-h", det.igual ? "¿Es lo mismo todos los meses?" : "¿Qué importe pongo en los meses sin factura?", body);
+    const decl = c.declarado && c.declarado.importe != null ? c.declarado : null;
+    const opciones = [[`Sí, ${acEur(det.mensual_medio)} cada mes`, "mensual", det.mensual_medio], [`Varía: usar la media (${acEur(det.mensual_medio)}/mes)`, "mensual", det.mensual_medio],
+                      ["Es otro importe", null, null], ["Este concepto no cuenta aquí", "no_aplica", 0]];
+    if (det.igual) opciones.splice(1, 1); else opciones.shift();
+    const msgDet = acEl("div", "fx-note err", "", body);
+    msgDet.style.display = "none";
+    const lista = acEl("div", "ac-opciones", null, body);
+    opciones.forEach(([t, m, imp]) => {
+      const b = acEl("button", "", t, lista); b.type = "button";
+      b.onclick = async () => {
+        if (m === null) { det.otro = true; return acConcepto(ids, k, enFlujo); }
+        b.disabled = true;
+        const ok = await acGuardar({conceptos: {[c.id]: {modo: m, importe: imp}}}, msgDet);
+        b.disabled = false;
+        if (ok) (k + 1 >= ids.length ? (enFlujo ? acFinal() : acIntro()) : acConcepto(ids, k + 1, enFlujo));
+      };
+    });
+    if (!det.otro) { const atrasDet = acEl("div", "fx-btns", null, body); const bb = acEl("button", "", k ? "Atrás" : "Cancelar", atrasDet); bb.onclick = () => (k ? acConcepto(ids, k - 1, enFlujo) : acIntro()); return; }
+    acEl("p", "fx-p", "Cuéntame qué importe pongo para los meses sin factura:", body);
+  }
+
   const defs = [["anual", "Al año"], ["mensual", "Al mes"], ["no_aplica", "No aplica"], ["no_se", "No lo sé"]];
   const botones = {};
   const modos = acEl("div", "ac-modos", null, body);
@@ -3233,7 +3262,13 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
     : ["Comprueba proveedor, fecha, importes y categoría; en amarillo está lo que dudo.", "Si todo está bien, pulsa «Guardar en el Drive». Si no es una factura, pulsa «Omitir»."]);
   if (arch && arch.vista) { const im = fxEl("img", "fx-thumb", null, body); im.src = arch.vista; im.alt = "Vista previa"; }
   else if (arch) fxEl("div", "fx-cat", "📄 " + arch.nombre, body);
-  else if (ctx && ctx.editar) fxEl("div", "fx-cat", "📄 " + (ctx.editar.archivo || "archivo del Drive"), body);
+  else if (ctx && ctx.editar) {
+    fxEl("div", "fx-cat", "📄 " + (ctx.editar.archivo || "archivo del Drive"), body);
+    const visor = fxEl("div", "fx-visor", null, body);
+    const ver = fxEl("button", "fx-big", "👁 Ver documento original", body);
+    body.insertBefore(ver, visor);
+    ver.onclick = () => fxVerOriginal(ctx.editar.id, visor, ver);
+  }
   const form = fxEl("div", "fx-form", null, body);
   // Propiedad a la que va la factura (o a la que pertenece, al editar). Solo se muestra si el PIN puede ver más de una.
   let propSel = null;
@@ -3406,6 +3441,23 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
 }
 
 // Editar una factura ya guardada (se llega tocándola en la lista del mes).
+async function fxVerOriginal(id, visor, boton) {
+  if (visor.dataset.abierto) { visor.textContent = ""; delete visor.dataset.abierto; boton.textContent = "👁 Ver documento original"; return; }
+  boton.disabled = true; boton.textContent = "Abriendo…";
+  let r;
+  try { r = await fxApi("/original?id=" + encodeURIComponent(id)); } catch (e) { r = {d: {ok: false, error: "Error de conexión."}}; }
+  boton.disabled = false;
+  if (!r.d.ok) { boton.textContent = "👁 Ver documento original"; fxEl("div", "fx-note err", r.d.error || "No se ha podido abrir el documento.", visor); return; }
+  const bin = atob(r.d.base64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([bytes], {type: r.d.mime}));
+  visor.dataset.abierto = "1"; boton.textContent = "Cerrar documento";
+  if (/^image\//.test(r.d.mime)) { const im = fxEl("img", "fx-original", null, visor); im.src = url; im.alt = "Documento original"; }
+  else { const fr = fxEl("iframe", "fx-original fx-marco", null, visor); fr.src = url; fr.title = "Documento original"; }
+  const a = fxEl("a", "fx-link", "Abrir en pantalla completa ↗", visor);
+  a.href = url; a.target = "_blank"; a.rel = "noopener";
+}
+
 function fxEditar(f) {
   fxFormulario({...f}, [], null, "", {
     archivo: null, etiqueta: "", propiedad: String(f.propiedad_id || FIN_PROPERTY), editar: {id: f.id, archivo: f.archivo},
@@ -3428,10 +3480,22 @@ const AS_CHIPS = [
 const AS_COLORS = ["#e0629e", "#d9b8f5", "#4caf7d", "#f2a65a", "#6aa7e0", "#c94f8f", "#8a7690", "#7bc4b8", "#e0a0c4", "#b0903d"];
 let AS_HISTORY = [];
 let AS_BUSY = false;
+let AS_PANTALLA = null;   // función que devuelve el texto de la pantalla desde la que se abrió el asistente (ayuda contextual)
+
+function ayudaPantalla(cual) {
+  const titulo = $("#" + cual + "-title").textContent;
+  AS_PANTALLA = () => titulo + "\n" + $("#" + cual + "-body").innerText.replace(/\n{2,}/g, "\n").slice(0, 1400);
+  $("#as-panel").classList.add("encima");
+  AS_HISTORY = [];
+  $("#as-messages").textContent = "";
+  if ($("#as-panel").style.display !== "flex") toggleAsistente();
+  resetAsistente(titulo);
+}
 
 function toggleAsistente() {
   const panel = $("#as-panel");
   const opening = panel.style.display !== "flex";
+  if (!opening) { panel.classList.remove("encima"); AS_PANTALLA = null; }
   panel.style.display = opening ? "flex" : "none";
   $("#as-fab").style.display = opening ? "none" : "block";
   if (opening) {
@@ -3440,17 +3504,18 @@ function toggleAsistente() {
   }
 }
 
-function resetAsistente() {
+function resetAsistente(pantalla) {
   AS_HISTORY = [];
+  if (typeof pantalla !== "string") { AS_PANTALLA = null; $("#as-panel").classList.remove("encima"); }
   const wrap = $("#as-messages");
   wrap.innerHTML = "";
   const empty = document.createElement("div");
   empty.id = "as-empty";
-  empty.textContent = "Pregunta lo que necesites sobre reservas, llegadas, partes de viajeros, disponibilidad, ocupación y finanzas. También puedo compararte periodos y dibujarte gráficos.";
+  empty.textContent = typeof pantalla === "string" ? `Estás en «${pantalla}». Pregúntame qué significa algo, qué debes hacer o qué pasa si pulsas un botón: lo veo en tu pantalla.` : "Pregunta lo que necesites sobre reservas, llegadas, partes de viajeros, disponibilidad, ocupación y finanzas. También puedo compararte periodos y dibujarte gráficos.";
   wrap.appendChild(empty);
   const chips = document.createElement("div");
   chips.id = "as-chips";
-  AS_CHIPS.forEach(texto => {
+  (typeof pantalla === "string" ? ["¿Qué tengo que hacer aquí?", "¿Para qué sirve esta pantalla?", "Explícamelo más fácil"] : AS_CHIPS).forEach(texto => {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "as-chip";
@@ -3713,7 +3778,7 @@ async function sendAsistente() {
     const r = await fetch(`${API}/assistant`, {
       method: "POST",
       headers: {"x-app-pin": PIN, "content-type": "application/json"},
-      body: JSON.stringify({mensajes: AS_HISTORY.slice(-12), finanzas: IS_ADMIN || FIN_UNLOCKED, pin: PIN}),
+      body: JSON.stringify({mensajes: AS_HISTORY.slice(-12), finanzas: IS_ADMIN || FIN_UNLOCKED, pin: PIN, pantalla: AS_PANTALLA ? AS_PANTALLA() : ""}),
     });
     const d = await r.json();
     loadingEl.remove();

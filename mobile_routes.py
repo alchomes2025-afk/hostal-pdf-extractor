@@ -1939,7 +1939,7 @@ def mobile_assistant():
     if mensajes is None:
         mensajes = [{"role": "user", "content": str(data.get("pregunta") or "")}]
         finanzas = True
-    resultado, status = asistente_responder(mensajes, {"es_admin": _es_pin_admin(), "finanzas": finanzas})
+    resultado, status = asistente_responder(mensajes, {"es_admin": _es_pin_admin(), "finanzas": finanzas, "pantalla": str(data.get("pantalla") or "")[:1500]})
     return jsonify(resultado), status
 
 
