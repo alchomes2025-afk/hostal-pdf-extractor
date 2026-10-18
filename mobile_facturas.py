@@ -125,13 +125,16 @@ def asesor_estado():
 
 @facturas_bp.route("/asesor/respuestas", methods=["POST"])
 def asesor_respuestas():
-    """Guarda lo que el usuario contesta al Asesor: {propiedad_id, conceptos: {id: {modo: anual|mensual|no_aplica, importe}}, limpieza: {modo, importe}}."""
+    """Guarda lo que el usuario contesta al Asesor: {propiedad_id, conceptos: {id: {modo: anual|mensual|no_aplica, importe}}, limpieza: {modo, importe, horas_min, horas_max},
+    excluidas: [categorías de compras que son de OTRO proyecto], completar: bool (rellenar lo que falte con la estimación anual de siempre)}."""
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
     body = request.get_json(silent=True) or {}
     try:
         propiedad = facturas.comprobar_propiedad(CLIENTE_APP, body.get("propiedad_id"), _es_pin_admin())
-        asesor.guardar_perfil(CLIENTE_APP, propiedad, body.get("conceptos"), body.get("limpieza"), usuario=body.get("usuario"))
+        exc = body.get("excluidas")
+        asesor.guardar_perfil(CLIENTE_APP, propiedad, body.get("conceptos"), body.get("limpieza"), usuario=body.get("usuario"),
+                              excluidas=exc if isinstance(exc, list) else None, completar=body.get("completar") if "completar" in body else None)
         return jsonify({"ok": True, **asesor.estado(CLIENTE_APP, propiedad, _es_pin_admin(), body.get("mes") if re.fullmatch(r"\d{4}-\d{2}", str(body.get("mes") or "")) else _mes_actual())})
     except facturas.FacturaError as e:
         return _error(e)

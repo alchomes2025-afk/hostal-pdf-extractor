@@ -219,8 +219,23 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
   width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;
   background:var(--acc);color:#fff;font-size:24px;box-shadow:0 4px 14px rgba(0,0,0,.28);
 }
+#ac-panel{position:fixed;left:0;right:0;bottom:0;z-index:47;margin:0 auto;width:100%;max-width:520px;height:92vh;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.25);display:none;flex-direction:column}
+#ac-head{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;padding:12px 14px;border-bottom:1.5px solid var(--border);font-weight:800;font-size:14px}
+#ac-head button{background:none;border:none;font-size:17px;cursor:pointer;padding:2px 8px;color:var(--muted)}
+#ac-body{flex:1;overflow-y:auto;padding:12px 14px 24px}
+.ac-opciones{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.ac-opciones button{padding:12px;border-radius:12px;border:1.5px solid var(--border);background:#fff;font-weight:700;font-size:13.5px;text-align:left;line-height:1.35}
+.ac-opciones button.act{border-color:var(--acc);background:#fdf1f8}
+.ac-conc{display:flex;gap:8px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer}
+.ac-conc .ic{width:22px;text-align:center}
+.ac-conc .tx{flex:1;min-width:0}
+.ac-conc .tx small{color:var(--muted);display:block}
+.ac-conc .im{font-weight:800;white-space:nowrap}
+.ac-modos{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0}
+.ac-modos button{padding:10px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:700;font-size:12.5px}
+.ac-modos button.act{background:var(--acc);border-color:var(--acc);color:#fff}
 #fx-bar{padding:10px 14px 0}
-#fx-bar button{width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:#fff;color:var(--ink);font-weight:800;font-size:13.5px}
+#fx-bar button{margin-bottom:8px;width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:#fff;color:var(--ink);font-weight:800;font-size:13.5px}
 #fx-panel{position:fixed;left:0;right:0;bottom:0;z-index:46;margin:0 auto;width:100%;max-width:520px;height:92vh;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.25);display:none;flex-direction:column}
 #fx-head{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;padding:12px 14px;border-bottom:1.5px solid var(--border);font-weight:800;font-size:14px}
 #fx-head button{background:none;border:none;font-size:17px;cursor:pointer;padding:2px 8px;color:var(--muted)}
@@ -650,7 +665,7 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
       <span id="fin-month-text">—</span>
       <button class="fin-nav-btn" onclick="shiftFinanceMonth(1)">›</button>
     </div>
-    <div id="fx-bar"><button type="button" onclick="openFacturas()">🧾 Facturas de este mes</button></div>
+    <div id="fx-bar"><button type="button" onclick="openFacturas()">🧾 Facturas de este mes</button><button type="button" onclick="openAsesor()">🧮 Asesor Contable</button></div>
     <div id="fin-body"><div id="fin-loading">Cargando…</div></div>
   </div>
   <div id="fx-panel">
@@ -658,6 +673,10 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div id="fx-body"></div>
     <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z,.csv,.xls,.xlsx,.txt,text/csv" multiple style="display:none">
     <input type="file" id="fx-extracto" accept=".csv,.xls,.xlsx,.pdf,.txt,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
+  </div>
+  <div id="ac-panel">
+    <div id="ac-head"><span id="ac-title">🧮 Asesor Contable</span><button type="button" onclick="closeAsesor()" title="Cerrar">✕</button></div>
+    <div id="ac-body"></div>
   </div>
   <button type="button" id="as-fab" title="Preguntar al asistente" onclick="toggleAsistente()">💬</button>
   <div id="as-panel">
@@ -2068,6 +2087,331 @@ function shiftFinanceMonth(delta) {
   loadFinance();
 }
 
+// ── Asesor Contable (pestaña Finanzas) ───────────────────
+// Asistente que HACE LAS PREGUNTAS ADECUADAS para calcular costes y rentabilidad lo más reales posible. No solo pide importes: mira las facturas subidas y pregunta lo
+// que no puede saber o lo que parece raro: ¿las compras son de esta propiedad o de otro proyecto?, ¿cómo se hace la limpieza si no hay facturas (y la estimo?), ¿qué
+// hago con lo que no sepas? Usa las facturas cuando las hay (un seguro o el IBI se reparten entre los meses que cubren) y lo contestado se guarda por propiedad.
+const AC = {estado: null, cola: [], k: 0, pasos: []};
+const acEl = (tag, cls, text, parent) => fxEl(tag, cls, text, parent);
+const AC_ICONO = {facturas: "🧾", declarado: "✎", no_aplica: "—", falta: "❓"};
+const acEur = n => Number(n).toLocaleString("es-ES", {style: "currency", currency: "EUR", maximumFractionDigits: 2});
+const acMes = () => `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
+
+async function acApi(path, opciones) {
+  const r = await fetch(`${API}/facturas${path}`, {headers: {"x-app-pin": PIN, "content-type": "application/json"}, ...opciones});
+  let d = {};
+  try { d = await r.json(); } catch (e) { d = {ok: false, error: "Respuesta no válida del servidor"}; }
+  return {status: r.status, d};
+}
+
+async function acGuardar(cuerpo, msg) {
+  const r = await acApi("/asesor/respuestas", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, mes: acMes(), ...cuerpo})}).catch(() => ({d: {ok: false, error: "Error de conexión."}}));
+  if (!r.d.ok) { if (msg) { msg.textContent = r.d.error || "No se pudo guardar."; msg.style.display = "block"; } return false; }
+  AC.estado = r.d;
+  return true;
+}
+
+async function openAsesor() {
+  $("#ac-panel").style.display = "flex";
+  $("#as-fab").style.display = "none";
+  $("#ac-body").textContent = "Cargando…";
+  await acCargar();
+  acIntro();
+}
+
+function closeAsesor() {
+  $("#ac-panel").style.display = "none";
+  if ($("#as-panel").style.display !== "flex") $("#as-fab").style.display = "block";
+  loadFinance();   // la rentabilidad puede haber cambiado con lo contestado
+}
+
+async function acCargar() {
+  try {
+    const {d} = await acApi(`/asesor/estado?propiedad_id=${FIN_PROPERTY}&mes=${acMes()}`);
+    AC.estado = d.ok ? d : null;
+    AC.error = d.ok ? "" : (d.error || "No se pudo cargar");
+  } catch (e) { AC.estado = null; AC.error = "Error de conexión."; }
+}
+
+function acBase(titulo) {
+  const body = $("#ac-body");
+  body.textContent = "";
+  $("#ac-title").textContent = titulo || "🧮 Asesor Contable";
+  return body;
+}
+
+function acBotones(padre, opciones) {   // opciones: [[texto, función, clase?]]
+  const caja = acEl("div", "ac-opciones", null, padre);
+  opciones.forEach(([t, fn, cls]) => { const b = acEl("button", cls || "", t, caja); b.type = "button"; b.onclick = fn; });
+  return caja;
+}
+
+// Qué falta por preguntar, en orden: compras de otro proyecto → limpieza → conceptos fijos → qué hacer con lo que siga sin dato.
+function acPendientes() {
+  const e = AC.estado, pasos = [];
+  if (e.compras.facturas && !e.compras.decidido) pasos.push("compras");
+  if (!e.limpieza.declarado) pasos.push("limpieza");
+  e.faltan.forEach(id => pasos.push("c:" + id));
+  return pasos;
+}
+
+function acIntro() {
+  const body = acBase();
+  if (!AC.estado) { acEl("div", "fx-note err", AC.error || "No se pudo cargar.", body); return; }
+  const e = AC.estado, pend = acPendientes();
+  acEl("h3", "fx-h", `Rentabilidad de ${e.propiedad}`, body);
+  acEl("p", "fx-p", "Voy a hacerte las preguntas que necesito para calcular tus costes y tu beneficio lo más reales posible. Uso las facturas que ya has subido y solo te pregunto lo que no puedo saber o lo que me parece raro.", body);
+  fxGuia(body, pend.length ? "Qué hacer ahora" : "✓ Todo contestado", pend.length
+    ? [`Tengo ${pend.length} ${pend.length === 1 ? "pregunta" : "preguntas"} para ti. Pulsa «Empezar» (o toca cualquier tema para cambiarlo).`]
+    : ["Tengo todo lo que necesito. Toca un tema si quieres cambiar una respuesta."]);
+  acEl("div", "fx-cat", "Temas", body);
+  // Compras
+  if (e.compras.facturas) {
+    const row = acEl("div", "ac-conc", null, body);
+    acEl("div", "ic", e.compras.decidido ? "✎" : "❓", row);
+    const tx = acEl("div", "tx", null, row);
+    acEl("b", "", "Compras (muebles, reparaciones…)", tx);
+    const exc = e.compras.excluidas.length;
+    acEl("small", "", `${e.compras.facturas} facturas · ${acEur(e.compras.total)}` + (e.compras.decidido ? (exc ? ` · ${exc === e.compras.categorias.length ? "de otro proyecto" : "algunas de otro proyecto"}` : " · de esta propiedad") : " · ¿de esta propiedad?"), tx);
+    row.onclick = () => acCompras();
+  }
+  // Limpieza
+  const lim = acEl("div", "ac-conc", null, body);
+  acEl("div", "ic", e.limpieza.declarado ? "✎" : "❓", lim);
+  const tl = acEl("div", "tx", null, lim);
+  acEl("b", "", "Limpieza", tl);
+  const d = e.limpieza.declarado;
+  acEl("small", "", d ? {estancia: `Estimada: ${acEur(d.importe)} por estancia`, hora: `Estimada: ${acEur(d.importe)} por hora`, fija: `Estimada: ${acEur(d.importe)} al mes`, externa: "Empresa externa: sube sus facturas", no_aplica: "No aplica"}[d.modo]
+                     : (e.limpieza.facturas ? `${e.limpieza.facturas} facturas de limpieza` : "Sin facturas: ¿cómo se hace?"), tl);
+  lim.onclick = () => acLimpieza();
+  // Costes fijos
+  e.conceptos.forEach(c => {
+    const row = acEl("div", "ac-conc", null, body);
+    acEl("div", "ic", AC_ICONO[c.origen], row);
+    const tx = acEl("div", "tx", null, row);
+    acEl("b", "", c.nombre, tx);
+    acEl("small", "", {facturas: `Con tus facturas${c.facturas_en_el_mes ? ` (${c.facturas_en_el_mes} este mes)` : ""}`, declarado: "Lo que me dijiste", no_aplica: "No aplica", falta: "Falta: tócalo para contestar"}[c.origen], tx);
+    acEl("div", "im", c.origen === "falta" ? "—" : acEur(c.mensual) + "/mes", row);
+    row.onclick = () => acConcepto([c.id], 0, false);
+  });
+  acEl("div", "fx-cat", `Costes fijos mensuales con lo que sé hoy: ${acEur(e.fijos_mensual)}${e.faltan.length ? " (incompleto)" : ""}` + (e.completar ? " · lo que falte se completa con tu estimación de siempre" : ""), body);
+  if (pend.length) { const go = acEl("button", "fx-big", "Empezar", body); go.onclick = () => { AC.pasos = pend; AC.k = 0; acPaso(); }; }
+  acEl("button", "fx-sec", "Ver mi rentabilidad", body).onclick = () => closeAsesor();
+}
+
+function acPaso() {   // ejecuta el paso AC.k de la lista AC.pasos
+  const paso = AC.pasos[AC.k];
+  if (!paso) return acFinal();
+  if (paso === "compras") return acCompras(true);
+  if (paso === "limpieza") return acLimpieza(true);
+  // los conceptos fijos son siempre los últimos pasos: se recorren de seguido y al terminar se pasa al final
+  acConcepto(AC.pasos.slice(AC.k).filter(x => x.startsWith("c:")).map(x => x.slice(2)), 0, true);
+}
+
+function acSiguientePaso() { AC.k++; acPaso(); }
+
+// ── Compras: ¿de esta propiedad o de otro proyecto? ──
+function acCompras(enFlujo) {
+  const e = AC.estado, body = acBase("🧮 Compras");
+  acEl("h3", "fx-h", `¿Las compras son de ${e.propiedad}?`, body);
+  acEl("p", "fx-p", `He visto ${e.compras.facturas} facturas de compras (mobiliario, reparaciones, consumibles…) por ${acEur(e.compras.total)}. A veces esas compras son de OTRO proyecto (una reforma, otra vivienda…) y no tienen que contar en la rentabilidad de esta propiedad. Siguen en las cuentas del gestor.`, body);
+  e.compras.categorias.forEach(c => { const f = acEl("div", "ac-conc", null, body); f.style.cursor = "default"; acEl("div", "tx", `${c.categoria} · ${c.facturas} facturas`, f); acEl("div", "im", acEur(c.total), f); });
+  const msg = acEl("div", "fx-note err", "", body);
+  msg.style.display = "none";
+  const hecho = async (excluidas) => { if (await acGuardar({conceptos: {}, excluidas}, msg)) (enFlujo ? acSiguientePaso() : acIntro()); };
+  acBotones(body, [
+    ["Sí, son de esta propiedad", () => hecho([])],
+    ["No, son de otro proyecto (no cuentan)", () => hecho(e.compras.categorias.map(c => c.categoria)), "act"],
+    ["Algunas sí y otras no", () => acComprasMixtas(enFlujo)],
+  ]);
+  acEl("button", "fx-sec", enFlujo ? "Saltar por ahora" : "Cancelar", body).onclick = () => enFlujo ? acSiguientePaso() : acIntro();
+}
+
+function acComprasMixtas(enFlujo) {
+  const e = AC.estado, body = acBase("🧮 Compras");
+  acEl("h3", "fx-h", "Marca las que son de otro proyecto", body);
+  acEl("p", "fx-p", "Las categorías marcadas dejan de contar en la rentabilidad de esta propiedad. Si solo algunas facturas de una categoría son de otro proyecto, déjala sin marcar y márcalas una a una al abrir la factura.", body);
+  const marcas = {};
+  e.compras.categorias.forEach(c => {
+    const l = acEl("label", "chk", null, body);
+    const i = acEl("input", "", null, l); i.type = "checkbox"; i.checked = e.compras.excluidas.includes(c.categoria);
+    marcas[c.categoria] = i;
+    acEl("span", "", `${c.categoria} (${c.facturas} facturas, ${acEur(c.total)}): de otro proyecto`, l);
+  });
+  const msg = acEl("div", "fx-note err", "", body);
+  msg.style.display = "none";
+  const btns = acEl("div", "fx-btns", null, body);
+  const ok = acEl("button", "send", "Guardar", btns);
+  acEl("button", "", "Atrás", btns).onclick = () => acCompras(enFlujo);
+  ok.onclick = async () => { if (await acGuardar({conceptos: {}, excluidas: Object.entries(marcas).filter(([, i]) => i.checked).map(([c]) => c)}, msg)) (enFlujo ? acSiguientePaso() : acIntro()); };
+}
+
+// ── Limpieza: con factura, externa, o hecha por vosotros y estimada ──
+function acLimpieza(enFlujo) {
+  const e = AC.estado, body = acBase("🧮 Limpieza");
+  const l = e.limpieza;
+  acEl("h3", "fx-h", `¿Cómo se hace la limpieza de ${e.propiedad}?`, body);
+  acEl("p", "fx-p", l.facturas ? `Veo ${l.facturas} facturas de limpieza. Las uso cuando las hay en el mes.` : "No veo ninguna factura de limpieza. Eso es normal si la hacéis vosotros mismos, pero entonces la rentabilidad sale más alta de lo real porque falta ese coste.", body);
+  const msg = acEl("div", "fx-note err", "", body);
+  msg.style.display = "none";
+  const fin = async (modo) => { if (await acGuardar({conceptos: {}, limpieza: {modo, importe: 0}}, msg)) (enFlujo ? acSiguientePaso() : acIntro()); };
+  acBotones(body, [
+    ["La hace una empresa o persona externa: subiré sus facturas", () => fin("externa")],
+    ["La hacemos nosotros, sin factura", () => acLimpiezaEstimar(enFlujo), "act"],
+    ["No hay limpieza que contar", () => fin("no_aplica")],
+  ]);
+  acEl("button", "fx-sec", enFlujo ? "Saltar por ahora" : "Cancelar", body).onclick = () => enFlujo ? acSiguientePaso() : acIntro();
+}
+
+function acLimpiezaEstimar(enFlujo) {
+  const e = AC.estado, l = e.limpieza, body = acBase("🧮 Limpieza");
+  const hostal = l.modo_habitual === "hora";
+  acEl("h3", "fx-h", "Como no hay factura, ¿la estimo?", body);
+  acEl("p", "fx-p", `Si no la cuento, tu beneficio sale más alto del real. Hasta ahora estimábamos ${hostal ? "de 1 a 3 horas al día a 10 €/hora según la ocupación" : "69 € por estancia (limpieza y productos)"}. Puedes mantener esa estimación o ajustarla. Algunas formas de calcularla:`, body);
+  const ul = acEl("ul", "fx-ol", null, body);
+  l.ideas.forEach(t => acEl("li", "", t, ul));
+  const msg = acEl("div", "fx-note err", "", body);
+  msg.style.display = "none";
+  acBotones(body, [
+    [hostal ? "Por horas según la ocupación" : "Por estancia (€ por reserva)", () => acLimpiezaDatos(hostal ? "hora" : "estancia", enFlujo), "act"],
+    ...(hostal ? [] : [["Por horas que lleva cada estancia", () => acLimpiezaDatos("hora", enFlujo)]]),
+    ["Cuota fija al mes", () => acLimpiezaDatos("fija", enFlujo)],
+    ["No estimarla (que cuente 0)", async () => { if (await acGuardar({conceptos: {}, limpieza: {modo: "no_aplica", importe: 0}}, msg)) (enFlujo ? acSiguientePaso() : acIntro()); }],
+  ]);
+  acEl("button", "fx-sec", "Atrás", body).onclick = () => acLimpieza(enFlujo);
+}
+
+function acLimpiezaDatos(modo, enFlujo) {
+  const e = AC.estado, l = e.limpieza, body = acBase("🧮 Limpieza");
+  const hostal = l.modo_habitual === "hora";
+  const decl = l.declarado && l.declarado.modo === modo ? l.declarado : null;
+  const etiquetas = {estancia: "€ por estancia", hora: "€ por hora", fija: "€ al mes"};
+  acEl("h3", "fx-h", {estancia: "¿Cuánto cuesta limpiar cada estancia?", hora: "¿Cuánto vale una hora de limpieza?", fija: "¿Cuánto es la cuota fija al mes?"}[modo], body);
+  const form = acEl("div", "fx-form", null, body);
+  acEl("label", "", etiquetas[modo], form);
+  const importe = acEl("input", "", null, form);
+  importe.type = "text"; importe.inputMode = "decimal";
+  importe.value = decl ? decl.importe : (modo === l.modo_habitual ? l.importe_habitual : (modo === "hora" ? 10 : ""));
+  let hMin = null, hMax = null;
+  if (modo === "hora") {
+    acEl("label", "", hostal ? "Horas al día con el hostal vacío (mínimo)" : "Horas que lleva cada estancia", form);
+    hMin = acEl("input", "", null, form); hMin.type = "text"; hMin.inputMode = "decimal";
+    hMin.value = decl && decl.horas_min != null ? decl.horas_min : (hostal ? 1 : 3);
+    if (hostal) {
+      acEl("label", "", "Horas al día con el hostal lleno (máximo)", form);
+      hMax = acEl("input", "", null, form); hMax.type = "text"; hMax.inputMode = "decimal";
+      hMax.value = decl && decl.horas_max != null ? decl.horas_max : 3;
+    }
+  }
+  const resumen = acEl("div", "fx-cat", "", form);
+  const calc = () => {
+    const i = fxNum(importe.value), a = hMin ? fxNum(hMin.value) : null, b = hMax ? fxNum(hMax.value) : null;
+    resumen.textContent = i == null ? "" : ({estancia: `Con 5 reservas al mes serían ${acEur(i * 5)}.`, fija: `Son ${acEur(i * 12)} al año.`,
+      hora: hostal ? `Con ocupación media y 30 días: ${acEur(i * ((a || 1) + ((b || 3) - (a || 1)) / 2) * 30)}.` : `Con 5 reservas al mes: ${acEur(i * (a || 3) * 5)}.`}[modo]);
+  };
+  [importe, hMin, hMax].filter(Boolean).forEach(x => x.oninput = calc);
+  calc();
+  const msg = acEl("div", "fx-note err", "", body);
+  msg.style.display = "none";
+  const btns = acEl("div", "fx-btns", null, body);
+  const ok = acEl("button", "send", "Guardar", btns);
+  acEl("button", "", "Atrás", btns).onclick = () => acLimpiezaEstimar(enFlujo);
+  ok.onclick = async () => {
+    const i = fxNum(importe.value);
+    if (i == null || i < 0) { msg.textContent = "Escribe un importe."; msg.style.display = "block"; return; }
+    const lim = {modo, importe: i};
+    if (hMin) lim.horas_min = fxNum(hMin.value);
+    if (hMax) lim.horas_max = fxNum(hMax.value);
+    if (await acGuardar({conceptos: {}, limpieza: lim}, msg)) (enFlujo ? acSiguientePaso() : acIntro());
+  };
+}
+
+// ── Costes fijos por concepto ──
+function acConcepto(ids, k, enFlujo) {
+  const e = AC.estado, c = e.conceptos.find(x => x.id === ids[k]);
+  const body = acBase("🧮 Costes fijos");
+  acEl("div", "fx-paso", ids.length > 1 ? `Concepto ${k + 1} de ${ids.length}` : "Concepto", body);
+  acEl("h3", "fx-h", c.pregunta, body);
+  acEl("p", "fx-p", c.ayuda, body);
+  if (c.tiene_facturas) acEl("div", "fx-note ok", "Ya hay facturas subidas de este concepto; las uso cuando cubren el mes. Esta respuesta solo vale para los meses sin factura.", body);
+  let modo = (c.declarado && c.declarado.modo) || c.modo_sugerido;
+  const defs = [["anual", "Al año"], ["mensual", "Al mes"], ["no_aplica", "No aplica"], ["no_se", "No lo sé"]];
+  const botones = {};
+  const modos = acEl("div", "ac-modos", null, body);
+  const form = acEl("div", "fx-form", null, body);
+  acEl("label", "", "Importe (€)", form);
+  const importe = acEl("input", "", null, form);
+  importe.type = "text"; importe.inputMode = "decimal";
+  importe.value = c.declarado && c.declarado.importe ? c.declarado.importe : "";
+  const ayudaMensual = acEl("div", "fx-cat", "", form);
+  const pintar = () => {
+    defs.forEach(([k2]) => botones[k2].classList.toggle("act", modo === k2));
+    form.style.display = (modo === "anual" || modo === "mensual") ? "block" : "none";
+    const n = fxNum(importe.value);
+    ayudaMensual.textContent = n == null ? "" : (modo === "anual" ? `Son ${acEur(n / 12)} al mes.` : `Son ${acEur(n * 12)} al año.`);
+  };
+  defs.forEach(([k2, t]) => { const b = acEl("button", "", t, modos); b.type = "button"; botones[k2] = b; b.onclick = () => { modo = k2; pintar(); }; });
+  importe.oninput = pintar;
+  pintar();
+  const msg = acEl("div", "fx-note err", "", body);
+  msg.style.display = "none";
+  const btns = acEl("div", "fx-btns", null, body);
+  const ultimo = k + 1 >= ids.length;
+  const sig = acEl("button", "send", ultimo ? (enFlujo ? "Continuar" : "Guardar") : "Siguiente", btns);
+  const atras = acEl("button", "", k ? "Atrás" : "Cancelar", btns);
+  const avanzar = () => { if (!ultimo) return acConcepto(ids, k + 1, enFlujo); enFlujo ? acFinal() : acIntro(); };
+  atras.onclick = () => { if (k) acConcepto(ids, k - 1, enFlujo); else acIntro(); };
+  sig.onclick = async () => {
+    msg.style.display = "none";
+    if (modo === "no_se") return avanzar();   // se deja sin contestar: seguirá en «falta»
+    if (modo !== "no_aplica" && (fxNum(importe.value) == null || fxNum(importe.value) < 0)) { msg.textContent = "Escribe un importe (o elige «No aplica» / «No lo sé»)."; msg.style.display = "block"; return; }
+    sig.disabled = atras.disabled = true;
+    const ok = await acGuardar({conceptos: {[c.id]: {modo, importe: modo === "no_aplica" ? 0 : fxNum(importe.value)}}}, msg);
+    sig.disabled = atras.disabled = false;
+    if (ok) avanzar();
+  };
+}
+
+// ── Final: qué hacer con lo que siga sin dato, y resumen ──
+function acFinal() {
+  const e = AC.estado;
+  if (e.faltan.length && !e.completar) return acCompletar();
+  acResumen();
+}
+
+function acCompletar() {
+  const e = AC.estado, body = acBase("🧮 Lo que falta");
+  const nombres = e.conceptos.filter(c => c.origen === "falta").map(c => c.nombre);
+  acEl("h3", "fx-h", "¿Qué hago con lo que no sabes?", body);
+  acEl("p", "fx-p", `Siguen sin dato: ${nombres.join(", ")}. Si los dejo en 0, tu beneficio sale más alto del real. Puedo completar lo que falte con tu estimación de siempre para ${e.propiedad} (${acEur(e.estimacion_anual_habitual)} al año en costes fijos: IBI, seguro, comunidad, suministros y programas).`, body);
+  const msg = acEl("div", "fx-note err", "", body);
+  msg.style.display = "none";
+  acBotones(body, [
+    ["Sí, completar con la estimación de siempre", async () => { if (await acGuardar({conceptos: {}, completar: true}, msg)) acResumen(); }, "act"],
+    ["No, que cuente 0 lo que no sé", async () => { if (await acGuardar({conceptos: {}, completar: false}, msg)) acResumen(); }],
+  ]);
+}
+
+function acResumen() {
+  const e = AC.estado, body = acBase("🧮 Resumen del Asesor");
+  acEl("h3", "fx-h", `Costes fijos de ${e.propiedad}: ${acEur(e.fijos_mensual)} al mes`, body);
+  e.conceptos.forEach(c => {
+    const row = acEl("div", "ac-conc", null, body);
+    acEl("div", "ic", AC_ICONO[c.origen], row);
+    const tx = acEl("div", "tx", null, row);
+    acEl("b", "", c.nombre, tx);
+    acEl("small", "", {facturas: "Con tus facturas", declarado: "Lo que me dijiste", no_aplica: "No aplica", falta: e.completar ? "Sin dato: se completa con la estimación" : "Sin dato (cuenta 0)"}[c.origen], tx);
+    acEl("div", "im", c.origen === "falta" ? "—" : acEur(c.mensual) + "/mes", row);
+    row.onclick = () => acConcepto([c.id], 0, false);
+  });
+  const pasos = ["La rentabilidad de Finanzas ya usa estos costes en lugar de la estimación."];
+  if (e.compras.facturas) pasos.push(e.compras.excluidas.length ? `${e.compras.excluidas.length === e.compras.categorias.length ? "Todas las compras" : "Parte de las compras"} (${acEur(e.compras.total)}) se consideran de otro proyecto y no cuentan.` : "Las compras cuentan como costes de esta propiedad.");
+  pasos.push("Cuantas más facturas subas (con el campo «Cubre»), menos tendré que preguntarte: las facturas mandan sobre lo que declares.");
+  fxGuia(body, "Qué pasa ahora", pasos);
+  acEl("button", "fx-big", "Ver mi rentabilidad", body).onclick = () => closeAsesor();
+  acEl("button", "fx-sec", "Volver a los temas", body).onclick = () => acIntro();
+}
+
 // ── Facturas (pestaña Finanzas) ─────────────────────────
 // Sube una factura (foto o PDF), el servidor la lee, el usuario revisa los datos y se guarda ordenada en el Drive del cliente
 // (/facturas/leer y /facturas/guardar). La lista del mes y los totales salen de /facturas.
@@ -2167,6 +2511,8 @@ async function fxLista() {
   if (FX.aviso) { fxEl("div", "fx-note ok", FX.aviso, body); FX.aviso = ""; }
   const extr = fxEl("button", "fx-sec", "📑 Cotejar con el extracto bancario", body);
   extr.onclick = () => fxExtracto(false);
+  const trim = fxEl("button", "fx-sec", "📊 Resumen trimestral para el gestor", body);
+  trim.onclick = () => fxResumenTrim();
   const carga = fxEl("div", "fx-cat", "Cargando facturas…", body);
   const mes = `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
   let r;
@@ -2201,6 +2547,91 @@ async function fxLista() {
     if (f.url) { const a = fxEl("a", "", "📎", row); a.href = f.url; a.target = "_blank"; a.rel = "noopener"; a.title = "Abrir en el Drive"; a.onclick = ev => ev.stopPropagation(); }
     row.onclick = () => fxEditar(f);
   });
+}
+
+// ── Resumen trimestral para el gestor ──
+// IVA soportado/repercutido, gastos por categoría y avisos del trimestre, con las facturas guardadas; se puede volcar a una hoja de Google en el Drive
+// (el gestor ya la ve porque la carpeta está compartida) o bajar el detalle en CSV.
+const FX_TRIM = {anio: null, t: null, reservas: false};
+
+function fxTrimestreActual() {
+  const hoy = new Date();
+  let t = Math.floor(hoy.getMonth() / 3) + 1, anio = hoy.getFullYear();
+  t -= 1;   // por defecto el último trimestre COMPLETO: es el que se declara
+  if (t < 1) { t = 4; anio -= 1; }
+  return {anio, t};
+}
+
+async function fxResumenTrim() {
+  if (FX_TRIM.anio == null) Object.assign(FX_TRIM, fxTrimestreActual());
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "📊 Resumen para el gestor";
+  const nav = fxEl("div", "fx-nav", null, body);
+  const prev = fxEl("button", "", "‹", nav);
+  fxEl("span", "", `${FX_TRIM.t}º trimestre ${FX_TRIM.anio}`, nav);
+  const next = fxEl("button", "", "›", nav);
+  const mover = d => { FX_TRIM.t += d; if (FX_TRIM.t < 1) { FX_TRIM.t = 4; FX_TRIM.anio--; } if (FX_TRIM.t > 4) { FX_TRIM.t = 1; FX_TRIM.anio++; } FX_TRIM.reservas = false; fxResumenTrim(); };
+  prev.onclick = () => mover(-1); next.onclick = () => mover(1);
+  fxEl("div", "fx-cat", `${fxPropiedad()}`, body);
+  const carga = fxEl("div", "fx-note", FX_TRIM.reservas ? "⏳ Calculando también los ingresos de reservas… unos segundos." : "⏳ Calculando el resumen…", body);
+  let r;
+  try { r = await fxApi(`/resumen-trimestral?propiedad_id=${FIN_PROPERTY}&anio=${FX_TRIM.anio}&trimestre=${FX_TRIM.t}${FX_TRIM.reservas ? "&reservas=1" : ""}`); }
+  catch (e) { carga.textContent = "Error de conexión."; return; }
+  if (!r.d.ok) { carga.className = "fx-note err"; carga.textContent = r.d.error || "No se pudo calcular."; fxEl("button", "fx-sec", "Volver", body).onclick = () => fxLista(); return; }
+  carga.remove();
+  const d = r.d;
+  const sum = fxEl("div", "fx-sum", null, body);
+  [["Gastos (con IVA)", d.gastos.total], ["IVA soportado", d.iva.soportado], ["Ingresos facturados", d.ingresos.total], ["Saldo IVA estimado", d.iva.saldo_estimado]].forEach(([k, v]) => {
+    const c = fxEl("div", "", null, sum); fxEl("span", "", k, c); fxEl("b", "", fxEur(v), c);
+  });
+  const pasos = [`Pulsa «Generar hoja para el gestor»: se crea en tu Drive (carpeta del año de la propiedad) y el gestor ya puede abrirla.`];
+  if (!d.reservas) pasos.push("Si quieres que incluya los ingresos de las reservas y el IVA repercutido estimado, pulsa «Añadir ingresos de reservas».");
+  pasos.push("Revisa los avisos de abajo antes de enviárselo.");
+  fxGuia(body, "Qué hacer ahora", pasos);
+  if (d.reservas) {
+    fxEl("div", "fx-cat", "Ingresos por reservas: " + d.reservas.map(x => `${x.mes.slice(5)}/${x.mes.slice(2, 4)} ${fxEur(x.brutos)}`).join(" · ") + (d.iva.repercutido_estimado_reservas != null ? ` · IVA repercutido estimado (${d.iva.pct_alojamiento}% incluido): ${fxEur(d.iva.repercutido_estimado_reservas)}` : ""), body);
+  } else {
+    const mas = fxEl("button", "fx-sec", "Añadir ingresos de reservas", body);
+    mas.onclick = () => { FX_TRIM.reservas = true; fxResumenTrim(); };
+  }
+  const gen = fxEl("button", "fx-big", "Generar hoja para el gestor", body);
+  const csv = fxEl("button", "fx-sec", "Descargar el detalle en CSV", body);
+  const msg = fxEl("div", "fx-note", "", body);
+  msg.style.display = "none";
+  gen.onclick = async () => {
+    gen.disabled = true; gen.textContent = "Creando la hoja…";
+    let g;
+    try { g = await fxApi("/resumen-trimestral/hoja", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, anio: FX_TRIM.anio, trimestre: FX_TRIM.t, reservas: FX_TRIM.reservas})}); }
+    catch (e) { g = {d: {ok: false, error: "Error de conexión."}}; }
+    gen.disabled = false; gen.textContent = "Generar hoja para el gestor";
+    msg.style.display = "block";
+    if (g.d.ok) {
+      msg.className = "fx-note ok"; msg.textContent = "✓ Hoja creada en tu Drive: «" + g.d.titulo + "». ";
+      const a = fxEl("a", "", "Abrirla", msg); a.href = g.d.url; a.target = "_blank"; a.rel = "noopener";
+    } else { msg.className = "fx-note err"; msg.textContent = g.d.error || "No se pudo crear la hoja."; }
+  };
+  csv.onclick = () => {
+    const celdas = ["Fecha", "Tipo", "Proveedor/Cliente", "NIF", "Nº factura", "Concepto", "Categoría", "Base", "IVA %", "Cuota IVA", "Retención", "Total", "Abono", "Cubre (meses)", "Enlace"];
+    const esc = v => { const t = String(v == null ? "" : v).replace(/^([=+\-@])/, "'$1"); return /[";\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+    const filas = [celdas].concat(d.detalle.map(x => [x.fecha, x.tipo, x.proveedor, x.nif, x.numero, x.concepto, x.categoria, x.base, x.iva_pct, x.cuota_iva, x.retencion, x.total, x.rectificativa ? "Sí" : "", x.cubre_meses, x.url]));
+    const blob = new Blob(["\ufeff" + filas.map(f => f.map(esc).join(";")).join("\n")], {type: "text/csv;charset=utf-8"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `facturas_${FX_TRIM.anio}_${FX_TRIM.t}T.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  if (d.gastos.por_categoria.length) {
+    fxEl("div", "fx-cat", "Gastos por categoría", body);
+    d.gastos.por_categoria.forEach(c => {
+      const row = fxEl("div", "fx-row", null, body);
+      const main = fxEl("div", "f-main", null, row);
+      fxEl("b", "", c.categoria, main);
+      fxEl("small", "", `${c.facturas} facturas · base ${fxEur(c.base)} · IVA ${fxEur(c.iva)}`, main);
+      fxEl("div", "f-tot", fxEur(c.total), row);
+    });
+  }
+  d.avisos.forEach(a => fxEl("div", "fx-note", a, body));
+  fxEl("button", "fx-sec", "Volver", body).onclick = () => fxLista();
 }
 
 // Asistente de primer uso: conectar el Google Drive del cliente (3 pasos). Se ejecuta solo la primera vez que se abren las facturas.
@@ -2844,6 +3275,17 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
     if (sel && (FX.cfg.categorias[t] || []).includes(sel)) cat.value = sel;
   };
   llenarCat(tipo.value, datos.categoria);
+  // Meses que cubre un gasto (un seguro o el IBI, 12; el agua, 2): su importe se reparte entre esos meses en los costes de Finanzas.
+  const cobDefecto = c => (c === "Seguros" || c === "Impuestos y tasas") ? 12 : 1;
+  const filaCob = fxEl("div", "", null, form);
+  fxEl("label", "", "Cubre (para repartir el coste entre meses)", filaCob);
+  const cob = fxEl("select", "", null, filaCob);
+  cob.id = "fx-cobertura";
+  [[1, "1 mes"], [2, "2 meses (agua…)"], [3, "3 meses (trimestre)"], [4, "4 meses"], [6, "6 meses"], [12, "12 meses (un año: seguro, IBI…)"]].forEach(([v, t]) => { const o = fxEl("option", "", t, cob); o.value = v; });
+  cob.value = String(datos.cobertura_meses || cobDefecto(cat.value));
+  let cobTocada = !!datos.cobertura_meses;
+  cob.onchange = () => { cobTocada = true; };
+  cat.addEventListener("change", () => { if (!cobTocada) cob.value = String(cobDefecto(cat.value)); });
   const d1 = dos();
   const base = campo("base_imponible", "Base imponible (€)", "text", datos.base_imponible, d1);
   const iva = campo("iva_pct", "IVA (%)", "text", datos.iva_pct, d1);
@@ -2870,6 +3312,9 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
   const rect = fxEl("label", "chk", null, form);
   const chk = fxEl("input", "", null, rect); chk.type = "checkbox"; chk.checked = !!datos.es_rectificativa;
   fxEl("span", "", "Es un abono o factura rectificativa (resta)", rect);
+  const ajeno = fxEl("label", "chk", null, form);
+  const chkAjeno = fxEl("input", "", null, ajeno); chkAjeno.type = "checkbox"; chkAjeno.checked = !!datos.proyecto_ajeno;
+  fxEl("span", "", "Es de OTRO proyecto (no cuenta en la rentabilidad de esta propiedad; sigue en las cuentas del gestor)", ajeno);
 
   const cuadra = () => {
     const b = fxNum(base.value), c = fxNum(cuota.value), r = fxNum(ret.value) || 0, t = fxNum(total.value);
@@ -2891,7 +3336,8 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
   };
   base.oninput = () => recalcular("base"); iva.oninput = () => recalcular("iva"); retPct.oninput = () => recalcular("ret_pct");
   cuota.oninput = () => recalcular("cuota"); ret.oninput = () => recalcular("ret"); total.oninput = () => recalcular("total");
-  tipo.onchange = () => { llenarCat(tipo.value); form.querySelector("label[for=fx-proveedor]").textContent = tipo.value === "gasto" ? "Proveedor" : "Cliente"; };
+  tipo.onchange = () => { llenarCat(tipo.value); filaCob.style.display = tipo.value === "gasto" ? "block" : "none"; form.querySelector("label[for=fx-proveedor]").textContent = tipo.value === "gasto" ? "Proveedor" : "Cliente"; };
+  filaCob.style.display = tipo.value === "gasto" ? "block" : "none";
   cuadra();
 
   let forzar = null;
@@ -2925,7 +3371,7 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
   guardar.onclick = async () => {
     const f = {tipo: tipo.value, fecha: fecha.value, proveedor: prov.value.trim(), nif: $("#fx-nif").value.trim(), numero: $("#fx-numero").value.trim(),
                concepto: $("#fx-concepto").value.trim(), categoria: cat.value, base_imponible: base.value, iva_pct: iva.value, cuota_iva: cuota.value,
-               retencion_pct: retPct.value, retencion: ret.value, total: total.value, es_rectificativa: chk.checked};
+               retencion_pct: retPct.value, retencion: ret.value, total: total.value, es_rectificativa: chk.checked, cobertura_meses: Number(cob.value), proyecto_ajeno: chkAjeno.checked};
     if (forzar && forzar.checked) f.forzar = true;
     if (!f.fecha || !f.proveedor || !fxNum(f.total)) { msg.textContent = "Faltan la fecha, el " + (f.tipo === "gasto" ? "proveedor" : "cliente") + " o el total."; msg.style.display = "block"; return; }
     guardar.disabled = cancelar.disabled = true;
@@ -3399,12 +3845,22 @@ function renderFinance(d) {
         ? `Costes fijos y limpieza son estimaciones — se sustituyen por los reales en cuanto subas facturas de este mes.`
         : `Costes fijos y limpieza son estimaciones (sin alquiler, aún por definir) — se sustituyen por los reales en cuanto subas facturas de este mes.`;
     }
+    if (real && r2.ajenas && r2.ajenas.facturas) notaFuente += ` Compras de otro proyecto fuera de la rentabilidad: ${r2.ajenas.facturas} facturas (${fmtEUR(r2.ajenas.total)}).`;
+    if (real && r2.fijos_completado_con_estimacion) notaFuente += ` Para lo que aún no tienes dato se han añadido ${fmtEUR(r2.fijos_completado_con_estimacion)} de tu estimación de siempre.`;
+    if (real && r2.limpieza_origen && r2.limpieza_origen !== "facturas") notaFuente += ` Limpieza: ${r2.limpieza_origen}.`;
     let boton = "";
     if (real) boton = `<button type="button" class="fin-toggle" onclick="setFinCostes('estimados')">Ver con costes estimados</button>`;
     else if (r2.facturas_mes) boton = `<button type="button" class="fin-toggle" onclick="setFinCostes('auto')">Ver con costes reales (${r2.facturas_mes} facturas)</button>`;
     const blockademyRow = r2.comision_blockademy !== undefined
       ? `<tr><td>Comisión Blockademy (${r2.comision_blockademy_pct}%)</td><td class="num">− ${fmtEUR(r2.comision_blockademy)}</td></tr>`
       : "";
+    let detalleFijos = "";
+    if (real && r2.fijos_detalle) {   // de dónde sale cada coste fijo, y lo que aún falta
+      const filas = Object.values(r2.fijos_detalle).filter(c => c.origen !== "no_aplica").map(c =>
+        `<tr><td>${{facturas: "🧾", declarado: "✎", falta: "❓"}[c.origen]} ${c.nombre}</td><td class="num">${c.origen === "falta" ? "sin dato" : fmtEUR(c.importe)}</td></tr>`).join("");
+      detalleFijos = `<div class="fin-channels-title">Costes fijos por concepto</div><table class="fin-table"><tbody>${filas}</tbody></table>` +
+        (r2.faltan_fijos && r2.faltan_fijos.length ? `<button type="button" class="fin-toggle" onclick="openAsesor()">⚠️ Faltan ${r2.faltan_fijos.length} conceptos: responder al Asesor Contable</button>` : "");
+    }
     const otrosRow = real ? `<tr><td>Otros gastos según facturas (mantenimiento, mobiliario…)</td><td class="num">− ${fmtEUR(r2.costes_otros)}</td></tr>` : "";
     html += `<div class="fin-channels-title">${real ? "Rentabilidad con costes reales" : "Rentabilidad estimada"}</div>
       <table class="fin-table">
@@ -3423,6 +3879,7 @@ function renderFinance(d) {
         <div class="fin-card net"><div class="fin-label">Beneficio neto (propietario)</div><div class="fin-value">${fmtEUR(r2.beneficio_neto_propietario)}</div></div>
         <div class="fin-card"><div class="fin-label">Gestión (${r2.comision_gestion_pct}%)</div><div class="fin-value">${fmtEUR(r2.comision_gestion)}</div></div>
       </div>
+      ${detalleFijos}
       ${boton}
       <div id="fin-note">${notaFuente}</div>`;
   }

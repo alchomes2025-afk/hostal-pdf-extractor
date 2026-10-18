@@ -385,6 +385,7 @@ def normalizar(d):
         "total": a_numero(d.get("total")),
         "categoria": d.get("categoria") if d.get("categoria") in CATEGORIAS[tipo] else ("Otros gastos" if tipo == "gasto" else "Otros ingresos"),
         "es_rectificativa": bool(d.get("es_rectificativa")),
+        "proyecto_ajeno": bool(d.get("proyecto_ajeno")),   # compra de OTRO proyecto (ni el hostal ni la casa): no cuenta en la rentabilidad, sí en las cuentas del gestor
     }
     try:
         cob = int(d.get("cobertura_meses") or 0)
@@ -796,14 +797,20 @@ def costes_reales(cliente_id, propiedad_id, mes):
         return None
     grupo_de = {cat: g for g, cats in GRUPOS_COSTE.items() for cat in cats}
     facs = asesor.facturas_de_propiedad(cliente_id, propiedad_id)
+    perfil_ = asesor.perfil(cliente_id, propiedad_id)
     grupos = {"limpieza": 0.0, "fijos": 0.0, "otros": 0.0}
     plataformas, iva, n, n_costes, por_categoria = 0.0, 0.0, 0, 0, {}
+    ajenas_n, ajenas_total = 0, 0.0
     for x in facs:
         if x.get("tipo") != "gasto" or x.get("mes") != mes:
             continue
-        n += 1
         signo = -1 if x.get("es_rectificativa") else 1
         importe = signo * (x.get("total") or 0)
+        if not asesor.cuenta(x, perfil_):   # compras de otro proyecto: fuera de la rentabilidad (se avisa de cuántas y cuánto)
+            ajenas_n += 1
+            ajenas_total += importe
+            continue
+        n += 1
         cat = x.get("categoria") or "Otros gastos"
         por_categoria[cat] = por_categoria.get(cat, 0.0) + importe
         iva += signo * (x.get("cuota_iva") or 0)
@@ -814,12 +821,13 @@ def costes_reales(cliente_id, propiedad_id, mes):
         n_costes += 1
         if g in ("limpieza", "otros"):
             grupos[g] += importe
-    fijos = asesor.costes_fijos_mes(cliente_id, propiedad_id, mes, facs)
+    fijos = asesor.costes_fijos_mes(cliente_id, propiedad_id, mes, facs, perfil_)
     grupos["fijos"] = fijos["total"]
     return {"facturas": n, "facturas_costes": n_costes, "total": round(sum(grupos.values()), 2), "grupos": {k: round(v, 2) for k, v in grupos.items()},
             "plataformas": round(plataformas, 2), "por_categoria": {k: round(v, 2) for k, v in por_categoria.items()}, "iva_soportado": round(iva, 2),
             "fijos_detalle": fijos["conceptos"], "faltan_fijos": fijos["faltan"], "hay_datos_fijos": fijos["hay_datos"],
-            "limpieza_cfg": asesor.perfil(cliente_id, propiedad_id).get("limpieza")}
+            "limpieza_cfg": perfil_.get("limpieza"), "completar_con_estimacion": bool(perfil_.get("completar")),
+            "ajenas": {"facturas": ajenas_n, "total": round(ajenas_total, 2)}}
 
 
 def meses_con_facturas(cliente_id, propiedad_id, es_admin):
@@ -868,5 +876,5 @@ def listar(cliente_id, propiedad_id, mes, es_admin):
                               for cat in CATEGORIAS[tipo] if any(x.get("categoria") == cat for x in delas)},
         }
     campos = ("id", "tipo", "fecha", "proveedor", "nif", "numero", "concepto", "categoria", "base_imponible", "iva_pct",
-              "cuota_iva", "retencion_pct", "retencion", "total", "es_rectificativa", "url", "usuario", "propiedad_id", "archivo", "cobertura_meses")
+              "cuota_iva", "retencion_pct", "retencion", "total", "es_rectificativa", "url", "usuario", "propiedad_id", "archivo", "cobertura_meses", "proyecto_ajeno")
     return {"facturas": [{k: x.get(k) for k in campos} for x in facturas], "totales": totales}

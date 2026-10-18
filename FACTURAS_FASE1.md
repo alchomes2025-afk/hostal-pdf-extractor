@@ -82,6 +82,21 @@ El asistente (`finanzas_mes`) lo recibe igual y avisa de que, si faltan facturas
 Pendiente de afinar: costes anuales (IBI, seguros) caen en un solo mes por fecha de factura —conviene prorratearlos—; reparto de un gasto entre las dos propiedades; IVA soportado
 y reglas de inversión del sujeto pasivo (Booking) cuando haya un resumen para el gestor.
 
+## Asesor Contable, costes fijos reales y resumen para el gestor (2026-10-18)
+- **Costes fijos por concepto** (`services/asesor.py`): IBI, seguros, comunidad, alquiler, suministros, software, gestoría y personal. Cada concepto sale de (1) las facturas
+  repartidas según los **meses que cubren** (campo «Cubre» de la factura: seguro/IBI 12, agua 2…; `devengo`), (2) lo que el usuario DECLARA al Asesor (anual o mensual) en los
+  meses sin factura, o (3) «falta» (cuenta 0 y se avisa). `costes_reales` (Finanzas) ya no suma un seguro anual en un solo mes.
+- **Facturas de otro proyecto:** una factura puede marcarse «de otro proyecto» (`proyecto_ajeno`) y el perfil de la propiedad puede excluir categorías enteras (`excluidas`):
+  no cuentan en la rentabilidad (sí en las cuentas y en el resumen del gestor). Finanzas avisa de cuántas y cuánto.
+- **Limpieza** (`limpieza` del perfil): estancia, hora (con horas por día según ocupación en el hostal, o por estancia en la casa), cuota fija, externa (solo facturas) o sin limpieza;
+  parte de las estimaciones de siempre (69 €/estancia en Primavera; 1-3 h/día a 10 €/h en el hostal). **Completar con la estimación anual de siempre** (`completar`): lo que falte hasta
+  3.100 € (Primavera) / 5.700 € (hostal) al año.
+- **Botón «🧮 Asesor Contable»** (Finanzas): asistente que pregunta, por este orden, ¿las compras son de esta propiedad o de otro proyecto?, ¿cómo se hace la limpieza y la estimo?,
+  cada concepto fijo sin dato, y qué hacer con lo que siga sin dato. `GET /mobile/facturas/asesor/estado`, `POST …/asesor/respuestas`. Tests: `test_asesor.py`, `test_asesor_inteligente.py`.
+- **Resumen trimestral para el gestor** (`services/gestor.py`, botón «📊 Resumen trimestral» en Facturas): gastos por categoría (base, IVA soportado, total), IVA repercutido (facturas
+  emitidas + estimado de las reservas de Beds24 al 10 %, solo orientativo), avisos (sin NIF, sin número, sin IVA, proveedores de la UE con inversión del sujeto pasivo, abonos) y detalle;
+  se vuelca a una hoja de Google en `Facturas/<Propiedad>/<Año>/` (acción `resumen` del puente) o se baja en CSV. Tests: `test_gestor.py`.
+
 ## Falta
 1. **Pasos de Adrián:** actualizar el puente (nueva versión), crear el conector y poner en Render `PUENTE_URL`, `PUENTE_SECRETO`, `CONECTOR_URL`
    (ver `apps-script/LEEME_conector.md`); fusionar la rama; abrir Facturas con el PIN de administrador y seguir el asistente.

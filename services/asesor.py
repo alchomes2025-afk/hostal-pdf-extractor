@@ -18,7 +18,9 @@ logger = logging.getLogger(__name__)
 COLECCION_PERFIL = "contabilidad_perfil"
 COBERTURAS, COBERTURA_DEFECTO = fac.COBERTURAS, fac.COBERTURA_DEFECTO     # los define facturas.py (lo habitual por categoría; se cambia en cada factura)
 MODOS = ("anual", "mensual", "no_aplica")
-MODOS_LIMPIEZA = ("estancia", "hora")
+MODOS_LIMPIEZA = ("estancia", "hora", "fija", "externa", "no_aplica")   # externa = la hace una empresa y se sube su factura; fija = cuota mensual
+# Compras «de obra o de equipamiento»: las que suelen ser de otro proyecto y no de la propiedad (se le pregunta al usuario)
+CATEGORIAS_COMPRAS = ("Mobiliario y equipamiento", "Mantenimiento y reparaciones", "Consumibles y amenities", "Otros gastos", "Publicidad")
 
 CONCEPTOS_FIJOS = [
     {"id": "ibi", "nombre": "IBI (impuesto de bienes inmuebles)", "categorias": ["Impuestos y tasas"], "modo": "anual",
@@ -52,25 +54,34 @@ _POR_ID = {c["id"]: c for c in CONCEPTOS_FIJOS}
 
 
 # ── Perfil (lo que declara el usuario) ──────────────────────────────────────────
+PERFIL_VACIO = {"conceptos": {}, "limpieza": None, "excluidas": [], "completar": False, "compras_decididas": False}
+
+
+def cuenta(f, perfil_):
+    """¿Esta factura de gasto cuenta en la rentabilidad de la propiedad? No si está marcada «de otro proyecto» o su categoría está excluida en el perfil."""
+    return not f.get("proyecto_ajeno") and f.get("categoria") not in (perfil_.get("excluidas") or [])
+
+
 def _doc_perfil(cliente_id, propiedad_id):
     return f"{cliente_id}-{propiedad_id}"
 
 
 def perfil(cliente_id, propiedad_id):
-    """{conceptos: {id: {modo, importe}}, limpieza: {modo, importe}|None}. Vacío si no hay."""
+    """{conceptos, limpieza, excluidas (categorías de compras que NO son de esta propiedad), completar (rellenar lo que falte con la estimación de siempre), compras_decididas}."""
     col = fac.config.db.collection(COLECCION_PERFIL) if fac.config.db is not None else None
     if col is None:
-        return {"conceptos": {}, "limpieza": None}
+        return dict(PERFIL_VACIO)
     try:
         doc = col.document(_doc_perfil(cliente_id, propiedad_id)).get()
         d = doc.to_dict() if doc.exists else {}
     except Exception as e:
         logger.error(f"[asesor] Error leyendo el perfil: {e}")
-        return {"conceptos": {}, "limpieza": None}
-    return {"conceptos": d.get("conceptos") or {}, "limpieza": d.get("limpieza")}
+        return dict(PERFIL_VACIO)
+    return {"conceptos": d.get("conceptos") or {}, "limpieza": d.get("limpieza"), "excluidas": d.get("excluidas") or [], "completar": bool(d.get("completar")),
+            "compras_decididas": bool(d.get("compras_decididas"))}
 
 
-def guardar_perfil(cliente_id, propiedad_id, conceptos, limpieza, usuario=""):
+def guardar_perfil(cliente_id, propiedad_id, conceptos, limpieza, usuario="", excluidas=None, completar=None):
     """Guarda las respuestas del Asesor (se mezclan con las anteriores). conceptos: {id: {modo, importe}}; limpieza: {modo, importe}."""
     col = fac.config.db.collection(COLECCION_PERFIL) if fac.config.db is not None else None
     if col is None:
@@ -91,13 +102,34 @@ def guardar_perfil(cliente_id, propiedad_id, conceptos, limpieza, usuario=""):
         nuevos[cid] = {"modo": r["modo"], "importe": importe}
     lim = actual["limpieza"]
     if limpieza:
-        imp = fac.a_numero(limpieza.get("importe"))
-        if limpieza.get("modo") not in MODOS_LIMPIEZA or imp is None or not 0 <= imp <= 10_000:
+        modo = limpieza.get("modo")
+        if modo not in MODOS_LIMPIEZA:
             raise fac.FacturaError("respuesta de limpieza no válida")
-        lim = {"modo": limpieza["modo"], "importe": imp}
-    col.document(_doc_perfil(cliente_id, propiedad_id)).set({"conceptos": nuevos, "limpieza": lim, "actualizado": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                                                          "por": str(usuario or "")[:40]})
-    return {"conceptos": nuevos, "limpieza": lim}
+        if modo in ("externa", "no_aplica"):
+            lim = {"modo": modo, "importe": 0.0}
+        else:
+            imp = fac.a_numero(limpieza.get("importe"))
+            if imp is None or not 0 <= imp <= 10_000:
+                raise fac.FacturaError("importe de limpieza no válido")
+            lim = {"modo": modo, "importe": imp}
+            if modo == "hora":   # horas al día según la ocupación (hostal) o por estancia (casa); opcionales
+                for k in ("horas_min", "horas_max"):
+                    h = fac.a_numero(limpieza.get(k))
+                    if h is not None:
+                        if not 0 <= h <= 24:
+                            raise fac.FacturaError("las horas de limpieza no son válidas")
+                        lim[k] = h
+    exc = actual["excluidas"]
+    decididas = actual["compras_decididas"]
+    if excluidas is not None:
+        malas = [c for c in excluidas if c not in fac.CATEGORIAS["gasto"]]
+        if malas:
+            raise fac.FacturaError(f"categoría desconocida: {malas[0]}")
+        exc, decididas = sorted(set(excluidas)), True
+    comp = actual["completar"] if completar is None else bool(completar)
+    col.document(_doc_perfil(cliente_id, propiedad_id)).set({"conceptos": nuevos, "limpieza": lim, "excluidas": exc, "completar": comp, "compras_decididas": decididas,
+                                                          "actualizado": datetime.now().strftime("%Y-%m-%d %H:%M"), "por": str(usuario or "")[:40]})
+    return {"conceptos": nuevos, "limpieza": lim, "excluidas": exc, "completar": comp, "compras_decididas": decididas}
 
 
 def mensual_declarado(r):
@@ -153,7 +185,7 @@ def costes_fijos_mes(cliente_id, propiedad_id, mes, facturas=None, perfil_=None)
     p = perfil_ if perfil_ is not None else perfil(cliente_id, propiedad_id)
     conceptos, faltan = {}, []
     for c in CONCEPTOS_FIJOS:
-        propias = [x for x in facs if x.get("tipo") == "gasto" and x.get("categoria") in c["categorias"]]
+        propias = [x for x in facs if x.get("tipo") == "gasto" and x.get("categoria") in c["categorias"] and cuenta(x, p)]
         dev = round(sum(devengo(x, mes) for x in propias), 2)
         declarado = mensual_declarado((p.get("conceptos") or {}).get(c["id"]))
         if dev > 0:
@@ -183,7 +215,25 @@ def estado(cliente_id, propiedad_id, es_admin, mes_ref):
                           "origen": x["origen"], "mensual": x["importe"], "facturas_en_el_mes": x["facturas"], "declarado": decl,
                           "tiene_facturas": any(f.get("tipo") == "gasto" and f.get("categoria") in def_["categorias"] for f in facs)})
     es_hostal = propiedad_id == "339751"
+    compras = {}
+    for x in facs:
+        if x.get("tipo") == "gasto" and x.get("categoria") in CATEGORIAS_COMPRAS:
+            r = compras.setdefault(x["categoria"], {"categoria": x["categoria"], "facturas": 0, "total": 0.0})
+            r["facturas"] += 1
+            r["total"] += (-1 if x.get("es_rectificativa") else 1) * (x.get("total") or 0)
+    lista = sorted(({**v, "total": round(v["total"], 2)} for v in compras.values()), key=lambda v: -v["total"])
+    limpiezas = [x for x in facs if x.get("tipo") == "gasto" and x.get("categoria") == "Limpieza y lavandería"]
+    ideas_hostal = ["Por horas: unas 1 a 3 horas al día según la ocupación (la estimación de siempre del hostal) × lo que valga una hora (9 a 15 € es lo habitual).",
+                    "Cuota fija al mes: lo que pagarías a una persona o empresa por dejarlo todo en orden.",
+                    "Coste de oportunidad: las horas reales que dedicáis × lo que cobraría una persona externa por hora."]
+    ideas_casa = ["Por estancia: una limpieza profesional de un apartamento turístico suele costar de 40 a 80 € por reserva (la estimación de siempre es 69 €, con productos).",
+                  "Por horas: horas que lleva limpiar y preparar la casa × lo que valga una hora (9 a 15 €).",
+                  "Cuota fija al mes: lo que pagarías por un servicio recurrente.",
+                  "Coste de oportunidad: las horas reales que dedicáis × lo que cobraría una persona externa."]
     return {"propiedad": c["propiedades"][propiedad_id], "propiedad_id": propiedad_id, "mes_ref": mes_ref, "conceptos": conceptos, "fijos_mensual": calculo["total"],
-            "faltan": calculo["faltan"], "limpieza": {"declarado": p["limpieza"], "modo_habitual": "hora" if es_hostal else "estancia",
-                                                      "importe_habitual": 10.0 if es_hostal else 69.0},
-            "facturas_subidas": len(facs)}
+            "faltan": calculo["faltan"], "facturas_subidas": len(facs), "completar": p["completar"], "estimacion_anual_habitual": 5700.0 if es_hostal else 3100.0,
+            "compras": {"facturas": sum(v["facturas"] for v in lista), "total": round(sum(v["total"] for v in lista), 2), "categorias": lista,
+                        "excluidas": p["excluidas"], "decidido": p["compras_decididas"]},
+            "limpieza": {"declarado": p["limpieza"], "facturas": len(limpiezas), "modo_habitual": "hora" if es_hostal else "estancia",
+                         "importe_habitual": 10.0 if es_hostal else 69.0, "horas_habituales": [1.0, 3.0] if es_hostal else None,
+                         "ideas": ideas_hostal if es_hostal else ideas_casa}}

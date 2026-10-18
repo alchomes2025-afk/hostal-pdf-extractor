@@ -1658,24 +1658,38 @@ def _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, c
     comision_blockademy = round(resumen["ingresos_brutos"] * PCT_COMISION_BLOCKADEMY, 2)
     base = resumen["ingresos_netos"] - comision_gestion - comision_blockademy
 
-    # Limpieza ESTIMADA: lo habitual de la propiedad, o lo que haya contestado el Asesor Contable (mismo modo: por estancia o por hora)
+    # Limpieza ESTIMADA según lo que haya contestado el Asesor Contable (por estancia, por horas, cuota fija, externa o sin limpieza) o, si no ha contestado, la
+    # estimación de siempre.
     cfg = (reales or {}).get("limpieza_cfg") or {}
-    if property_id == PROPERTY_ID_CASA_PRIMAVERA and cfg.get("modo") == "estancia":
-        est_limpieza = round(float(cfg["importe"]) * resumen["reservas"], 2)
-    elif property_id == PROPERTY_ID and cfg.get("modo") == "hora":
-        horas = HOSTAL_LIMPIEZA_HORAS_MIN + (HOSTAL_LIMPIEZA_HORAS_MAX - HOSTAL_LIMPIEZA_HORAS_MIN) * (ocupacion_total_pct / 100)
-        est_limpieza = round(horas * float(cfg["importe"]) * dias_mes, 2)
+    modo_limpieza = cfg.get("modo")
+    estimacion_origen = "estimada"
+    if modo_limpieza == "estancia":
+        est_limpieza, estimacion_origen = round(float(cfg["importe"]) * resumen["reservas"], 2), "estimada según tu respuesta (por estancia)"
+    elif modo_limpieza == "hora" and property_id == PROPERTY_ID:
+        h_min, h_max = float(cfg.get("horas_min") or HOSTAL_LIMPIEZA_HORAS_MIN), float(cfg.get("horas_max") or HOSTAL_LIMPIEZA_HORAS_MAX)
+        est_limpieza = round((h_min + (h_max - h_min) * (ocupacion_total_pct / 100)) * float(cfg["importe"]) * dias_mes, 2)
+        estimacion_origen = "estimada según tu respuesta (por horas)"
+    elif modo_limpieza == "hora" and cfg.get("horas_min"):   # casa: horas que lleva cada estancia
+        est_limpieza, estimacion_origen = round(float(cfg["horas_min"]) * float(cfg["importe"]) * resumen["reservas"], 2), "estimada según tu respuesta (por horas)"
+    elif modo_limpieza == "fija":
+        est_limpieza, estimacion_origen = round(float(cfg["importe"]), 2), "estimada según tu respuesta (cuota fija)"
+    elif modo_limpieza in ("externa", "no_aplica"):
+        est_limpieza, estimacion_origen = 0.0, ("sin facturas de limpieza este mes" if modo_limpieza == "externa" else "sin limpieza")
 
     # Costes REALES si el mes tiene facturas de costes o hay datos de costes fijos (facturas repartidas por los meses que cubren, o declarados al Asesor);
-    # los conceptos fijos sin ningún dato quedan en «faltan» (cuentan 0 y se avisa). Sin nada de eso, las estimaciones de siempre.
+    # los conceptos fijos sin ningún dato quedan en «faltan» (cuentan 0 y se avisa), salvo que el usuario pida completarlos con la estimación anual de siempre.
     usa_reales = costes != "estimados" and bool(reales and (reales.get("facturas_costes") or reales.get("hay_datos_fijos")))
     limpieza_origen = "estimada"
+    fijos_completado = 0.0
     if usa_reales:
         costes_fijos, costes_otros = reales["grupos"]["fijos"], reales["grupos"]["otros"]
+        if reales.get("completar_con_estimacion") and reales.get("faltan_fijos") and costes_fijos < est_fijos:
+            fijos_completado = round(est_fijos - costes_fijos, 2)   # solo lo que falta para llegar a la estimación anual de siempre
+            costes_fijos = est_fijos
         if reales["grupos"]["limpieza"] > 0:
             costes_limpieza, limpieza_origen = reales["grupos"]["limpieza"], "facturas"
         else:
-            costes_limpieza = est_limpieza
+            costes_limpieza, limpieza_origen = est_limpieza, estimacion_origen
     else:
         costes_fijos, costes_limpieza, costes_otros = est_fijos, est_limpieza, 0.0
     beneficio_antes_impuestos = round(base - costes_fijos - costes_limpieza - costes_otros, 2)
@@ -1694,6 +1708,8 @@ def _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, c
         "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
         "origen_costes":             "reales" if usa_reales else "estimados",
         "limpieza_origen":           limpieza_origen,
+        "fijos_completado_con_estimacion": fijos_completado,
+        "ajenas":                    (reales or {}).get("ajenas", {"facturas": 0, "total": 0.0}) if usa_reales else {"facturas": 0, "total": 0.0},
         "fijos_detalle":             (reales or {}).get("fijos_detalle") if usa_reales else None,
         "faltan_fijos":              (reales or {}).get("faltan_fijos", []) if usa_reales else [],
         "facturas_mes":              (reales or {}).get("facturas_costes", 0),
