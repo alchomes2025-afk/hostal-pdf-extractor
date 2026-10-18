@@ -257,6 +257,8 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-guia ul{margin:0;padding-left:18px}
 .fx-det{margin:0 0 10px}
 .fx-det summary{font-weight:800;font-size:13px;cursor:pointer;padding:8px 0}
+.fx-prop{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:10px;border:1.5px solid var(--border);font-size:14px;background:#fff;margin-bottom:10px}
+.fx-peligro{width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--blocked);background:#fff;color:var(--blocked);font-weight:800;font-size:13.5px;margin-top:10px}
 .fx-note{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
 .fx-note.err{background:var(--blocked-bg);border-color:var(--blocked)}
 .fx-note.ok{background:var(--avail-bg);border-color:var(--avail)}
@@ -2138,6 +2140,12 @@ async function fxLista() {
   const next = fxEl("button", "", "›", nav);
   prev.onclick = () => fxShift(-1);
   next.onclick = () => fxShift(1);
+  if (FX.cfg.propiedades.length > 1) {   // el administrador ve las dos propiedades: se elige aquí cuál ver
+    const sel = fxEl("select", "fx-prop", null, body);
+    FX.cfg.propiedades.forEach(pr => { const o = fxEl("option", "", pr.nombre, sel); o.value = pr.id; });
+    sel.value = String(FIN_PROPERTY);
+    sel.onchange = () => { FIN_PROPERTY = Number(sel.value); FX.saltado = false; FX.meses = null; shiftFinanceMonth(0); fxLista(); };
+  }
   const chips = fxEl("div", "fx-chips", null, body);   // meses con facturas ya subidas
   fxApi(`/meses?propiedad_id=${FIN_PROPERTY}`).then(({d}) => {
     if (miPeticion !== FX.peticion || !d.ok || !d.meses.length) return;
@@ -2173,6 +2181,7 @@ async function fxLista() {
   });
   const cats = Object.entries(t.gasto.por_categoria || {});
   if (cats.length) fxEl("div", "fx-cat", "Gastos por categoría: " + cats.map(([k, v]) => `${k} ${fxEur(v)}`).join(" · "), body);
+  fxEl("div", "fx-cat", "Toca una factura para corregirla, cambiarla de propiedad o eliminarla.", body).style.display = r.d.facturas.length ? "block" : "none";
   if (!r.d.facturas.length) {
     const otros = (FX.meses || []).length;
     fxGuia(body, "Este mes no hay facturas subidas", [
@@ -2182,12 +2191,13 @@ async function fxLista() {
     return;
   }
   r.d.facturas.forEach(f => {
-    const row = fxEl("div", "fx-row", null, body);
+    const row = fxEl("div", "fx-row fx-click", null, body);
     const main = fxEl("div", "f-main", null, row);
     fxEl("b", "", f.proveedor || "(sin nombre)", main);
     fxEl("small", "", [f.fecha, f.numero, f.categoria].filter(Boolean).join(" · "), main);
     fxEl("div", "f-tot" + (f.tipo === "ingreso" ? " ing" : ""), (f.es_rectificativa ? "−" : "") + fxEur(f.total), row);
-    if (f.url) { const a = fxEl("a", "", "📎", row); a.href = f.url; a.target = "_blank"; a.rel = "noopener"; a.title = "Abrir en el Drive"; }
+    if (f.url) { const a = fxEl("a", "", "📎", row); a.href = f.url; a.target = "_blank"; a.rel = "noopener"; a.title = "Abrir en el Drive"; a.onclick = ev => ev.stopPropagation(); }
+    row.onclick = () => fxEditar(f);
   });
 }
 
@@ -2410,7 +2420,7 @@ $("#fx-file").addEventListener("change", async (e) => {
     body.prepend(...avisos.map(a => fxEl("div", ya.size ? "fx-note ok" : "fx-note err", a)));
     return;
   }
-  FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false, fuera, extractos};
+  FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false, fuera, extractos, propiedad: String(FIN_PROPERTY)};
   await fxLeerLote();
 });
 
@@ -2522,7 +2532,8 @@ function fxListo(it) {
 
 function fxAbrirItem(i, unica) {
   const lote = FX.lote, it = lote.items[i];
-  const ctx = {archivo: it.archivo, etiqueta: lote.items.length > 1 ? `${i + 1} de ${lote.items.length}` : "",
+  const ctx = {archivo: it.archivo, etiqueta: lote.items.length > 1 ? `${i + 1} de ${lote.items.length}` : "", propiedad: it.propiedad || lote.propiedad || String(FIN_PROPERTY),
+    guardada: (pid) => { it.propiedad = pid; },
     alGuardar: (f) => {
       it.estado = "guardada";
       if (unica) { FX.aviso = `✓ Guardada en el Drive: ${f.archivo || f.proveedor}`; FX.lote = null; fxLista(); }
@@ -2575,6 +2586,13 @@ function fxResumenLote() {
     si.onclick = () => fxCotejar(lote.extractos[0]);
     no.onclick = () => { lote.cotejoDescartado = true; fxResumenLote(); };
   }
+  if (FX.cfg.propiedades.length > 1 && (listas.length || porRevisar + fallos)) {   // a qué propiedad van las de esta tanda
+    fxEl("div", "fx-cat", "Guardar esta tanda en:", body);
+    const sel = fxEl("select", "fx-prop", null, body);
+    FX.cfg.propiedades.forEach(pr => { const o = fxEl("option", "", pr.nombre, sel); o.value = pr.id; });
+    sel.value = lote.propiedad;
+    sel.onchange = () => { lote.propiedad = sel.value; };
+  }
   if (listas.length) {
     const todas = fxEl("button", "fx-big", `Guardar las ${listas.length} que cuadran`, body);
     todas.onclick = () => fxGuardarListas(listas);
@@ -2612,6 +2630,7 @@ function fxResumenLote() {
 }
 
 async function fxGuardarListas(listas) {
+  const lote = FX.lote;
   const body = $("#fx-body");
   body.textContent = "";
   $("#fx-title").textContent = "🧾 Guardando…";
@@ -2621,7 +2640,7 @@ async function fxGuardarListas(listas) {
     estado.textContent = `Guardando ${k + 1} de ${listas.length}…`;
     let r;
     try {
-      r = await fxApi("/guardar", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, datos: it.lectura.datos,
+      r = await fxApi("/guardar", {method: "POST", body: JSON.stringify({propiedad_id: it.propiedad || lote.propiedad || FIN_PROPERTY, pin: PIN, usuario: USER_NAME, datos: it.lectura.datos,
                                                                       archivo: {nombre: it.archivo.nombre, mime: it.archivo.mime, base64: it.archivo.base64}})});
     } catch (e) { r = {d: {ok: false, error: "Error de conexión."}}; }
     if (r.d.ok) it.estado = "guardada";
@@ -2772,15 +2791,28 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
   const arch = ctx ? ctx.archivo : FX.archivo;   // con ctx (lote) se llama a ctx.alGuardar / ctx.alOmitir
   const body = $("#fx-body");
   body.textContent = "";
-  $("#fx-title").textContent = "🧾 Revisa la factura" + (ctx && ctx.etiqueta ? " · " + ctx.etiqueta : "");
+  $("#fx-title").textContent = ctx && ctx.editar ? "🧾 Factura guardada" : "🧾 Revisa la factura" + (ctx && ctx.etiqueta ? " · " + ctx.etiqueta : "");
   if (errorLectura) fxEl("div", "fx-note err", errorLectura, body);
   avisos.forEach(a => fxEl("div", "fx-note", a, body));
-  fxGuia(body, errorLectura ? "No he podido leerla" : "Revisa los datos", errorLectura
+  if (ctx && ctx.editar) fxGuia(body, "Corregir esta factura", ["Cambia lo que haga falta y pulsa «Guardar cambios»: se renombra y se mueve sola en tu Drive y se actualiza la hoja de registro.", "«Eliminar» la quita del Drive (queda 30 días en la papelera) y de las cuentas."]);
+  else fxGuia(body, errorLectura ? "No he podido leerla" : "Revisa los datos", errorLectura
     ? ["Rellena los datos a mano y pulsa «Guardar en el Drive».", "Si no es una factura (nómina, justificante de pago…), pulsa «Omitir»."]
     : ["Comprueba proveedor, fecha, importes y categoría; en amarillo está lo que dudo.", "Si todo está bien, pulsa «Guardar en el Drive». Si no es una factura, pulsa «Omitir»."]);
   if (arch && arch.vista) { const im = fxEl("img", "fx-thumb", null, body); im.src = arch.vista; im.alt = "Vista previa"; }
   else if (arch) fxEl("div", "fx-cat", "📄 " + arch.nombre, body);
+  else if (ctx && ctx.editar) fxEl("div", "fx-cat", "📄 " + (ctx.editar.archivo || "archivo del Drive"), body);
   const form = fxEl("div", "fx-form", null, body);
+  // Propiedad a la que va la factura (o a la que pertenece, al editar). Solo se muestra si el PIN puede ver más de una.
+  let propSel = null;
+  const propInicial = String((ctx && ctx.propiedad) || FIN_PROPERTY);
+  if (FX.cfg.propiedades.length > 1) {
+    fxEl("label", "", "Propiedad", form);
+    propSel = fxEl("select", "", null, form);
+    propSel.id = "fx-propiedad";
+    FX.cfg.propiedades.forEach(pr => { const o = fxEl("option", "", pr.nombre, propSel); o.value = pr.id; });
+    propSel.value = propInicial;
+  }
+  const propiedadElegida = () => propSel ? propSel.value : propInicial;
   const campo = (id, etiqueta, tipo, valor, padre) => {
     const p = padre ? fxEl("div", "", null, padre) : form;   // en una fila de dos columnas, cada campo va con su etiqueta en su celda
     fxEl("label", "", etiqueta, p).htmlFor = "fx-" + id;
@@ -2870,8 +2902,23 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
   const msg = fxEl("div", "fx-note err", "", form);
   msg.style.display = "none";
   const btns = fxEl("div", "fx-btns", null, form);
-  const guardar = fxEl("button", "send", "Guardar en el Drive", btns);
-  const cancelar = fxEl("button", "", ctx && ctx.etiqueta ? "Omitir" : "Cancelar", btns);
+  const edicion = !!(ctx && ctx.editar);
+  const guardar = fxEl("button", "send", edicion ? "Guardar cambios" : "Guardar en el Drive", btns);
+  const cancelar = fxEl("button", "", edicion ? "Cerrar" : (ctx && ctx.etiqueta ? "Omitir" : "Cancelar"), btns);
+  if (edicion) {   // Eliminar: pide un segundo toque para confirmar
+    const eliminar = fxEl("button", "fx-peligro", "Eliminar factura", form);
+    eliminar.type = "button";
+    let confirmado = false;
+    eliminar.onclick = async () => {
+      if (!confirmado) { confirmado = true; eliminar.textContent = "Pulsa otra vez para eliminarla definitivamente"; return; }
+      eliminar.disabled = guardar.disabled = cancelar.disabled = true;
+      let r;
+      try { r = await fxApi("/eliminar", {method: "POST", body: JSON.stringify({id: ctx.editar.id, pin: PIN, usuario: USER_NAME})}); } catch (e) { r = {d: {ok: false, error: "Error de conexión."}}; }
+      if (r.d.ok) { FX.aviso = "✓ Factura eliminada (el archivo queda 30 días en la papelera de tu Drive)."; FX.meses = null; fxLista(); return; }
+      msg.textContent = r.d.error || "No se pudo eliminar."; msg.style.display = "block";
+      eliminar.disabled = guardar.disabled = cancelar.disabled = false; confirmado = false; eliminar.textContent = "Eliminar factura";
+    };
+  }
   cancelar.onclick = () => { if (ctx) ctx.alOmitir(); else { FX.archivo = null; fxLista(); } };
   guardar.onclick = async () => {
     const f = {tipo: tipo.value, fecha: fecha.value, proveedor: prov.value.trim(), nif: $("#fx-nif").value.trim(), numero: $("#fx-numero").value.trim(),
@@ -2884,10 +2931,13 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
     msg.style.display = "none";
     let r;
     try {
-      r = await fxApi("/guardar", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, datos: f,
-                                                                      archivo: {nombre: arch.nombre, mime: arch.mime, base64: arch.base64}})});
+      r = edicion
+        ? await fxApi("/editar", {method: "POST", body: JSON.stringify({id: ctx.editar.id, propiedad_id: propiedadElegida(), pin: PIN, usuario: USER_NAME, datos: f})})
+        : await fxApi("/guardar", {method: "POST", body: JSON.stringify({propiedad_id: propiedadElegida(), pin: PIN, usuario: USER_NAME, datos: f,
+                                                                        archivo: {nombre: arch.nombre, mime: arch.mime, base64: arch.base64}})});
     } catch (e) { r = {status: 0, d: {ok: false, error: "Error de conexión. Comprueba la lista antes de reintentar."}}; }
     if (r.d.ok) {
+      if (ctx && ctx.guardada) ctx.guardada(propiedadElegida());
       if (ctx) { ctx.alGuardar(r.d.factura); return; }
       FX.archivo = null;
       FX.aviso = `✓ Guardada en el Drive: ${r.d.factura.archivo || r.d.factura.proveedor}`;
@@ -2903,8 +2953,17 @@ function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
     }
     msg.style.display = "block";
     guardar.disabled = cancelar.disabled = false;
-    guardar.textContent = "Guardar en el Drive";
+    guardar.textContent = edicion ? "Guardar cambios" : "Guardar en el Drive";
   };
+}
+
+// Editar una factura ya guardada (se llega tocándola en la lista del mes).
+function fxEditar(f) {
+  fxFormulario({...f}, [], null, "", {
+    archivo: null, etiqueta: "", propiedad: String(f.propiedad_id || FIN_PROPERTY), editar: {id: f.id, archivo: f.archivo},
+    alGuardar: () => { FX.aviso = "✓ Cambios guardados: el archivo y la hoja de registro se han actualizado en tu Drive."; FX.meses = null; fxLista(); },
+    alOmitir: () => fxLista(),
+  });
 }
 
 // ── Asistente ───────────────────────────────────────────

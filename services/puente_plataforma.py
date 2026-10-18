@@ -50,6 +50,17 @@ def estructura(raiz_id, rutas):
     return _llamar("estructura", raiz_id=raiz_id, rutas=rutas).get("rutas")
 
 
+def eliminar(raiz_id, file_id, registro):
+    """Manda a la papelera el archivo de una factura y quita su fila (por ID) de la hoja de registro. Un archivo que ya no existe no es error."""
+    return _llamar("eliminar", raiz_id=raiz_id, file_id=file_id, registro=registro)
+
+
+def actualizar(raiz_id, file_id, ruta, nombre, registro_viejo, registro_nuevo):
+    """Mueve y renombra el archivo de una factura y reemplaza su fila en la hoja de registro. Devuelve {url, nombre, hoja_url}."""
+    data = _llamar("actualizar", raiz_id=raiz_id, file_id=file_id, ruta=ruta, nombre=nombre, registro_viejo=registro_viejo, registro_nuevo=registro_nuevo)
+    return {k: data.get(k) for k in ("url", "nombre", "hoja_url")}
+
+
 def ocr(contenido, mime, timeout=None):
     """Texto de una imagen o PDF escaneado."""
     return _llamar("ocr", timeout=timeout, mime=mime, base64=base64.b64encode(contenido).decode()).get("texto") or ""

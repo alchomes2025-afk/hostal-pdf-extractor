@@ -63,6 +63,15 @@ carpeta por cliente en Firestore (`facturas_config`); la app lo detecta sola. So
   Resultado: conciliadas, facturas sin movimiento, pagos sin factura (agrupados: efectivo, nómina, Seguridad Social, comisiones…) y cobros sin factura. Solo cuentan las
   facturas GUARDADAS de las propiedades que ve el PIN (el PIN normal, solo Primavera). Tests: `tests/test_extractos.py`.
 
+## Editar, eliminar y elegir propiedad (2026-10-18)
+- Tocar una factura de la lista abre su formulario en modo edición: «Guardar cambios» (`POST /mobile/facturas/editar`: corrige datos y, si cambian la fecha, el tipo o la
+  propiedad, el archivo se RENOMBRA y MUEVE en el Drive y su fila se quita de la hoja de registro vieja y se añade a la nueva, con el mismo ID) y «Eliminar factura»
+  (`POST /mobile/facturas/eliminar`, con segundo toque de confirmación: el archivo va a la papelera del Drive 30 días, se quita la fila de la hoja y se borra el índice, así la
+  huella queda libre para volver a subirla). El puente nuevo tiene las acciones `eliminar` y `actualizar`; comprueban que el archivo cuelga de la carpeta raíz del cliente.
+- Si el Drive falla, no se toca el índice de Firestore (editar/eliminar son «Drive primero»). Permisos: el PIN normal solo toca facturas de Primavera y no puede moverlas al hostal.
+- **Selector de propiedad:** en la lista (el administrador ve las dos), en el formulario de cada factura y para toda una tanda en el resumen («Guardar esta tanda en:»).
+  Tests: `tests/test_facturas_editar.py`.
+
 ## Falta
 1. **Pasos de Adrián:** actualizar el puente (nueva versión), crear el conector y poner en Render `PUENTE_URL`, `PUENTE_SECRETO`, `CONECTOR_URL`
    (ver `apps-script/LEEME_conector.md`); fusionar la rama; abrir Facturas con el PIN de administrador y seguir el asistente.

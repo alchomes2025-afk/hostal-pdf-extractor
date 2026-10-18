@@ -11,6 +11,8 @@ Primavera); con el de administración, todas. La app de gestión actual es de un
   POST /mobile/facturas/conocidas {huellas:[sha256…]}                                    → las que ya están guardadas (volver a subir un ZIP salta lo ya hecho)
   GET  /mobile/facturas/meses?propiedad_id=349341                                      → meses con facturas (cuántas y totales)
   GET  /mobile/facturas?propiedad_id=349341&mes=2026-10                                  → facturas y totales del mes
+  POST /mobile/facturas/editar   {id, propiedad_id, datos, usuario}                       → corrige una factura guardada (la renombra/mueve en el Drive y su fila)
+  POST /mobile/facturas/eliminar {id, usuario}                                            → borra una factura guardada (archivo a la papelera, fila fuera)
   POST /mobile/facturas/extracto {propiedad_id, archivo:{nombre,mime,base64}, usuario}    → extracto bancario guardado en el Drive (para el cotejo)
   POST /mobile/facturas/cotejar {propiedad_id, archivo, usuario}                          → cotejo del extracto (PDF BBVA o CSV) con las facturas guardadas
   POST /mobile/facturas/conectar  (PIN de administrador)                                  → {url} del conector para dar permiso al Drive
@@ -92,6 +94,29 @@ def guardar_factura():
                                    _es_pin_admin(), usuario=body.get("usuario"))
         logger.info(f"[facturas] Guardada {factura['id']} ({factura['tipo']}, {factura['fecha']}, {factura['total']}) por {factura['usuario'] or '?'}")
         return jsonify({"ok": True, "factura": factura})
+    except facturas.FacturaError as e:
+        return _error(e)
+
+
+@facturas_bp.route("/editar", methods=["POST"])
+def editar_factura():
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, "factura": facturas.editar(CLIENTE_APP, body.get("id"), body.get("datos"), body.get("propiedad_id"), _es_pin_admin(),
+                                                              usuario=body.get("usuario"))})
+    except facturas.FacturaError as e:
+        return _error(e)
+
+
+@facturas_bp.route("/eliminar", methods=["POST"])
+def eliminar_factura():
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **facturas.eliminar(CLIENTE_APP, body.get("id"), _es_pin_admin(), usuario=body.get("usuario"))})
     except facturas.FacturaError as e:
         return _error(e)
 

@@ -8,7 +8,9 @@
  *   - guardar:  guarde la factura en <raíz>/<Propiedad>/<Año>/<nT>/<Gastos|Ingresos>/ y añada su fila a la hoja
  *               «Registro de facturas <Año>» de <raíz>/<Propiedad>/<Año>/;
  *   - ping:     compruebe que el script responde y que la carpeta raíz es accesible;
- *   - estructura: cree las subcarpetas del cliente dentro de su carpeta raíz (al conectar su Drive).
+ *   - estructura: cree las subcarpetas del cliente dentro de su carpeta raíz (al conectar su Drive);
+ *   - eliminar:   mande a la papelera el archivo de una factura y quite su fila de la hoja de registro;
+ *   - actualizar: mueva y renombre el archivo de una factura y reemplace su fila en la hoja de registro.
  *
  * Requisitos (una vez):
  *   1. Servicios → añadir «Drive API» (servicio avanzado, identificador «Drive», versión v3).
@@ -36,6 +38,8 @@ function doPost(e) {
   try {
     if (p.accion === 'ping') return json_(ping_(p));
     if (p.accion === 'estructura') return json_(estructura_(p));
+    if (p.accion === 'eliminar') return json_(eliminar_(p));
+    if (p.accion === 'actualizar') return json_(actualizar_(p));
     if (p.accion === 'ocr') return json_(ocr_(p));
     if (p.accion === 'correo') return json_(correo_(p));
     if (p.accion === 'guardar') return json_(guardar_(p));
@@ -123,6 +127,94 @@ function hoja_(carpeta, titulo, cabecera) {
   sh.getRange(1, 1, 1, cabecera.length).setValues([cabecera]).setFontWeight('bold');
   sh.setFrozenRows(1);
   return ss;
+}
+
+/** ¿El archivo cuelga (a cualquier nivel) de la carpeta raíz de ese cliente? Impide tocar archivos de otros clientes con un id cualquiera. */
+function dentro_(archivo, raizId) {
+  let actual = archivo;
+  for (let i = 0; i < 12; i++) {
+    const it = actual.getParents();
+    if (!it.hasNext()) return false;
+    actual = it.next();
+    if (actual.getId() === raizId) return true;
+  }
+  return false;
+}
+
+/** Carpeta <base>/<seg1>/… SIN crear nada: null si falta alguna. */
+function carpetaExistente_(base, ruta) {
+  let c = base;
+  for (let i = 0; i < (ruta || []).length; i++) {
+    const it = c.getFoldersByName(String(ruta[i]).trim());
+    if (!it.hasNext()) return null;
+    c = it.next();
+  }
+  return c;
+}
+
+/** Quita de la hoja de registro (si existe) la fila cuyo ID (última columna «ID») coincide. Devuelve cuántas filas quitó. */
+function quitarFila_(raiz, registro) {
+  if (!registro || !registro.id) return 0;
+  const carpeta = carpetaExistente_(raiz, registro.ruta);
+  if (!carpeta) return 0;
+  const it = carpeta.getFilesByName(registro.titulo);
+  let quitadas = 0;
+  while (it.hasNext()) {
+    const f = it.next();
+    if (f.getMimeType() !== MimeType.GOOGLE_SHEETS) continue;
+    const sh = SpreadsheetApp.openById(f.getId()).getSheets()[0];
+    const datos = sh.getDataRange().getValues();
+    const col = datos[0].indexOf('ID');
+    if (col < 0) continue;
+    for (let i = datos.length - 1; i >= 1; i--) {
+      if (String(datos[i][col]) === String(registro.id)) { sh.deleteRow(i + 1); quitadas++; }
+    }
+  }
+  return quitadas;
+}
+
+function eliminar_(p) {
+  const bloqueo = LockService.getScriptLock();
+  bloqueo.waitLock(30000);
+  try {
+    const raiz = DriveApp.getFolderById(p.raiz_id);
+    let borrado = false;
+    try {
+      const archivo = DriveApp.getFileById(p.file_id);
+      if (!dentro_(archivo, p.raiz_id)) return { ok: false, error: 'archivo_fuera_de_la_carpeta_del_cliente' };
+      archivo.setTrashed(true);   // a la papelera de esta cuenta (30 días): se puede recuperar
+      borrado = true;
+    } catch (err) { /* el archivo ya no existe: no es un error */ }
+    return { ok: true, borrado: borrado, filas: quitarFila_(raiz, p.registro) };
+  } finally {
+    bloqueo.releaseLock();
+  }
+}
+
+function actualizar_(p) {
+  const bloqueo = LockService.getScriptLock();
+  bloqueo.waitLock(30000);
+  try {
+    const raiz = DriveApp.getFolderById(p.raiz_id);
+    const archivo = DriveApp.getFileById(p.file_id);
+    if (!dentro_(archivo, p.raiz_id)) return { ok: false, error: 'archivo_fuera_de_la_carpeta_del_cliente' };
+    const destino = carpeta_(raiz, p.ruta);
+    const mismoSitio = archivo.getParents().hasNext() && archivo.getParents().next().getId() === destino.getId();
+    const nombre = (mismoSitio && archivo.getName() === p.nombre) ? p.nombre : nombreLibre_(destino, p.nombre);
+    if (!mismoSitio) archivo.moveTo(destino);
+    if (archivo.getName() !== nombre) archivo.setName(nombre);
+    const url = archivo.getUrl();
+    quitarFila_(raiz, p.registro_viejo);
+    let hojaUrl = null;
+    if (p.registro_nuevo) {
+      const ss = hoja_(carpeta_(raiz, p.registro_nuevo.ruta), p.registro_nuevo.titulo, p.registro_nuevo.cabecera);
+      ss.getSheets()[0].appendRow((p.registro_nuevo.fila || []).map(function (v) { return celda_(v === '{{ENLACE}}' ? url : v); }));
+      hojaUrl = ss.getUrl();
+    }
+    return { ok: true, url: url, nombre: nombre, hoja_url: hojaUrl };
+  } finally {
+    bloqueo.releaseLock();
+  }
 }
 
 /** Crea (si faltan) las carpetas de cada ruta dentro de la carpeta raíz del cliente. */

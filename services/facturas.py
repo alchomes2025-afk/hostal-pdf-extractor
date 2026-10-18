@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -587,6 +588,17 @@ def _celda(v):
     return v
 
 
+def _fila_registro(datos, enlace, ahora, usuario, doc_id):
+    return [_celda(v) for v in (datos["fecha"], "Gasto" if datos["tipo"] == "gasto" else "Ingreso", datos["proveedor"], datos["nif"], datos["numero"],
+                                datos["concepto"], datos["categoria"], datos["base_imponible"], datos["iva_pct"], datos["cuota_iva"],
+                                datos["retencion_pct"], datos["retencion"], datos["total"], enlace, ahora, str(usuario or "")[:40], doc_id)]
+
+
+def _nombre_archivo(datos, extension):
+    total_txt = f"{datos['total']:.2f}".replace(".", ",")
+    return f"{datos['fecha']}_{_limpio(datos['proveedor'])}_{total_txt}€{extension}"
+
+
 def _limpio(texto, maximo=50):
     t = re.sub(r'[\\/:*?"<>|\n\r\t]+', " ", str(texto or "")).strip()
     return re.sub(r"\s+", " ", t)[:maximo].strip() or "SinNombre"
@@ -614,9 +626,7 @@ def guardar(cliente_id, propiedad_id, archivo, datos_formulario, es_admin, usuar
     nombre = f"{datos['fecha']}_{_limpio(datos['proveedor'])}_{total_txt}€{MIMES[mime]}"
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
     doc_id = _doc_id(cliente_id, h)
-    fila = [_celda(v) for v in (datos["fecha"], "Gasto" if datos["tipo"] == "gasto" else "Ingreso", datos["proveedor"], datos["nif"], datos["numero"],
-                                datos["concepto"], datos["categoria"], datos["base_imponible"], datos["iva_pct"], datos["cuota_iva"],
-                                datos["retencion_pct"], datos["retencion"], datos["total"], "{{ENLACE}}", ahora, str(usuario or "")[:40], doc_id)]
+    fila = _fila_registro(datos, "{{ENLACE}}", ahora, usuario, doc_id)
     try:
         r = puente_plataforma.guardar(raiz_drive(cliente_id), [CARPETA_FACTURAS, propiedad, anio, trimestre, carpeta_tipo], nombre, mime, contenido,
                                  registro={"ruta": [CARPETA_FACTURAS, propiedad, anio], "titulo": f"Registro de facturas {anio}",
@@ -689,6 +699,76 @@ def cotejar_extracto(cliente_id, propiedad_id, archivo, es_admin, usuario=""):
     return resultado
 
 
+def _factura_guardada(cliente_id, factura_id):
+    col = _coleccion()
+    if col is None:
+        raise FacturaError("no se puede acceder a las facturas ahora mismo", 503)
+    fid = str(factura_id or "")
+    if not fid.startswith(cliente_id + "-"):
+        raise FacturaError("factura desconocida", 404)
+    try:
+        doc = col.document(fid).get()
+    except Exception as e:
+        logger.error(f"[facturas] Error leyendo la factura {fid}: {e}")
+        raise FacturaError("no se ha podido cargar la factura", 502)
+    if not doc.exists:
+        raise FacturaError("factura desconocida", 404)
+    return col, fid, doc.to_dict()
+
+
+def editar(cliente_id, factura_id, datos_formulario, propiedad_id, es_admin, usuario=""):
+    """Corrige los datos de una factura ya guardada (y, si cambia la fecha, el tipo o la propiedad, la mueve y la renombra en el Drive) y
+    actualiza su fila en la hoja de registro. Cambiar de propiedad con el PIN normal solo vale entre las propiedades que ese PIN puede ver."""
+    c = cliente(cliente_id)
+    col, fid, actual = _factura_guardada(cliente_id, factura_id)
+    comprobar_propiedad(cliente_id, actual.get("propiedad_id"), es_admin)
+    nueva = comprobar_propiedad(cliente_id, propiedad_id or actual.get("propiedad_id"), es_admin)
+    if not habilitado(cliente_id):
+        raise FacturaError("la edición de facturas no está configurada", 503)
+    datos, avisos = normalizar(datos_formulario or {})
+    if not datos["fecha"] or not datos["total"] or not datos["proveedor"]:
+        raise FacturaError("faltan la fecha, el " + ("proveedor" if datos["tipo"] == "gasto" else "cliente") + " o el total")
+    f = date.fromisoformat(datos["fecha"])
+    anio, trimestre = str(f.year), f"{(f.month - 1) // 3 + 1}T"
+    extension = os.path.splitext(str(actual.get("archivo") or ""))[1] or ".pdf"
+    nombre = _nombre_archivo(datos, extension)
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ruta = [CARPETA_FACTURAS, c["propiedades"][nueva], anio, trimestre, "Gastos" if datos["tipo"] == "gasto" else "Ingresos"]
+    viejo = {"ruta": [CARPETA_FACTURAS, c["propiedades"][actual["propiedad_id"]], str(actual.get("anio") or "")], "titulo": f"Registro de facturas {actual.get('anio')}", "id": fid}
+    nuevo = {"ruta": ruta[:3], "titulo": f"Registro de facturas {anio}", "cabecera": CABECERA_REGISTRO,
+             "fila": _fila_registro(datos, "{{ENLACE}}", ahora, usuario, fid)}
+    try:
+        r = puente_plataforma.actualizar(raiz_drive(cliente_id), actual.get("drive_id"), ruta, nombre, viejo, nuevo)
+    except puente_plataforma.PuenteError as e:
+        logger.error(f"[facturas] Actualizar en Drive: {e}")
+        raise FacturaError("no se ha podido actualizar en el Drive; vuelve a intentarlo en un momento", 502)
+    cambios = {**datos, "propiedad_id": nueva, "mes": datos["fecha"][:7], "anio": anio, "trimestre": trimestre, "archivo": r.get("nombre") or nombre,
+               "url": r.get("url") or actual.get("url"), "hoja_url": r.get("hoja_url") or actual.get("hoja_url"), "editada": ahora, "editada_por": str(usuario or "")[:40]}
+    col.document(fid).set({**actual, **cambios})
+    logger.info(f"[facturas] Editada {fid} por {usuario or '?'}")
+    return {"id": fid, **actual, **cambios, "avisos": avisos}
+
+
+def eliminar(cliente_id, factura_id, es_admin, usuario=""):
+    """Borra una factura guardada: el archivo va a la papelera del Drive (30 días), se quita su fila de la hoja de registro y deja de contar. Se
+    puede volver a subir (su huella queda libre)."""
+    c = cliente(cliente_id)
+    col, fid, actual = _factura_guardada(cliente_id, factura_id)
+    comprobar_propiedad(cliente_id, actual.get("propiedad_id"), es_admin)
+    if not habilitado(cliente_id):
+        raise FacturaError("el borrado de facturas no está configurado", 503)
+    registro = {"ruta": [CARPETA_FACTURAS, c["propiedades"][actual["propiedad_id"]], str(actual.get("anio") or "")],
+                "titulo": f"Registro de facturas {actual.get('anio')}", "id": fid}
+    try:
+        puente_plataforma.eliminar(raiz_drive(cliente_id), actual.get("drive_id"), registro)
+    except puente_plataforma.PuenteError as e:
+        logger.error(f"[facturas] Eliminar en Drive: {e}")
+        raise FacturaError("no se ha podido borrar en el Drive; vuelve a intentarlo en un momento", 502)
+    col.document(fid).delete()
+    logger.info(f"[facturas] Eliminada {fid} por {usuario or '?'}")
+    return {"id": fid}
+
+
 def meses_con_facturas(cliente_id, propiedad_id, es_admin):
     """Resumen por mes (más reciente primero) de lo ya subido de una propiedad: [{mes, facturas, gasto, ingreso}]. Para ver de un vistazo lo que hay."""
     propiedad_id = comprobar_propiedad(cliente_id, propiedad_id, es_admin)
@@ -735,5 +815,5 @@ def listar(cliente_id, propiedad_id, mes, es_admin):
                               for cat in CATEGORIAS[tipo] if any(x.get("categoria") == cat for x in delas)},
         }
     campos = ("id", "tipo", "fecha", "proveedor", "nif", "numero", "concepto", "categoria", "base_imponible", "iva_pct",
-              "cuota_iva", "retencion", "total", "es_rectificativa", "url", "usuario")
+              "cuota_iva", "retencion_pct", "retencion", "total", "es_rectificativa", "url", "usuario", "propiedad_id", "archivo")
     return {"facturas": [{k: x.get(k) for k in campos} for x in facturas], "totales": totales}
