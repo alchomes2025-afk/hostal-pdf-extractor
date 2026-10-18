@@ -40,6 +40,17 @@ comparte con hostalfacil@gmail.com y avisa al backend (`POST /mobile/facturas/co
 carpeta por cliente en Firestore (`facturas_config`); la app lo detecta sola. Solo el PIN de administrador puede conectar. `tests/test_facturas_conexion.py`
 (11 pruebas) y prueba en Chrome con servidor simulado. Instalación: `apps-script/LEEME_conector.md`.
 
+## Varias facturas, ZIP y extracto bancario (2026-10-18)
+- **Subida múltiple:** el selector admite varios archivos (PDF, fotos) y archivos **.zip** (se abren en el navegador con JSZip, cargado de cdnjs solo cuando
+  hace falta; se ignoran los archivos que no son PDF ni imagen y las carpetas `__MACOSX`). **.rar/.7z/.tar no** se pueden abrir desde el navegador: la app avisa y
+  pide convertirlos a .zip. Máx. 30 documentos por tanda.
+- Se leen **uno tras otro** (reintento a los 20 s si la IA está ocupada: la cuenta gratuita de Groq da unas 3 facturas por minuto). Resumen: «guardar las N que
+  cuadran» de golpe (cuadra + sin avisos + sin duplicado), «revisar una a una» las demás (formulario con «Guardar» / «Omitir»), toque en cualquier fila para revisarla.
+- **Extracto bancario:** al terminar una tanda, y siempre desde el botón «📑 Subir extracto bancario», la app pregunta si se quiere cotejar con el extracto
+  (CSV, Excel o PDF, ≤10 MB) y lo guarda en `Facturas/<Propiedad>/<Año>/Extractos/` (`POST /mobile/facturas/extracto`). **El cotejo automático NO está hecho todavía:**
+  falta decidir el formato de los extractos, repasar la app de cotejo de Adrián (fase de pruebas; no funcionó con Groq) y, si hace falta, IA de pago del cliente.
+  Pruebas: `tests/test_facturas_extracto.py`; Chrome contra servidor simulado (lote con ZIP, resumen, guardado en bloque, revisión una a una, extracto).
+
 ## Falta
 1. **Pasos de Adrián:** actualizar el puente (nueva versión), crear el conector y poner en Render `PUENTE_URL`, `PUENTE_SECRETO`, `CONECTOR_URL`
    (ver `apps-script/LEEME_conector.md`); fusionar la rama; abrir Facturas con el PIN de administrador y seguir el asistente.

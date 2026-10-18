@@ -56,6 +56,9 @@ CARPETA_FACTURAS = "Facturas"
 
 MIMES = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_BYTES = 10 * 1024 * 1024
+MIMES_EXTRACTO = {"application/pdf": ".pdf", "text/csv": ".csv", "text/plain": ".txt", "application/vnd.ms-excel": ".xls",
+                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx"}
+CARPETA_EXTRACTOS = "Extractos"
 CABECERA_REGISTRO = ["Fecha", "Tipo", "Proveedor / Cliente", "NIF", "Nº factura", "Concepto", "Categoría",
                      "Base imponible", "IVA %", "Cuota IVA", "Retención %", "Retención", "Total", "Archivo",
                      "Subida", "Usuario", "ID"]
@@ -257,6 +260,36 @@ def _archivo(archivo):
     if len(contenido) > MAX_BYTES:
         raise FacturaError("archivo demasiado grande (máximo 10 MB)")
     return contenido, mime
+
+
+def guardar_extracto(cliente_id, propiedad_id, archivo, es_admin, usuario=""):
+    """Guarda el extracto bancario que sube el cliente en <raíz>/Facturas/<Propiedad>/<Año>/Extractos/ (para el cotejo con las facturas)."""
+    import base64 as b64
+    c = cliente(cliente_id)
+    propiedad_id = comprobar_propiedad(cliente_id, propiedad_id, es_admin)
+    if not habilitado(cliente_id):
+        raise FacturaError("la subida de documentos no está configurada", 503)
+    mime = str((archivo or {}).get("mime") or "").lower()
+    if mime not in MIMES_EXTRACTO:
+        raise FacturaError("formato no admitido: sube el extracto en CSV, Excel (XLS o XLSX) o PDF")
+    try:
+        contenido = b64.b64decode((archivo or {}).get("base64") or "", validate=False)
+    except Exception:
+        raise FacturaError("archivo dañado")
+    if not contenido:
+        raise FacturaError("archivo vacío")
+    if len(contenido) > MAX_BYTES:
+        raise FacturaError("archivo demasiado grande (máximo 10 MB)")
+    ahora = datetime.now()
+    nombre = f"{ahora:%Y-%m-%d}_Extracto_{_limpio(re.sub(r'[.][^.]*$', '', str((archivo or {}).get('nombre') or 'extracto')), 40)}{MIMES_EXTRACTO[mime]}"
+    try:
+        r = puente_plataforma.guardar(raiz_drive(cliente_id), [CARPETA_FACTURAS, c["propiedades"][propiedad_id], str(ahora.year), CARPETA_EXTRACTOS],
+                                      nombre, mime, contenido, registro=None, descripcion=f"Extracto bancario subido por {str(usuario or '?')[:40]}")
+    except puente_plataforma.PuenteError as e:
+        logger.error(f"[facturas] Guardar el extracto en Drive: {e}")
+        raise FacturaError("no se ha podido guardar en el Drive; vuelve a intentarlo en un momento", 502)
+    logger.info(f"[facturas] Extracto guardado ({nombre}) por {usuario or '?'}")
+    return {"nombre": r.get("nombre"), "url": r.get("url")}
 
 
 def _coleccion():

@@ -9,6 +9,7 @@ Primavera); con el de administración, todas. La app de gestión actual es de un
   POST /mobile/facturas/leer     {propiedad_id, archivo:{nombre,mime,base64}}            → propuesta para revisar
   POST /mobile/facturas/guardar  {propiedad_id, archivo, datos, usuario}                 → guardada en el Drive
   GET  /mobile/facturas?propiedad_id=349341&mes=2026-10                                  → facturas y totales del mes
+  POST /mobile/facturas/extracto {propiedad_id, archivo:{nombre,mime,base64}, usuario}    → extracto bancario guardado en el Drive (para el cotejo)
   POST /mobile/facturas/conectar  (PIN de administrador)                                  → {url} del conector para dar permiso al Drive
   POST /mobile/facturas/conectado (lo llama el conector, firmado con PUENTE_SECRETO)      → crea las subcarpetas y guarda la conexión
 """
@@ -88,6 +89,18 @@ def guardar_factura():
                                    _es_pin_admin(), usuario=body.get("usuario"))
         logger.info(f"[facturas] Guardada {factura['id']} ({factura['tipo']}, {factura['fecha']}, {factura['total']}) por {factura['usuario'] or '?'}")
         return jsonify({"ok": True, "factura": factura})
+    except facturas.FacturaError as e:
+        return _error(e)
+
+
+@facturas_bp.route("/extracto", methods=["POST"])
+def subir_extracto():
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, **facturas.guardar_extracto(CLIENTE_APP, body.get("propiedad_id"), body.get("archivo"), _es_pin_admin(),
+                                                               usuario=body.get("usuario"))})
     except facturas.FacturaError as e:
         return _error(e)
 

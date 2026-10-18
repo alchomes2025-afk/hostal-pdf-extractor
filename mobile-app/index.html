@@ -246,6 +246,8 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-ol{font-size:13.5px;line-height:1.55;padding-left:20px;margin:0 0 12px;color:var(--ink)}
 .fx-ol li{margin-bottom:6px}
 .fx-arbol{white-space:pre;font-size:12px;line-height:1.5;background:#fdf1f8;border:1px solid var(--border);border-radius:10px;padding:10px;margin:0 0 10px;overflow-x:auto}
+.fx-sec{width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:#fff;color:var(--ink);font-weight:800;font-size:13.5px;margin-bottom:10px}
+.fx-click{cursor:pointer}
 .fx-note{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
 .fx-note.err{background:var(--blocked-bg);border-color:var(--blocked)}
 .fx-note.ok{background:var(--avail-bg);border-color:var(--avail)}
@@ -642,7 +644,8 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
   <div id="fx-panel">
     <div id="fx-head"><span id="fx-title">🧾 Facturas</span><button type="button" onclick="closeFacturas()" title="Cerrar">✕</button></div>
     <div id="fx-body"></div>
-    <input type="file" id="fx-file" accept="application/pdf,image/*" style="display:none">
+    <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z" multiple style="display:none">
+    <input type="file" id="fx-extracto" accept=".csv,.xls,.xlsx,.pdf,.txt,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
   </div>
   <button type="button" id="as-fab" title="Preguntar al asistente" onclick="toggleAsistente()">💬</button>
   <div id="as-panel">
@@ -2115,7 +2118,10 @@ async function fxLista() {
   next.onclick = () => fxShift(1);
   const subir = fxEl("button", "fx-big", "＋ Subir factura (foto o PDF)", body);
   subir.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
+  fxEl("div", "fx-cat", "Puedes elegir varias facturas a la vez o un archivo .zip con todas.", body);
   if (FX.aviso) { fxEl("div", "fx-note ok", FX.aviso, body); FX.aviso = ""; }
+  const extr = fxEl("button", "fx-sec", "📑 Subir extracto bancario (para cotejar)", body);
+  extr.onclick = () => fxExtracto(false);
   const carga = fxEl("div", "fx-cat", "Cargando facturas…", body);
   const mes = `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
   let r;
@@ -2264,34 +2270,228 @@ function fxLeerArchivo(file) {
   });
 }
 
+// ── Varias facturas a la vez y archivos ZIP ──
+// Cada archivo (o cada documento dentro de un ZIP) se lee uno detrás de otro; después hay un resumen: se guardan de golpe las que cuadran y se revisan
+// una a una las demás. Un .rar/.7z no se puede abrir desde el navegador (hay que convertirlo a .zip).
+const FX_MAX_LOTE = 30;
+const FX_JSZIP = "https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js";
+const fxEspera = ms => new Promise(r => setTimeout(r, ms));
+const FX_EXT_MIME = {pdf: "application/pdf", jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp"};
+
+function fxScript(url) {
+  return new Promise((ok, fail) => {
+    const s = document.createElement("script");
+    s.src = url; s.onload = ok; s.onerror = () => fail(new Error("No se pudo cargar el lector de ZIP (¿sin conexión?)."));
+    document.head.appendChild(s);
+  });
+}
+
+async function fxExpandir(files) {
+  const docs = [], avisos = [];
+  const anadir = async (file, nombre) => {
+    try { docs.push(await fxLeerArchivo(file)); } catch (err) { avisos.push(`«${nombre}»: ${err.message}`); }
+  };
+  for (const file of files) {
+    const nombre = file.name, ext = (nombre.split(".").pop() || "").toLowerCase();
+    if (ext === "zip" || /zip/.test(file.type)) {
+      try {
+        if (typeof JSZip === "undefined") await fxScript(FX_JSZIP);
+        const zip = await JSZip.loadAsync(file);
+        let omitidos = 0;
+        for (const e of Object.values(zip.files)) {
+          const base = e.name.split("/").pop();
+          if (e.dir || e.name.startsWith("__MACOSX/") || base.startsWith(".")) continue;
+          const mime = FX_EXT_MIME[(base.split(".").pop() || "").toLowerCase()];
+          if (!mime) { omitidos++; continue; }
+          const blob = await e.async("blob");
+          await anadir(new File([blob], base, {type: mime}), `${nombre} › ${base}`);
+        }
+        if (omitidos) avisos.push(`«${nombre}»: ${omitidos} archivo(s) que no son PDF ni imagen se han ignorado.`);
+      } catch (err) { avisos.push(`«${nombre}»: no se pudo abrir el ZIP (${err.message}).`); }
+    } else if (["rar", "7z", "tar", "gz", "tgz", "bz2"].includes(ext)) {
+      avisos.push(`«${nombre}»: este tipo de archivo comprimido no se puede abrir desde la app. Conviértelo a .zip o sube las facturas sueltas.`);
+    } else if (FX_EXT_MIME[ext] || file.type === "application/pdf" || /^image\//.test(file.type)) {
+      await anadir(file.type ? file : new File([file], nombre, {type: FX_EXT_MIME[ext] || ""}), nombre);
+    } else {
+      avisos.push(`«${nombre}»: formato no admitido (sube PDF, fotos o un .zip).`);
+    }
+  }
+  return {docs, avisos};
+}
+
 $("#fx-file").addEventListener("change", async (e) => {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
+  const files = [...(e.target.files || [])];
+  if (!files.length) return;
   const body = $("#fx-body");
   body.textContent = "";
-  fxEl("div", "fx-note", "Leyendo la factura… puede tardar unos 20 segundos.", body);
+  $("#fx-title").textContent = "🧾 Preparando…";
+  fxEl("div", "fx-note", "Preparando los archivos…", body);
+  const {docs, avisos} = await fxExpandir(files);
+  if (docs.length > FX_MAX_LOTE) { avisos.push(`Se han leído solo las primeras ${FX_MAX_LOTE} de ${docs.length}: sube el resto en otra tanda.`); docs.length = FX_MAX_LOTE; }
+  if (!docs.length) { await fxLista(); body.prepend(...avisos.map(a => fxEl("div", "fx-note err", a))); return; }
+  FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false};
+  await fxLeerLote();
+});
+
+async function fxLeerUna(archivo) {
   try {
-    FX.archivo = await fxLeerArchivo(file);
-  } catch (err) { fxLista(); FX.aviso = ""; body.prepend(fxEl("div", "fx-note err", err.message)); return; }
+    return await fxApi("/leer", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, archivo: {nombre: archivo.nombre, mime: archivo.mime, base64: archivo.base64}})});
+  } catch (err) { return {status: 0, d: {ok: false, error: "Error de conexión."}}; }
+}
+
+async function fxLeerLote() {
+  const lote = FX.lote, n = lote.items.length;
+  for (let i = 0; i < n; i++) {
+    if (lote.cancelado) break;
+    const it = lote.items[i];
+    const body = $("#fx-body");
+    body.textContent = "";
+    $("#fx-title").textContent = "🧾 Leyendo facturas";
+    fxEl("div", "fx-paso", `Factura ${i + 1} de ${n}`, body);
+    fxEl("div", "fx-p", it.archivo.nombre, body);
+    const estado = fxEl("div", "fx-note", "⏳ Leyendo… (unos 20 segundos cada una)", body);
+    const parar = fxEl("button", "fx-sec", "Parar y revisar lo leído", body);
+    parar.onclick = () => { lote.cancelado = true; };
+    let r = await fxLeerUna(it.archivo);
+    for (let intento = 0; !r.d.ok && [0, 429, 502, 503].includes(r.status) && intento < 2 && !lote.cancelado; intento++) {
+      estado.textContent = "⏳ La IA está ocupada: reintento en 20 segundos…";
+      await fxEspera(20000);
+      estado.textContent = "⏳ Leyendo otra vez…";
+      r = await fxLeerUna(it.archivo);
+    }
+    if (r.d.ok) { it.lectura = {datos: r.d.datos, avisos: r.d.avisos || [], duplicado: r.d.duplicado}; it.estado = "leida"; }
+    else { it.lectura = null; it.error = r.d.error || "No se pudo leer"; it.estado = "error"; }
+  }
+  if (n === 1) return fxAbrirItem(0, true);
+  fxResumenLote();
+}
+
+function fxListo(it) {
+  const l = it.lectura;
+  return !!(l && l.datos && l.datos.cuadra && !l.avisos.length && !l.duplicado && l.datos.fecha && l.datos.proveedor && l.datos.total);
+}
+
+function fxAbrirItem(i, unica) {
+  const lote = FX.lote, it = lote.items[i];
+  const ctx = {archivo: it.archivo, etiqueta: lote.items.length > 1 ? `${i + 1} de ${lote.items.length}` : "",
+    alGuardar: (f) => {
+      it.estado = "guardada";
+      if (unica) { FX.aviso = `✓ Guardada en el Drive: ${f.archivo || f.proveedor}`; FX.lote = null; fxLista(); }
+      else if (ctx.seguido) fxSiguiente(); else fxResumenLote();
+    },
+    alOmitir: () => { if (unica) { FX.lote = null; fxLista(); return; } it.estado = "omitida"; if (ctx.seguido) fxSiguiente(); else fxResumenLote(); }};
+  ctx.seguido = !!lote.seguido;
+  if (it.lectura) fxFormulario(it.lectura.datos, it.lectura.avisos, it.lectura.duplicado, "", ctx);
+  else fxFormulario({tipo: "gasto"}, [], null, (it.error || "No se pudo leer la factura") + ". Puedes rellenar los datos a mano.", ctx);
+}
+
+function fxSiguiente() {
+  const lote = FX.lote;
+  const i = lote.items.findIndex(it => it.estado === "leida" || it.estado === "error");
+  if (i < 0) { lote.seguido = false; return fxResumenLote(); }
+  lote.seguido = true;
+  fxAbrirItem(i, false);
+}
+
+function fxResumenLote() {
+  const lote = FX.lote;
+  if (!lote) return fxLista();
+  lote.seguido = false;
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "🧾 Resumen de la subida";
+  lote.avisos.forEach(a => fxEl("div", "fx-note", a, body));
+  const cuenta = f => lote.items.filter(f).length;
+  const listas = lote.items.filter(it => it.estado === "leida" && fxListo(it));
+  const porRevisar = cuenta(it => it.estado === "leida" && !fxListo(it)), fallos = cuenta(it => it.estado === "error"), guardadas = cuenta(it => it.estado === "guardada");
+  fxEl("div", "fx-cat", `${lote.items.length} documentos: ✓ ${guardadas} guardadas · ${listas.length} listas para guardar · ⚠ ${porRevisar} por revisar · ✖ ${fallos} sin leer`, body);
+  if (listas.length) {
+    const todas = fxEl("button", "fx-big", `Guardar las ${listas.length} que cuadran`, body);
+    todas.onclick = () => fxGuardarListas(listas);
+  }
+  if (porRevisar + fallos) {
+    const uno = fxEl("button", "fx-sec", `Revisar una a una (${porRevisar + fallos})`, body);
+    uno.onclick = () => fxSiguiente();
+  }
+  lote.items.forEach((it, i) => {
+    const row = fxEl("div", "fx-row fx-click", null, body);
+    const main = fxEl("div", "f-main", null, row);
+    const d = it.lectura && it.lectura.datos;
+    fxEl("b", "", d && d.proveedor ? d.proveedor : it.archivo.nombre, main);
+    const dup = it.lectura && it.lectura.duplicado;
+    const texto = {guardada: "✓ guardada", omitida: "omitida", error: "✖ no se pudo leer: toca para rellenar a mano"}[it.estado] ||
+                  (dup ? "♻ ya estaba subida" : fxListo(it) ? "✓ lista para guardar" : "⚠ revisa los datos");
+    fxEl("small", "", [d && d.fecha, d && d.numero, texto].filter(Boolean).join(" · "), main);
+    if (d && d.total != null) fxEl("div", "f-tot" + (d.tipo === "ingreso" ? " ing" : ""), fxEur(d.total), row);
+    if (it.estado !== "guardada") row.onclick = () => fxAbrirItem(i, false);
+  });
+  const fin = fxEl("button", "fx-sec", "Terminar", body);
+  fin.onclick = () => { FX.lote = null; if (guardadas) fxExtracto(true); else fxLista(); };
+}
+
+async function fxGuardarListas(listas) {
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "🧾 Guardando…";
+  const estado = fxEl("div", "fx-note", "", body);
+  for (let k = 0; k < listas.length; k++) {
+    const it = listas[k];
+    estado.textContent = `Guardando ${k + 1} de ${listas.length}…`;
+    let r;
+    try {
+      r = await fxApi("/guardar", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, datos: it.lectura.datos,
+                                                                      archivo: {nombre: it.archivo.nombre, mime: it.archivo.mime, base64: it.archivo.base64}})});
+    } catch (e) { r = {d: {ok: false, error: "Error de conexión."}}; }
+    if (r.d.ok) it.estado = "guardada";
+    else { it.estado = "leida"; it.lectura.avisos = [...it.lectura.avisos, "No se pudo guardar: " + (r.d.error || "error")]; }
+  }
+  fxResumenLote();
+}
+
+// ── Extracto bancario (para cotejar las facturas con los movimientos) ──
+function fxExtracto(trasSubida) {
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "📑 Extracto bancario";
+  fxEl("h3", "fx-h", "¿Quieres cotejar las facturas con tu extracto bancario?", body);
+  fxEl("p", "fx-p", "Con el extracto se puede comprobar qué facturas están pagadas y detectar movimientos sin factura. Súbelo en CSV, Excel o PDF; se guarda en tu Drive, en la carpeta «Extractos» de la propiedad.", body);
+  const si = fxEl("button", "fx-big", "Subir el extracto", body);
+  const no = fxEl("button", "fx-sec", trasSubida ? "Ahora no" : "Volver", body);
+  const msg = fxEl("div", "fx-note", "", body);
+  msg.style.display = "none";
+  si.onclick = () => { $("#fx-extracto").value = ""; $("#fx-extracto").click(); };
+  no.onclick = () => fxLista();
+  FX.extractoMsg = (texto, ok) => { msg.className = "fx-note " + (ok ? "ok" : "err"); msg.textContent = texto; msg.style.display = "block"; };
+}
+
+$("#fx-extracto").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  const mime = file.type || {csv: "text/csv", xls: "application/vnd.ms-excel", xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", pdf: "application/pdf", txt: "text/plain"}[ext] || "";
+  if (file.size > 10 * 1024 * 1024) return FX.extractoMsg && FX.extractoMsg("El archivo pesa más de 10 MB.", false);
+  FX.extractoMsg && FX.extractoMsg("⏳ Subiendo el extracto…", true);
+  const base64 = await new Promise((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(",")[1]); fr.onerror = fail; fr.readAsDataURL(file); }).catch(() => null);
+  if (!base64) return FX.extractoMsg && FX.extractoMsg("No se pudo leer el archivo.", false);
   let r;
-  try {
-    r = await fxApi("/leer", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, archivo: {nombre: FX.archivo.nombre, mime: FX.archivo.mime, base64: FX.archivo.base64}})});
-  } catch (err) { r = {d: {ok: false, error: "Error de conexión."}}; }
-  if (r.d.ok) fxFormulario(r.d.datos, r.d.avisos || [], r.d.duplicado, "");
-  else fxFormulario({tipo: "gasto"}, [], null, (r.d.error || "No se pudo leer la factura") + ". Puedes rellenar los datos a mano.");
+  try { r = await fxApi("/extracto", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, archivo: {nombre: file.name, mime, base64}})}); }
+  catch (err) { r = {d: {ok: false, error: "Error de conexión."}}; }
+  if (r.d.ok) FX.extractoMsg("✓ Extracto guardado en tu Drive (" + (r.d.nombre || file.name) + "). El cotejo automático con las facturas llegará en la siguiente fase; ya queda guardado y ordenado.", true);
+  else FX.extractoMsg(r.d.error || "No se pudo guardar el extracto.", false);
 });
 
 const fxNum = s => { const n = parseFloat(String(s || "").replace(",", ".")); return isNaN(n) ? null : n; };
 const fxR2 = n => Math.round(n * 100) / 100;
 
-function fxFormulario(datos, avisos, duplicado, errorLectura) {
+function fxFormulario(datos, avisos, duplicado, errorLectura, ctx) {
+  const arch = ctx ? ctx.archivo : FX.archivo;   // con ctx (lote) se llama a ctx.alGuardar / ctx.alOmitir
   const body = $("#fx-body");
   body.textContent = "";
-  $("#fx-title").textContent = "🧾 Revisa la factura";
+  $("#fx-title").textContent = "🧾 Revisa la factura" + (ctx && ctx.etiqueta ? " · " + ctx.etiqueta : "");
   if (errorLectura) fxEl("div", "fx-note err", errorLectura, body);
   avisos.forEach(a => fxEl("div", "fx-note", a, body));
-  if (FX.archivo && FX.archivo.vista) { const im = fxEl("img", "fx-thumb", null, body); im.src = FX.archivo.vista; im.alt = "Vista previa"; }
-  else if (FX.archivo) fxEl("div", "fx-cat", "📄 " + FX.archivo.nombre, body);
+  if (arch && arch.vista) { const im = fxEl("img", "fx-thumb", null, body); im.src = arch.vista; im.alt = "Vista previa"; }
+  else if (arch) fxEl("div", "fx-cat", "📄 " + arch.nombre, body);
   const form = fxEl("div", "fx-form", null, body);
   const campo = (id, etiqueta, tipo, valor, padre) => {
     const p = padre ? fxEl("div", "", null, padre) : form;   // en una fila de dos columnas, cada campo va con su etiqueta en su celda
@@ -2369,8 +2569,8 @@ function fxFormulario(datos, avisos, duplicado, errorLectura) {
   msg.style.display = "none";
   const btns = fxEl("div", "fx-btns", null, form);
   const guardar = fxEl("button", "send", "Guardar en el Drive", btns);
-  const cancelar = fxEl("button", "", "Cancelar", btns);
-  cancelar.onclick = () => { FX.archivo = null; fxLista(); };
+  const cancelar = fxEl("button", "", ctx && ctx.etiqueta ? "Omitir" : "Cancelar", btns);
+  cancelar.onclick = () => { if (ctx) ctx.alOmitir(); else { FX.archivo = null; fxLista(); } };
   guardar.onclick = async () => {
     const f = {tipo: tipo.value, fecha: fecha.value, proveedor: prov.value.trim(), nif: $("#fx-nif").value.trim(), numero: $("#fx-numero").value.trim(),
                concepto: $("#fx-concepto").value.trim(), categoria: cat.value, base_imponible: base.value, iva_pct: iva.value, cuota_iva: cuota.value,
@@ -2383,9 +2583,10 @@ function fxFormulario(datos, avisos, duplicado, errorLectura) {
     let r;
     try {
       r = await fxApi("/guardar", {method: "POST", body: JSON.stringify({propiedad_id: FIN_PROPERTY, pin: PIN, usuario: USER_NAME, datos: f,
-                                                                      archivo: {nombre: FX.archivo.nombre, mime: FX.archivo.mime, base64: FX.archivo.base64}})});
+                                                                      archivo: {nombre: arch.nombre, mime: arch.mime, base64: arch.base64}})});
     } catch (e) { r = {status: 0, d: {ok: false, error: "Error de conexión. Comprueba la lista antes de reintentar."}}; }
     if (r.d.ok) {
+      if (ctx) { ctx.alGuardar(r.d.factura); return; }
       FX.archivo = null;
       FX.aviso = `✓ Guardada en el Drive: ${r.d.factura.archivo || r.d.factura.proveedor}`;
       fxLista();
