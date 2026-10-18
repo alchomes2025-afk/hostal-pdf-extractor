@@ -50,6 +50,12 @@ def estructura(raiz_id, rutas):
     return _llamar("estructura", raiz_id=raiz_id, rutas=rutas).get("rutas")
 
 
+def resumen(raiz_id, ruta, titulo, hojas):
+    """Crea o reescribe una hoja de Google en <raíz>/<ruta> con una pestaña por cada {nombre: filas}. Devuelve {url}."""
+    data = _llamar("resumen", raiz_id=raiz_id, ruta=ruta, titulo=titulo, hojas=[{"nombre": n, "filas": f} for n, f in hojas.items()])
+    return {"url": data.get("url")}
+
+
 def eliminar(raiz_id, file_id, registro):
     """Manda a la papelera el archivo de una factura y quita su fila (por ID) de la hoja de registro. Un archivo que ya no existe no es error."""
     return _llamar("eliminar", raiz_id=raiz_id, file_id=file_id, registro=registro)

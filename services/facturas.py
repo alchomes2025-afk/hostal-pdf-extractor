@@ -48,7 +48,7 @@ CATEGORIAS = {
     "gasto": [
         "Suministros (luz, agua, gas, internet)", "Limpieza y lavandería", "Mantenimiento y reparaciones",
         "Consumibles y amenities", "Mobiliario y equipamiento", "Comisiones de plataformas", "Software y suscripciones",
-        "Seguros", "Gestoría y asesoría", "Impuestos y tasas", "Alquiler", "Publicidad", "Otros gastos",
+        "Seguros", "Gestoría y asesoría", "Impuestos y tasas", "Alquiler", "Comunidad de propietarios", "Publicidad", "Otros gastos",
     ],
     "ingreso": ["Alojamiento", "Otros ingresos"],
 }
@@ -56,6 +56,10 @@ CATEGORIAS = {
 # Carpeta que crea el propio sistema, la primera vez que se guarda una factura, dentro de la carpeta compartida por el cliente
 # (FACTURAS_DRIVE_RAIZ_ALC = «HostalFácil-Gestión»); de ahí cuelgan <Propiedad>/<Año>/<nT>/<Gastos|Ingresos> (el puente crea lo que falte).
 CARPETA_FACTURAS = "Facturas"
+
+# Meses que cubre una factura de gasto (un seguro anual = 12, el agua = 2…): su importe se reparte entre esos meses (services/asesor.py, «devengo»).
+COBERTURAS = (1, 2, 3, 4, 6, 12)
+COBERTURA_DEFECTO = {"Seguros": 12, "Impuestos y tasas": 12}
 
 MIMES = {"application/pdf": ".pdf", "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 MAX_BYTES = 10 * 1024 * 1024
@@ -382,6 +386,11 @@ def normalizar(d):
         "categoria": d.get("categoria") if d.get("categoria") in CATEGORIAS[tipo] else ("Otros gastos" if tipo == "gasto" else "Otros ingresos"),
         "es_rectificativa": bool(d.get("es_rectificativa")),
     }
+    try:
+        cob = int(d.get("cobertura_meses") or 0)
+    except (TypeError, ValueError):
+        cob = 0
+    datos["cobertura_meses"] = cob if cob in COBERTURAS else COBERTURA_DEFECTO.get(datos["categoria"], 1)
     for k in ("base_imponible", "cuota_iva", "total", "retencion"):   # en positivo: el abono lo marca es_rectificativa
         if datos[k] is not None and datos[k] < 0:
             datos[k], datos["es_rectificativa"] = -datos[k], True
@@ -772,38 +781,45 @@ def eliminar(cliente_id, factura_id, es_admin, usuario=""):
 # Cómo entran los gastos reales en el beneficio de Finanzas. Las comisiones de plataformas (Booking…) NO suman: ya están descontadas de los ingresos netos.
 GRUPOS_COSTE = {
     "limpieza": ("Limpieza y lavandería", "Consumibles y amenities"),
-    "fijos": ("Suministros (luz, agua, gas, internet)", "Seguros", "Impuestos y tasas", "Alquiler", "Software y suscripciones", "Gestoría y asesoría"),
+    "fijos": ("Suministros (luz, agua, gas, internet)", "Seguros", "Impuestos y tasas", "Alquiler", "Comunidad de propietarios", "Software y suscripciones", "Gestoría y asesoría"),
     "otros": ("Mantenimiento y reparaciones", "Mobiliario y equipamiento", "Publicidad", "Otros gastos"),
     "plataformas": ("Comisiones de plataformas",),
 }
 
 
 def costes_reales(cliente_id, propiedad_id, mes):
-    """Gastos reales de un mes y propiedad según las facturas guardadas (importes con IVA, un abono resta), agrupados como los costes del informe:
-    {facturas, total (sin comisiones de plataformas), grupos {limpieza, fijos, otros}, plataformas, por_categoria, iva_soportado}. None si no hay base de datos."""
-    col = _coleccion()
-    if col is None:
+    """Gastos reales de un mes y propiedad según las facturas guardadas (importes con IVA, un abono resta), agrupados como los costes del informe.
+    Limpieza y «otros» salen de las facturas DEL MES; los costes FIJOS se calculan por concepto (services/asesor.py): facturas repartidas según los meses que cubren,
+    lo declarado al Asesor Contable cuando no hay factura y «falta» si no hay nada. None si no hay base de datos."""
+    from services import asesor
+    if _coleccion() is None:
         return None
     grupo_de = {cat: g for g, cats in GRUPOS_COSTE.items() for cat in cats}
+    facs = asesor.facturas_de_propiedad(cliente_id, propiedad_id)
     grupos = {"limpieza": 0.0, "fijos": 0.0, "otros": 0.0}
     plataformas, iva, n, n_costes, por_categoria = 0.0, 0.0, 0, 0, {}
-    for d in col.where("cliente", "==", cliente_id).where("propiedad_id", "==", str(propiedad_id)).where("mes", "==", mes).stream():
-        x = d.to_dict()
-        if x.get("tipo") != "gasto":
+    for x in facs:
+        if x.get("tipo") != "gasto" or x.get("mes") != mes:
             continue
         n += 1
         signo = -1 if x.get("es_rectificativa") else 1
         importe = signo * (x.get("total") or 0)
-        por_categoria[x.get("categoria") or "Otros gastos"] = por_categoria.get(x.get("categoria") or "Otros gastos", 0.0) + importe
+        cat = x.get("categoria") or "Otros gastos"
+        por_categoria[cat] = por_categoria.get(cat, 0.0) + importe
         iva += signo * (x.get("cuota_iva") or 0)
-        g = grupo_de.get(x.get("categoria"), "otros")
+        g = grupo_de.get(cat, "otros")
         if g == "plataformas":
             plataformas += importe
-        else:
+            continue
+        n_costes += 1
+        if g in ("limpieza", "otros"):
             grupos[g] += importe
-            n_costes += 1
-    return {"facturas": n, "facturas_costes": n_costes, "total": round(sum(grupos.values()), 2), "grupos": {k: round(v, 2) for k, v in grupos.items()}, "plataformas": round(plataformas, 2),
-            "por_categoria": {k: round(v, 2) for k, v in por_categoria.items()}, "iva_soportado": round(iva, 2)}
+    fijos = asesor.costes_fijos_mes(cliente_id, propiedad_id, mes, facs)
+    grupos["fijos"] = fijos["total"]
+    return {"facturas": n, "facturas_costes": n_costes, "total": round(sum(grupos.values()), 2), "grupos": {k: round(v, 2) for k, v in grupos.items()},
+            "plataformas": round(plataformas, 2), "por_categoria": {k: round(v, 2) for k, v in por_categoria.items()}, "iva_soportado": round(iva, 2),
+            "fijos_detalle": fijos["conceptos"], "faltan_fijos": fijos["faltan"], "hay_datos_fijos": fijos["hay_datos"],
+            "limpieza_cfg": asesor.perfil(cliente_id, propiedad_id).get("limpieza")}
 
 
 def meses_con_facturas(cliente_id, propiedad_id, es_admin):
@@ -852,5 +868,5 @@ def listar(cliente_id, propiedad_id, mes, es_admin):
                               for cat in CATEGORIAS[tipo] if any(x.get("categoria") == cat for x in delas)},
         }
     campos = ("id", "tipo", "fecha", "proveedor", "nif", "numero", "concepto", "categoria", "base_imponible", "iva_pct",
-              "cuota_iva", "retencion_pct", "retencion", "total", "es_rectificativa", "url", "usuario", "propiedad_id", "archivo")
+              "cuota_iva", "retencion_pct", "retencion", "total", "es_rectificativa", "url", "usuario", "propiedad_id", "archivo", "cobertura_meses")
     return {"facturas": [{k: x.get(k) for k in campos} for x in facturas], "totales": totales}

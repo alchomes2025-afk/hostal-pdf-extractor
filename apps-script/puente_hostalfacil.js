@@ -10,7 +10,8 @@
  *   - ping:     compruebe que el script responde y que la carpeta raíz es accesible;
  *   - estructura: cree las subcarpetas del cliente dentro de su carpeta raíz (al conectar su Drive);
  *   - eliminar:   mande a la papelera el archivo de una factura y quite su fila de la hoja de registro;
- *   - actualizar: mueva y renombre el archivo de una factura y reemplace su fila en la hoja de registro.
+ *   - actualizar: mueva y renombre el archivo de una factura y reemplace su fila en la hoja de registro;
+ *   - resumen:    cree o reescriba una hoja de Google con pestañas (el resumen trimestral para el gestor).
  *
  * Requisitos (una vez):
  *   1. Servicios → añadir «Drive API» (servicio avanzado, identificador «Drive», versión v3).
@@ -39,6 +40,7 @@ function doPost(e) {
     if (p.accion === 'ping') return json_(ping_(p));
     if (p.accion === 'estructura') return json_(estructura_(p));
     if (p.accion === 'eliminar') return json_(eliminar_(p));
+    if (p.accion === 'resumen') return json_(resumen_(p));
     if (p.accion === 'actualizar') return json_(actualizar_(p));
     if (p.accion === 'ocr') return json_(ocr_(p));
     if (p.accion === 'correo') return json_(correo_(p));
@@ -171,6 +173,42 @@ function quitarFila_(raiz, registro) {
     }
   }
   return quitadas;
+}
+
+/** Hoja de Google con pestañas {nombre, filas}: la crea en la carpeta o, si ya existe con ese título, la reescribe (así «Generar» otra vez la actualiza). */
+function resumen_(p) {
+  const bloqueo = LockService.getScriptLock();
+  bloqueo.waitLock(30000);
+  try {
+    const raiz = DriveApp.getFolderById(p.raiz_id);
+    const carpeta = carpeta_(raiz, p.ruta);
+    let ss = null;
+    const it = carpeta.getFilesByName(p.titulo);
+    while (it.hasNext()) {
+      const f = it.next();
+      if (f.getMimeType() === MimeType.GOOGLE_SHEETS) { ss = SpreadsheetApp.openById(f.getId()); break; }
+    }
+    if (!ss) {
+      ss = SpreadsheetApp.create(p.titulo);
+      DriveApp.getFileById(ss.getId()).moveTo(carpeta);
+    }
+    (p.hojas || []).forEach(function (h, i) {
+      let sh = ss.getSheetByName(h.nombre);
+      if (!sh) sh = ss.insertSheet(h.nombre, i);
+      sh.clear();
+      const filas = (h.filas || []).map(function (f) { return f.map(function (v) { return v === null || v === undefined ? '' : celda_(v); }); });
+      const ancho = filas.reduce(function (m, f) { return Math.max(m, f.length); }, 1);
+      const rect = filas.map(function (f) { const g = f.slice(); while (g.length < ancho) g.push(''); return g; });
+      if (rect.length) sh.getRange(1, 1, rect.length, ancho).setValues(rect);
+      sh.getRange(1, 1, 1, ancho).setFontWeight('bold');
+      sh.autoResizeColumns(1, Math.min(ancho, 6));
+    });
+    const sobrante = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1');
+    if (sobrante && ss.getSheets().length > 1) ss.deleteSheet(sobrante);
+    return { ok: true, url: ss.getUrl() };
+  } finally {
+    bloqueo.releaseLock();
+  }
 }
 
 function eliminar_(p) {

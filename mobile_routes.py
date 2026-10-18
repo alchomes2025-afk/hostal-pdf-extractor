@@ -1658,9 +1658,24 @@ def _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, c
     comision_blockademy = round(resumen["ingresos_brutos"] * PCT_COMISION_BLOCKADEMY, 2)
     base = resumen["ingresos_netos"] - comision_gestion - comision_blockademy
 
-    usa_reales = costes != "estimados" and bool(reales and reales.get("facturas_costes"))   # solo comisiones de plataformas ≠ costes reales
+    # Limpieza ESTIMADA: lo habitual de la propiedad, o lo que haya contestado el Asesor Contable (mismo modo: por estancia o por hora)
+    cfg = (reales or {}).get("limpieza_cfg") or {}
+    if property_id == PROPERTY_ID_CASA_PRIMAVERA and cfg.get("modo") == "estancia":
+        est_limpieza = round(float(cfg["importe"]) * resumen["reservas"], 2)
+    elif property_id == PROPERTY_ID and cfg.get("modo") == "hora":
+        horas = HOSTAL_LIMPIEZA_HORAS_MIN + (HOSTAL_LIMPIEZA_HORAS_MAX - HOSTAL_LIMPIEZA_HORAS_MIN) * (ocupacion_total_pct / 100)
+        est_limpieza = round(horas * float(cfg["importe"]) * dias_mes, 2)
+
+    # Costes REALES si el mes tiene facturas de costes o hay datos de costes fijos (facturas repartidas por los meses que cubren, o declarados al Asesor);
+    # los conceptos fijos sin ningún dato quedan en «faltan» (cuentan 0 y se avisa). Sin nada de eso, las estimaciones de siempre.
+    usa_reales = costes != "estimados" and bool(reales and (reales.get("facturas_costes") or reales.get("hay_datos_fijos")))
+    limpieza_origen = "estimada"
     if usa_reales:
-        costes_fijos, costes_limpieza, costes_otros = reales["grupos"]["fijos"], reales["grupos"]["limpieza"], reales["grupos"]["otros"]
+        costes_fijos, costes_otros = reales["grupos"]["fijos"], reales["grupos"]["otros"]
+        if reales["grupos"]["limpieza"] > 0:
+            costes_limpieza, limpieza_origen = reales["grupos"]["limpieza"], "facturas"
+        else:
+            costes_limpieza = est_limpieza
     else:
         costes_fijos, costes_limpieza, costes_otros = est_fijos, est_limpieza, 0.0
     beneficio_antes_impuestos = round(base - costes_fijos - costes_limpieza - costes_otros, 2)
@@ -1678,6 +1693,9 @@ def _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, c
         "impuesto_sociedades":       impuesto,
         "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
         "origen_costes":             "reales" if usa_reales else "estimados",
+        "limpieza_origen":           limpieza_origen,
+        "fijos_detalle":             (reales or {}).get("fijos_detalle") if usa_reales else None,
+        "faltan_fijos":              (reales or {}).get("faltan_fijos", []) if usa_reales else [],
         "facturas_mes":              (reales or {}).get("facturas_costes", 0),
         "plataformas_facturadas":    (reales or {}).get("plataformas", 0.0),
         "iva_soportado":             (reales or {}).get("iva_soportado", 0.0),
