@@ -8,6 +8,7 @@ Primavera); con el de administración, todas. La app de gestión actual es de un
   GET  /mobile/facturas/config                         → propiedades visibles, categorías y si está habilitado
   POST /mobile/facturas/leer     {propiedad_id, archivo:{nombre,mime,base64}}            → propuesta para revisar
   POST /mobile/facturas/guardar  {propiedad_id, archivo, datos, usuario}                 → guardada en el Drive
+  GET  /mobile/facturas/meses?propiedad_id=349341                                      → meses con facturas (cuántas y totales)
   GET  /mobile/facturas?propiedad_id=349341&mes=2026-10                                  → facturas y totales del mes
   POST /mobile/facturas/extracto {propiedad_id, archivo:{nombre,mime,base64}, usuario}    → extracto bancario guardado en el Drive (para el cotejo)
   POST /mobile/facturas/conectar  (PIN de administrador)                                  → {url} del conector para dar permiso al Drive
@@ -101,6 +102,16 @@ def subir_extracto():
     try:
         return jsonify({"ok": True, **facturas.guardar_extracto(CLIENTE_APP, body.get("propiedad_id"), body.get("archivo"), _es_pin_admin(),
                                                                usuario=body.get("usuario"))})
+    except facturas.FacturaError as e:
+        return _error(e)
+
+
+@facturas_bp.route("/meses", methods=["GET"])
+def meses_facturas():
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    try:
+        return jsonify({"ok": True, "meses": facturas.meses_con_facturas(CLIENTE_APP, request.args.get("propiedad_id"), _es_pin_admin())})
     except facturas.FacturaError as e:
         return _error(e)
 

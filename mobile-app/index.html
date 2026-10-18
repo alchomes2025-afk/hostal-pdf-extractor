@@ -248,6 +248,10 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-arbol{white-space:pre;font-size:12px;line-height:1.5;background:#fdf1f8;border:1px solid var(--border);border-radius:10px;padding:10px;margin:0 0 10px;overflow-x:auto}
 .fx-sec{width:100%;padding:11px;border-radius:12px;border:1.5px solid var(--border);background:#fff;color:var(--ink);font-weight:800;font-size:13.5px;margin-bottom:10px}
 .fx-click{cursor:pointer}
+.fx-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-2px 0 10px}
+.fx-chips-t{font-size:11px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.fx-chip{padding:5px 9px;border-radius:999px;border:1px solid var(--border);background:#fff;font-size:12px;font-weight:700;color:var(--ink)}
+.fx-chip.act{background:var(--acc);border-color:var(--acc);color:#fff}
 .fx-note{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
 .fx-note.err{background:var(--blocked-bg);border-color:var(--blocked)}
 .fx-note.ok{background:var(--avail-bg);border-color:var(--avail)}
@@ -2093,6 +2097,19 @@ async function openFacturas() {
       else { $("#fx-body").textContent = d.error || "No se pudo cargar."; return; }
     } catch (e) { $("#fx-body").textContent = "Error de conexión."; return; }
   }
+  // Al abrir: si el mes que se está viendo no tiene facturas pero otros sí, se salta al último mes con facturas (para ver enseguida lo ya subido)
+  if (FX.cfg.habilitado && !FX.saltado) {
+    FX.saltado = true;
+    try {
+      const {d} = await fxApi(`/meses?propiedad_id=${FIN_PROPERTY}`);
+      const actual = `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`;
+      if (d.ok && d.meses.length && !d.meses.some(m => m.mes === actual)) {
+        const [a, m] = d.meses[0].mes.split("-").map(Number);
+        FIN_YEAR = a; FIN_MONTH = m;
+        shiftFinanceMonth(0);   // sincroniza también la pestaña de Finanzas
+      }
+    } catch (e) { /* sin el salto, se ve el mes actual */ }
+  }
   fxLista();
 }
 
@@ -2116,6 +2133,18 @@ async function fxLista() {
   const next = fxEl("button", "", "›", nav);
   prev.onclick = () => fxShift(-1);
   next.onclick = () => fxShift(1);
+  const chips = fxEl("div", "fx-chips", null, body);   // meses con facturas ya subidas
+  fxApi(`/meses?propiedad_id=${FIN_PROPERTY}`).then(({d}) => {
+    if (miPeticion !== FX.peticion || !d.ok || !d.meses.length) return;
+    chips.appendChild(fxEl("span", "fx-chips-t", "Ya subidas:"));
+    d.meses.forEach(m => {
+      const [a, n] = m.mes.split("-").map(Number);
+      const activo = a === FIN_YEAR && n === FIN_MONTH;
+      const b = fxEl("button", "fx-chip" + (activo ? " act" : ""), `${FX_MESES[n - 1].slice(0, 3)} ${String(a).slice(2)} · ${m.facturas}`, chips);
+      b.title = `${m.facturas} facturas · gastos ${fxEur(m.gasto)} · ingresos ${fxEur(m.ingreso)}`;
+      b.onclick = () => { FIN_YEAR = a; FIN_MONTH = n; shiftFinanceMonth(0); fxLista(); };
+    });
+  }).catch(() => {});
   const subir = fxEl("button", "fx-big", "＋ Subir factura (foto o PDF)", body);
   subir.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
   fxEl("div", "fx-cat", "Puedes elegir varias facturas a la vez o un archivo .zip con todas.", body);

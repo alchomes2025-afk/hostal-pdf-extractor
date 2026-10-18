@@ -455,6 +455,26 @@ def guardar(cliente_id, propiedad_id, archivo, datos_formulario, es_admin, usuar
     return {"id": doc_id, **factura, "avisos": avisos}
 
 
+def meses_con_facturas(cliente_id, propiedad_id, es_admin):
+    """Resumen por mes (más reciente primero) de lo ya subido de una propiedad: [{mes, facturas, gasto, ingreso}]. Para ver de un vistazo lo que hay."""
+    propiedad_id = comprobar_propiedad(cliente_id, propiedad_id, es_admin)
+    col = _coleccion()
+    resumen = {}
+    if col is not None:
+        try:
+            for d in col.where("cliente", "==", cliente_id).where("propiedad_id", "==", propiedad_id).stream():
+                x = d.to_dict()
+                if not x.get("mes"):
+                    continue
+                r = resumen.setdefault(x["mes"], {"mes": x["mes"], "facturas": 0, "gasto": 0.0, "ingreso": 0.0})
+                r["facturas"] += 1
+                r["gasto" if x.get("tipo") == "gasto" else "ingreso"] += (-1 if x.get("es_rectificativa") else 1) * (x.get("total") or 0)
+        except Exception as e:
+            logger.error(f"[facturas] Error resumiendo los meses: {e}")
+            raise FacturaError("no se han podido cargar las facturas", 502)
+    return [{**r, "gasto": round(r["gasto"], 2), "ingreso": round(r["ingreso"], 2)} for r in sorted(resumen.values(), key=lambda r: r["mes"], reverse=True)]
+
+
 def listar(cliente_id, propiedad_id, mes, es_admin):
     """Facturas de un mes (AAAA-MM) de una propiedad, y sus totales por tipo y por categoría."""
     propiedad_id = comprobar_propiedad(cliente_id, propiedad_id, es_admin)
