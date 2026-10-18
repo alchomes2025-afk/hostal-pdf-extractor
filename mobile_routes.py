@@ -1642,12 +1642,58 @@ class InformeError(Exception):
         self.status = status
 
 
-def _informe_financiero(property_id, month_str):
+def _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, costes="auto"):
+    """Beneficio del mes. Costes ESTIMADOS (los de siempre) o REALES (facturas subidas del mes: limpieza, fijos y otros; las comisiones de plataformas no suman
+    porque ya están descontadas de los ingresos netos). Devuelve None si la propiedad no tiene estimación."""
+    if property_id == PROPERTY_ID_CASA_PRIMAVERA:
+        est_fijos = round(PRIMAVERA_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
+        est_limpieza = round(PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA * resumen["reservas"], 2)
+    elif property_id == PROPERTY_ID:
+        est_fijos = round(HOSTAL_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
+        horas_limpieza_dia = HOSTAL_LIMPIEZA_HORAS_MIN + (HOSTAL_LIMPIEZA_HORAS_MAX - HOSTAL_LIMPIEZA_HORAS_MIN) * (ocupacion_total_pct / 100)
+        est_limpieza = round(horas_limpieza_dia * HOSTAL_COSTE_LIMPIEZA_EUR_HORA * dias_mes, 2)
+    else:
+        return None
+    comision_gestion = round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2)
+    comision_blockademy = round(resumen["ingresos_brutos"] * PCT_COMISION_BLOCKADEMY, 2)
+    base = resumen["ingresos_netos"] - comision_gestion - comision_blockademy
+
+    usa_reales = costes != "estimados" and bool(reales and reales.get("facturas_costes"))   # solo comisiones de plataformas ≠ costes reales
+    if usa_reales:
+        costes_fijos, costes_limpieza, costes_otros = reales["grupos"]["fijos"], reales["grupos"]["limpieza"], reales["grupos"]["otros"]
+    else:
+        costes_fijos, costes_limpieza, costes_otros = est_fijos, est_limpieza, 0.0
+    beneficio_antes_impuestos = round(base - costes_fijos - costes_limpieza - costes_otros, 2)
+    impuesto = round(max(0.0, beneficio_antes_impuestos) * PCT_IMPUESTO_SOCIEDADES, 2)
+    estimado_antes = round(base - est_fijos - est_limpieza, 2)
+    return {
+        "comision_gestion":          comision_gestion,
+        "comision_gestion_pct":      round(PCT_COMISION_GESTION * 100),
+        "comision_blockademy":       comision_blockademy,
+        "comision_blockademy_pct":   round(PCT_COMISION_BLOCKADEMY * 100),
+        "costes_fijos":              costes_fijos,
+        "costes_limpieza":           costes_limpieza,
+        "costes_otros":              costes_otros,
+        "beneficio_antes_impuestos": beneficio_antes_impuestos,
+        "impuesto_sociedades":       impuesto,
+        "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
+        "origen_costes":             "reales" if usa_reales else "estimados",
+        "facturas_mes":              (reales or {}).get("facturas_costes", 0),
+        "plataformas_facturadas":    (reales or {}).get("plataformas", 0.0),
+        "iva_soportado":             (reales or {}).get("iva_soportado", 0.0),
+        "estimado":                  {"costes_fijos": est_fijos, "costes_limpieza": est_limpieza, "beneficio_antes_impuestos": estimado_antes},
+    }
+
+
+def _informe_financiero(property_id, month_str, costes="auto"):
     """
     Calcula el informe financiero mensual de una propiedad (lo que devuelve
     /finance, sin las comprobaciones de PIN): resumen, por canal, ocupación,
     rentabilidad y detalle de reservas. Lanza InformeError si el mes no es
     válido o Beds24 falla. Lo usa también el asistente (mobile_asistente.py).
+
+    costes: "auto" (por defecto) usa los costes REALES de las facturas subidas del mes si las hay y, si no, las estimaciones; "reales" y "estimados" fuerzan
+    uno u otro (sin facturas, "reales" cae a estimados).
     """
     try:
         year_s, month_s = month_str.split("-")
@@ -1778,35 +1824,13 @@ def _informe_financiero(property_id, month_str):
             "dias_mes":      dias_mes,
         }
 
-    rentabilidad = None
-    if property_id == PROPERTY_ID_CASA_PRIMAVERA:
-        costes_fijos = round(PRIMAVERA_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
-        costes_limpieza = round(PRIMAVERA_COSTE_LIMPIEZA_POR_ESTANCIA * resumen["reservas"], 2)
-    elif property_id == PROPERTY_ID:
-        costes_fijos = round(HOSTAL_COSTES_FIJOS_ANUALES / 365 * dias_mes, 2)
-        horas_limpieza_dia = HOSTAL_LIMPIEZA_HORAS_MIN + (HOSTAL_LIMPIEZA_HORAS_MAX - HOSTAL_LIMPIEZA_HORAS_MIN) * (ocupacion_total_pct / 100)
-        costes_limpieza = round(horas_limpieza_dia * HOSTAL_COSTE_LIMPIEZA_EUR_HORA * dias_mes, 2)
-    else:
-        costes_fijos = None
-
-    if costes_fijos is not None:
-        comision_gestion = round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2)
-        comision_blockademy = round(resumen["ingresos_brutos"] * PCT_COMISION_BLOCKADEMY, 2)
-        beneficio_antes_impuestos = round(
-            resumen["ingresos_netos"] - comision_gestion - comision_blockademy - costes_fijos - costes_limpieza, 2
-        )
-        impuesto = round(max(0.0, beneficio_antes_impuestos) * PCT_IMPUESTO_SOCIEDADES, 2)
-        rentabilidad = {
-            "comision_gestion":          comision_gestion,
-            "comision_gestion_pct":      round(PCT_COMISION_GESTION * 100),
-            "comision_blockademy":       comision_blockademy,
-            "comision_blockademy_pct":   round(PCT_COMISION_BLOCKADEMY * 100),
-            "costes_fijos":              costes_fijos,
-            "costes_limpieza":           costes_limpieza,
-            "beneficio_antes_impuestos": beneficio_antes_impuestos,
-            "impuesto_sociedades":       impuesto,
-            "beneficio_neto_propietario": round(beneficio_antes_impuestos - impuesto, 2),
-        }
+    reales = None
+    try:
+        from services import facturas as _facturas   # costes REALES según las facturas subidas (si las hay)
+        reales = _facturas.costes_reales("alc-homes", property_id, month_str)
+    except Exception as e:
+        logger.warning(f"[finance] No se pudieron cargar los costes reales: {e}")
+    rentabilidad = _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, costes)
 
     return {
         "ok":         True,
@@ -1818,6 +1842,7 @@ def _informe_financiero(property_id, month_str):
         "ocupacion":  ocupacion,
         "por_tipo_habitacion": por_tipo_habitacion,
         "rentabilidad": rentabilidad,
+        "costes_reales_disponibles": (reales or {}).get("facturas_costes", 0),
         "completo":   chunks_fallidos == 0,
         "aviso":      (
             f"Beds24 no respondió para {chunks_fallidos} tramo(s) de fechas tras varios "
@@ -1837,7 +1862,7 @@ def mobile_finance():
     noches entre ambos (una estancia de 10 noches con 3 en septiembre y 7
     en octubre aporta el 30% de su precio y comisión a septiembre).
 
-    GET /mobile/finance?pin=1234&propertyId=339751&month=2026-09
+    GET /mobile/finance?pin=1234&propertyId=339751&month=2026-09[&costes=auto|reales|estimados]
     """
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
@@ -1850,8 +1875,9 @@ def mobile_finance():
     if property_id == PROPERTY_ID and not _es_pin_admin():
         return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
 
+    costes = request.args.get("costes") if request.args.get("costes") in ("auto", "reales", "estimados") else "auto"
     try:
-        return jsonify(_informe_financiero(property_id, month_str))
+        return jsonify(_informe_financiero(property_id, month_str, costes))
     except InformeError as e:
         return jsonify({"ok": False, "error": str(e)}), e.status
 

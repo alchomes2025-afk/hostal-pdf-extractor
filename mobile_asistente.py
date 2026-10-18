@@ -720,7 +720,12 @@ def _t_finanzas_mes(a, ctx):
         raise ErrorHerramienta(str(e))
     informe.pop("reservas_detalle", None)
     informe.pop("ok", None)
-    informe["nota"] = "La rentabilidad usa costes fijos y de limpieza ESTIMADOS (no son facturas reales)."
+    r = informe.get("rentabilidad") or {}
+    if r.get("origen_costes") == "reales":
+        informe["nota"] = (f"La rentabilidad usa los costes REALES de las {r.get('facturas_mes')} facturas subidas de ese mes (importes con IVA; las comisiones de plataformas ya están "
+                           "descontadas de los ingresos). Si aún faltan facturas por subir, el beneficio saldrá más alto del real: avísalo.")
+    else:
+        informe["nota"] = "La rentabilidad usa costes fijos y de limpieza ESTIMADOS (ese mes no tiene facturas subidas)."
     return informe
 
 

@@ -769,6 +769,43 @@ def eliminar(cliente_id, factura_id, es_admin, usuario=""):
     return {"id": fid}
 
 
+# Cómo entran los gastos reales en el beneficio de Finanzas. Las comisiones de plataformas (Booking…) NO suman: ya están descontadas de los ingresos netos.
+GRUPOS_COSTE = {
+    "limpieza": ("Limpieza y lavandería", "Consumibles y amenities"),
+    "fijos": ("Suministros (luz, agua, gas, internet)", "Seguros", "Impuestos y tasas", "Alquiler", "Software y suscripciones", "Gestoría y asesoría"),
+    "otros": ("Mantenimiento y reparaciones", "Mobiliario y equipamiento", "Publicidad", "Otros gastos"),
+    "plataformas": ("Comisiones de plataformas",),
+}
+
+
+def costes_reales(cliente_id, propiedad_id, mes):
+    """Gastos reales de un mes y propiedad según las facturas guardadas (importes con IVA, un abono resta), agrupados como los costes del informe:
+    {facturas, total (sin comisiones de plataformas), grupos {limpieza, fijos, otros}, plataformas, por_categoria, iva_soportado}. None si no hay base de datos."""
+    col = _coleccion()
+    if col is None:
+        return None
+    grupo_de = {cat: g for g, cats in GRUPOS_COSTE.items() for cat in cats}
+    grupos = {"limpieza": 0.0, "fijos": 0.0, "otros": 0.0}
+    plataformas, iva, n, n_costes, por_categoria = 0.0, 0.0, 0, 0, {}
+    for d in col.where("cliente", "==", cliente_id).where("propiedad_id", "==", str(propiedad_id)).where("mes", "==", mes).stream():
+        x = d.to_dict()
+        if x.get("tipo") != "gasto":
+            continue
+        n += 1
+        signo = -1 if x.get("es_rectificativa") else 1
+        importe = signo * (x.get("total") or 0)
+        por_categoria[x.get("categoria") or "Otros gastos"] = por_categoria.get(x.get("categoria") or "Otros gastos", 0.0) + importe
+        iva += signo * (x.get("cuota_iva") or 0)
+        g = grupo_de.get(x.get("categoria"), "otros")
+        if g == "plataformas":
+            plataformas += importe
+        else:
+            grupos[g] += importe
+            n_costes += 1
+    return {"facturas": n, "facturas_costes": n_costes, "total": round(sum(grupos.values()), 2), "grupos": {k: round(v, 2) for k, v in grupos.items()}, "plataformas": round(plataformas, 2),
+            "por_categoria": {k: round(v, 2) for k, v in por_categoria.items()}, "iva_soportado": round(iva, 2)}
+
+
 def meses_con_facturas(cliente_id, propiedad_id, es_admin):
     """Resumen por mes (más reciente primero) de lo ya subido de una propiedad: [{mes, facturas, gasto, ingreso}]. Para ver de un vistazo lo que hay."""
     propiedad_id = comprobar_propiedad(cliente_id, propiedad_id, es_admin)

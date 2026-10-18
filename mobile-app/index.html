@@ -200,6 +200,7 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
   background:var(--blocked);color:#fff;border:none;border-radius:8px;
   padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;
 }
+.fin-toggle{width:100%;margin-top:10px;padding:9px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:12.5px;color:var(--ink)}
 #fin-note{font-size:10px;color:var(--muted);margin-top:16px;line-height:1.5;text-align:center}
 .fin-occ-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px}
 .fin-occ-row:last-child{border-bottom:none}
@@ -1976,6 +1977,7 @@ $("#month-bar-today").addEventListener("click", () => {
 });
 
 // ── FINANZAS ─────────────────────────────────────────────
+let FIN_COSTES = "auto"; // costes del beneficio: "auto" = reales si el mes tiene facturas, "estimados" para forzar la estimación
 let FIN_PROPERTY = 349341; // Casa Primavera — Hostal desactivado temporalmente (ver fin-property-bar)
 const today0 = new Date();
 let FIN_YEAR = today0.getFullYear();
@@ -3311,7 +3313,7 @@ async function loadFinance() {
   $("#fin-month-text").textContent = `${MONTHS_LONG[FIN_MONTH - 1]} ${FIN_YEAR}`;
   $("#fin-body").innerHTML = `<div id="fin-loading">Cargando…</div>`;
   try {
-    const r = await fetch(`${API}/finance?propertyId=${FIN_PROPERTY}&month=${monthStr}&pin=${PIN}`, {headers: {"x-app-pin": PIN}});
+    const r = await fetch(`${API}/finance?propertyId=${FIN_PROPERTY}&month=${monthStr}&costes=${FIN_COSTES}&pin=${PIN}`, {headers: {"x-app-pin": PIN}});
     const d = await r.json();
     if (myRequestId !== FIN_REQUEST_ID) return; // obsoleta: ya se pidió otro mes/propiedad
     if (!d.ok) {
@@ -3324,6 +3326,8 @@ async function loadFinance() {
     $("#fin-body").innerHTML = `<div id="fin-empty">Error de conexión. Pulsa ↺ o vuelve a intentarlo.</div>`;
   }
 }
+
+function setFinCostes(v) { FIN_COSTES = v; loadFinance(); }
 
 function renderFinance(d) {
   const r = d.resumen;
@@ -3379,23 +3383,38 @@ function renderFinance(d) {
   if (d.rentabilidad) {
     const r2 = d.rentabilidad;
     const esPrimavera = d.propertyId === "349341";
-    const costesFijosLabel = esPrimavera
-      ? "Costes fijos (comunidad, IBI, seguro, suministros…)"
-      : "Costes fijos (IBI, suministros, seguro de negocio, software…)";
-    const notaFuente = esPrimavera
-      ? `Costes fijos y limpieza son estimaciones (ver chat "Estimación de costes fijos diarios") — ajustar en el backend si cambian los recibos reales.`
-      : `Costes fijos y limpieza son estimaciones (sin alquiler, aún por definir) — ajustar en el backend si cambian los recibos reales.`;
+    const real = r2.origen_costes === "reales";
+    const costesFijosLabel = real
+      ? "Costes fijos según facturas (suministros, seguros, impuestos, software…)"
+      : (esPrimavera ? "Costes fijos (comunidad, IBI, seguro, suministros…)" : "Costes fijos (IBI, suministros, seguro de negocio, software…)");
+    let notaFuente;
+    if (real) {
+      notaFuente = `Costes REALES según las ${r2.facturas_mes} facturas subidas de este mes (importes con IVA). Si aún faltan facturas por subir, el beneficio sale más alto del real. ` +
+                   `Con la estimación anterior serían ${fmtEUR(r2.estimado.beneficio_antes_impuestos)} antes de impuestos.` +
+                   (r2.plataformas_facturadas ? ` Comisiones de plataformas facturadas este mes: ${fmtEUR(r2.plataformas_facturadas)} (ya descontadas en los ingresos netos, no se suman).` : "");
+    } else if (r2.facturas_mes) {
+      notaFuente = `Estás viendo los costes ESTIMADOS. Este mes ya hay ${r2.facturas_mes} facturas subidas: pulsa «Ver con costes reales» para usarlas.`;
+    } else {
+      notaFuente = esPrimavera
+        ? `Costes fijos y limpieza son estimaciones — se sustituyen por los reales en cuanto subas facturas de este mes.`
+        : `Costes fijos y limpieza son estimaciones (sin alquiler, aún por definir) — se sustituyen por los reales en cuanto subas facturas de este mes.`;
+    }
+    let boton = "";
+    if (real) boton = `<button type="button" class="fin-toggle" onclick="setFinCostes('estimados')">Ver con costes estimados</button>`;
+    else if (r2.facturas_mes) boton = `<button type="button" class="fin-toggle" onclick="setFinCostes('auto')">Ver con costes reales (${r2.facturas_mes} facturas)</button>`;
     const blockademyRow = r2.comision_blockademy !== undefined
       ? `<tr><td>Comisión Blockademy (${r2.comision_blockademy_pct}%)</td><td class="num">− ${fmtEUR(r2.comision_blockademy)}</td></tr>`
       : "";
-    html += `<div class="fin-channels-title">Rentabilidad estimada</div>
+    const otrosRow = real ? `<tr><td>Otros gastos según facturas (mantenimiento, mobiliario…)</td><td class="num">− ${fmtEUR(r2.costes_otros)}</td></tr>` : "";
+    html += `<div class="fin-channels-title">${real ? "Rentabilidad con costes reales" : "Rentabilidad estimada"}</div>
       <table class="fin-table">
         <tbody>
           <tr><td>Ingresos netos (tras comisión de portal)</td><td class="num">${fmtEUR(r.ingresos_netos)}</td></tr>
           <tr><td>Comisión de gestión (${r2.comision_gestion_pct}%)</td><td class="num">− ${fmtEUR(r2.comision_gestion)}</td></tr>
           ${blockademyRow}
           <tr><td>${costesFijosLabel}</td><td class="num">− ${fmtEUR(r2.costes_fijos)}</td></tr>
-          <tr><td>Limpieza</td><td class="num">− ${fmtEUR(r2.costes_limpieza)}</td></tr>
+          <tr><td>${real ? "Limpieza y consumibles según facturas" : "Limpieza"}</td><td class="num">− ${fmtEUR(r2.costes_limpieza)}</td></tr>
+          ${otrosRow}
           <tr><td>Beneficio antes de impuestos</td><td class="num">${fmtEUR(r2.beneficio_antes_impuestos)}</td></tr>
           <tr><td>Impuesto de sociedades (25%)</td><td class="num">− ${fmtEUR(r2.impuesto_sociedades)}</td></tr>
         </tbody>
@@ -3404,6 +3423,7 @@ function renderFinance(d) {
         <div class="fin-card net"><div class="fin-label">Beneficio neto (propietario)</div><div class="fin-value">${fmtEUR(r2.beneficio_neto_propietario)}</div></div>
         <div class="fin-card"><div class="fin-label">Gestión (${r2.comision_gestion_pct}%)</div><div class="fin-value">${fmtEUR(r2.comision_gestion)}</div></div>
       </div>
+      ${boton}
       <div id="fin-note">${notaFuente}</div>`;
   }
 

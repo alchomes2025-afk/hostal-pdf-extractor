@@ -72,6 +72,16 @@ carpeta por cliente en Firestore (`facturas_config`); la app lo detecta sola. So
 - **Selector de propiedad:** en la lista (el administrador ve las dos), en el formulario de cada factura y para toda una tanda en el resumen («Guardar esta tanda en:»).
   Tests: `tests/test_facturas_editar.py`.
 
+## Finanzas con costes reales (fase 2, 2026-10-18)
+`_informe_financiero(property_id, mes, costes="auto")` (`mobile_routes.py`) calcula el beneficio con los gastos REALES de las facturas guardadas del mes y la propiedad
+(`services/facturas.costes_reales`) cuando los hay, y con las estimaciones de siempre cuando no (`/finance?costes=auto|reales|estimados`; en la app, botón «Ver con costes
+estimados / reales»). Agrupación: **limpieza** (Limpieza y lavandería, Consumibles y amenities), **fijos** (Suministros, Seguros, Impuestos y tasas, Alquiler, Software, Gestoría) y
+**otros** (Mantenimiento, Mobiliario, Publicidad, Otros gastos). Importes con IVA, un abono resta. Las **comisiones de plataformas NO suman** (ya van descontadas de los ingresos netos;
+se muestran aparte). Un mes con solo facturas de comisiones sigue usando estimaciones. La respuesta trae `rentabilidad.origen_costes`, `facturas_mes` y `estimado` (para comparar).
+El asistente (`finanzas_mes`) lo recibe igual y avisa de que, si faltan facturas, el beneficio sale más alto. Tests: `tests/test_costes_reales.py`.
+Pendiente de afinar: costes anuales (IBI, seguros) caen en un solo mes por fecha de factura —conviene prorratearlos—; reparto de un gasto entre las dos propiedades; IVA soportado
+y reglas de inversión del sujeto pasivo (Booking) cuando haya un resumen para el gestor.
+
 ## Falta
 1. **Pasos de Adrián:** actualizar el puente (nueva versión), crear el conector y poner en Render `PUENTE_URL`, `PUENTE_SECRETO`, `CONECTOR_URL`
    (ver `apps-script/LEEME_conector.md`); fusionar la rama; abrir Facturas con el PIN de administrador y seguir el asistente.
