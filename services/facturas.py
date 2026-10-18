@@ -141,14 +141,31 @@ def a_numero(v):
 
 
 def a_fecha(v):
-    """'2026-10-14' | '14/10/2026' | '14-10-26' → '2026-10-14'; None si no se entiende."""
-    s = str(v or "").strip()
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y", "%d.%m.%Y"):
-        try:
-            return datetime.strptime(s[:10] if fmt == "%Y-%m-%d" else s, fmt).date().isoformat()
-        except ValueError:
-            continue
-    return None
+    """Fecha en casi cualquier forma → 'AAAA-MM-DD'; None si no se entiende. Admite '2026-10-14', '14/10/2026', '14-10-26', '14.10.2026',
+    '19 8 26' (casillas DÍA MES AÑO de un talonario), '19/8/26', '19 de agosto de 2026', {'dia': 19, 'mes': 8, 'anio': 26}…"""
+    if isinstance(v, dict):   # el modelo a veces devuelve las casillas por separado
+        v = "-".join(str(v.get(k) or "") for k in (("dia", "día", "day"), ("mes", "month"), ("anio", "año", "year", "ano")) for k in [next((x for x in k if x in v), k[0])])
+    s = str(v or "").strip().lower()
+    if not s:
+        return None
+    meses = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9,
+             "octubre": 10, "noviembre": 11, "diciembre": 12}
+    for nombre, n in meses.items():   # «19 de agosto de 2026» → 19-8-2026
+        s = s.replace(nombre, str(n))
+    m = re.search(r"(\d{1,4})\D+(\d{1,2})\D+(\d{1,4})", s)
+    if not m:
+        return None
+    a, b, c = (int(x) for x in m.groups())
+    if len(m.group(1)) == 4:        # año primero: AAAA-MM-DD
+        anio, mes, dia = a, b, c
+    else:                           # día primero (convención española): DD-MM-AA o DD-MM-AAAA
+        dia, mes, anio = a, b, c
+    if anio < 100:
+        anio += 2000
+    try:
+        return date(anio, mes, dia).isoformat()
+    except ValueError:
+        return None
 
 
 # ── Lectura ──────────────────────────────────────────────────────────────────
@@ -197,6 +214,7 @@ def _prompt(c, texto, en_imagen=False):
         "- retencion = retención de IRPF que se descuenta (0 si no hay).\n"
         f"- categoria (gasto): una de {json.dumps(CATEGORIAS['gasto'], ensure_ascii=False)}; "
         f"(ingreso): una de {json.dumps(CATEGORIAS['ingreso'], ensure_ascii=False)}.\n"
+        "- fecha: si va en casillas separadas DÍA / MES / AÑO (talonarios), júntalas: 19 · 8 · 26 → \"2026-08-19\" (un año de dos cifras es 20xx).\n"
         "- Si un dato no aparece o no se lee, null. No inventes nada.\n\n"
         + ("La factura va en la IMAGEN adjunta; puede ser un talonario escrito a mano o un escaneo: lee con cuidado los datos manuscritos "
            "(fecha, número, importes) y el nombre y NIF impresos del emisor. «Razón social/Señor» es el CLIENTE (receptor), no el emisor."
