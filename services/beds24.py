@@ -3,6 +3,7 @@ services/beds24.py — Autenticación con Beds24, búsqueda de reservas y envío
 del código de puerta vía Booking.com Messages.
 """
 import logging
+import threading
 import time
 import requests
 from datetime import date, timedelta
@@ -14,17 +15,52 @@ from services.fechas import ahora_madrid, hoy_madrid
 logger = logging.getLogger(__name__)
 
 
+_token_cache = {"token": None, "expira": 0.0}   # access token (dura 24 h) y el instante hasta el que lo damos por bueno
+_token_lock = threading.Lock()
+MARGEN_TOKEN = 300          # se renueva 5 min antes de que caduque
+REINTENTOS_TOKEN = 3
+ESPERA_MAX_429 = 5          # segundos máximos que se espera entre reintentos tras un 429
+
+
 def get_beds24_access_token():
-    """Intercambia el refresh token de Beds24 por un access token válido (24h)."""
+    """
+    Access token de Beds24 (24 h), pedido con el refresh token y guardado en memoria. Antes se pedía uno NUEVO en cada
+    llamada (y un solo check-in hace varias), lo que acababa en «429 Too Many Requests» en /authentication/token y dejaba
+    sin respuesta a la web de check-in. Ahora: caché; un candado para que, con la caché vacía (p. ej. tras un despliegue),
+    varias peticiones simultáneas no pidan el token a la vez; y reintentos cortos si Beds24 aun así responde 429 o falla.
+    El backend corre con 1 worker, así que la caché la comparten todas las peticiones.
+    """
     if not BEDS24_REFRESH_TOKEN:
         raise Exception("BEDS24_REFRESH_TOKEN no configurado en Render.")
-    resp = requests.get(
-        f"{BEDS24_API_BASE}/authentication/token",
-        headers={"refreshToken": BEDS24_REFRESH_TOKEN, "accept": "application/json"},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return resp.json()["token"]
+    if _token_cache["token"] and time.time() < _token_cache["expira"]:
+        return _token_cache["token"]
+    with _token_lock:
+        if _token_cache["token"] and time.time() < _token_cache["expira"]:   # otra petición ya lo renovó mientras esperábamos
+            return _token_cache["token"]
+        ultimo_error = None
+        for intento in range(REINTENTOS_TOKEN):
+            espera = 1 + intento
+            try:
+                resp = requests.get(
+                    f"{BEDS24_API_BASE}/authentication/token",
+                    headers={"refreshToken": BEDS24_REFRESH_TOKEN, "accept": "application/json"},
+                    timeout=15,
+                )
+                if resp.status_code == 429:
+                    try:
+                        espera = min(float(resp.headers.get("Retry-After", espera)), ESPERA_MAX_429)
+                    except (TypeError, ValueError):
+                        pass
+                resp.raise_for_status()
+                datos = resp.json()
+                _token_cache["token"] = datos["token"]
+                _token_cache["expira"] = time.time() + max(float(datos.get("expiresIn") or 3600) - MARGEN_TOKEN, 60)
+                return _token_cache["token"]
+            except Exception as e:
+                ultimo_error = e
+                if intento < REINTENTOS_TOKEN - 1:
+                    time.sleep(espera)
+        raise ultimo_error
 
 
 # ── Helper: búsqueda recursiva del número de Booking.com ─────────────────
