@@ -38,7 +38,7 @@ class Plazo(unittest.TestCase):
         with mock.patch.object(facturas.requests, "post", post):
             self.assertEqual(facturas._preguntar_ia("x"), {"tipo": "gasto"})
         self.assertLessEqual(visto["timeout"], 18)             # nunca más de lo que queda (menos un margen)
-        self.assertLessEqual(visto["max_tokens"], 800)
+        self.assertGreaterEqual(visto["max_tokens"], 2000)           # margen para el razonamiento de gpt-oss
 
     def test_ocr_con_poco_tiempo_falla_rapido_y_con_tiempo_lleva_su_limite(self):
         facturas._plazo.fin = time.time() + 8

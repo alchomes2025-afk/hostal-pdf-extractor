@@ -188,33 +188,64 @@ def _prompt(c, texto):
         f"- categoria (gasto): una de {json.dumps(CATEGORIAS['gasto'], ensure_ascii=False)}; "
         f"(ingreso): una de {json.dumps(CATEGORIAS['ingreso'], ensure_ascii=False)}.\n"
         "- Si un dato no aparece, null. No inventes nada.\n\n"
-        f"TEXTO:\n{texto[:8000]}"
+        f"TEXTO:\n{_recortar(texto)}"
     )
+
+
+MAX_SALIDA_IA = 3000   # los modelos gpt-oss «piensan» antes de responder y ese razonamiento cuenta dentro del límite: con poco, una factura larga sale cortada
+MAX_TEXTO_IA = 9000
+
+
+def _recortar(texto):
+    """Texto que se manda a la IA. En las facturas largas (tiendas con muchas líneas) el TOTAL, el IVA y la forma de pago están al FINAL:
+    se conserva el principio (emisor, fecha, número) y el final, y se recorta el medio."""
+    texto = texto.strip()
+    if len(texto) <= MAX_TEXTO_IA:
+        return texto
+    return texto[:3000] + "\n[... líneas intermedias omitidas ...]\n" + texto[-(MAX_TEXTO_IA - 3000):]
+
+
+def _cuerpo_ia(modelo, prompt, modo_json):
+    cuerpo = {"model": modelo, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": MAX_SALIDA_IA}
+    if modo_json:   # «modo completo»: JSON garantizado y poco razonamiento; si el modelo rechaza alguno de los dos (400) se repite con la petición básica
+        cuerpo["response_format"] = {"type": "json_object"}
+        if "gpt-oss" in modelo:
+            cuerpo["reasoning_effort"] = "low"   # extraer datos de una factura no necesita pensar mucho: más rápido y menos tokens
+    return cuerpo
 
 
 def _preguntar_ia(prompt):
     clave = clave_gestion()   # la cuenta de Groq de GESTIÓN del cliente (no la de los huéspedes ni la interna de HostalFácil)
     if not clave:
         raise FacturaError("la lectura automática no está disponible (sin clave de IA)", 503)
+    saturada = False
     for modelo in (GROQ_MODEL_PRI, GROQ_MODEL_FALL):
-        restante = _restante()
-        if restante < 6:
-            raise FacturaError("la lectura tarda demasiado; vuelve a intentarlo", 504)
-        try:
-            resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {clave}", "Content-Type": "application/json"},
-                                 json={"model": modelo, "messages": [{"role": "user", "content": prompt}], "temperature": 0, "max_tokens": 800},
-                                 timeout=min(30, restante - 2))
-            if resp.status_code in (429, 503):
-                continue
-            resp.raise_for_status()
-            contenido = resp.json()["choices"][0]["message"]["content"].strip()
-            contenido = re.sub(r"^```(json)?|```$", "", contenido, flags=re.M).strip()
-            return json.loads(contenido[contenido.find("{"): contenido.rfind("}") + 1])
-        except FacturaError:
-            raise
-        except Exception as e:
-            logger.warning(f"[facturas] La IA ({modelo}) no devolvió datos válidos: {e}")
-    raise FacturaError("no se ha podido leer la factura automáticamente; rellena los datos a mano", 502)
+        for modo_json in (True, False):   # si el modelo no admite el modo JSON (400), se repite sin él
+            restante = _restante()
+            if restante < 6:
+                raise FacturaError("la lectura tarda demasiado; vuelve a intentarlo", 504)
+            try:
+                resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {clave}", "Content-Type": "application/json"},
+                                     json=_cuerpo_ia(modelo, prompt, modo_json), timeout=min(30, restante - 2))
+                if resp.status_code in (429, 503):
+                    saturada = True
+                    break
+                if resp.status_code == 400 and modo_json:
+                    continue
+                resp.raise_for_status()
+                contenido = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+                if not contenido:
+                    raise ValueError("respuesta vacía (se agotó el límite de salida)")
+                contenido = re.sub(r"^```(json)?|```$", "", contenido, flags=re.M).strip()
+                return json.loads(contenido[contenido.find("{"): contenido.rfind("}") + 1])
+            except FacturaError:
+                raise
+            except Exception as e:
+                logger.warning(f"[facturas] La IA ({modelo}) no devolvió datos válidos: {e}")
+                break
+    if saturada:
+        raise FacturaError("la IA está saturada ahora mismo (límite por minuto); se reintenta sola", 503)
+    raise FacturaError("la IA no ha devuelto una lectura válida de esta factura; rellena los datos a mano", 422)
 
 
 def normalizar(d):
