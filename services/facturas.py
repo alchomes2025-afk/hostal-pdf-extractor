@@ -24,7 +24,7 @@ import requests
 
 import config
 from config import FACTURAS_DRIVE_RAIZ_ALC, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
-from services import puente_plataforma
+from services import drive_cliente, puente_plataforma
 from services.groq_claves import clave_gestion
 
 logger = logging.getLogger(__name__)
@@ -75,8 +75,20 @@ def cliente(cliente_id):
     return c
 
 
+def raiz_drive(cliente_id):
+    """Carpeta raíz del Drive del cliente: la que se guardó al conectar su Drive y, si no, la variable de entorno antigua."""
+    return drive_cliente.raiz(cliente_id, por_defecto=CLIENTES.get(cliente_id, {}).get("drive_raiz") or "")
+
+
 def habilitado(cliente_id):
-    return puente_plataforma.configurado() and bool(CLIENTES.get(cliente_id, {}).get("drive_raiz"))
+    return puente_plataforma.configurado() and bool(raiz_drive(cliente_id))
+
+
+def estructura_inicial(cliente_id, anio=None):
+    """Rutas de carpetas que se crean al conectar el Drive: Facturas/<Propiedad>/<Año>/<1T..4T>/<Gastos|Ingresos>."""
+    c = cliente(cliente_id)
+    anio = str(anio or date.today().year)
+    return [[CARPETA_FACTURAS, nombre, anio, f"{t}T", tipo] for nombre in c["propiedades"].values() for t in range(1, 5) for tipo in ("Gastos", "Ingresos")]
 
 
 def propiedades_visibles(cliente_id, es_admin):
@@ -318,7 +330,7 @@ def guardar(cliente_id, propiedad_id, archivo, datos_formulario, es_admin, usuar
             datos["concepto"], datos["categoria"], datos["base_imponible"], datos["iva_pct"], datos["cuota_iva"],
             datos["retencion_pct"], datos["retencion"], datos["total"], "{{ENLACE}}", ahora, str(usuario or "")[:40], doc_id]
     try:
-        r = puente_plataforma.guardar(c["drive_raiz"], [CARPETA_FACTURAS, propiedad, anio, trimestre, carpeta_tipo], nombre, mime, contenido,
+        r = puente_plataforma.guardar(raiz_drive(cliente_id), [CARPETA_FACTURAS, propiedad, anio, trimestre, carpeta_tipo], nombre, mime, contenido,
                                  registro={"ruta": [CARPETA_FACTURAS, propiedad, anio], "titulo": f"Registro de facturas {anio}",
                                            "cabecera": CABECERA_REGISTRO, "fila": fila},
                                  descripcion=f"{datos['categoria']} · {datos['concepto']}")

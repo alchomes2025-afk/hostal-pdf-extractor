@@ -240,6 +240,12 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-row .f-tot{font-weight:800;white-space:nowrap}
 .fx-row .f-tot.ing{color:var(--avail)}
 .fx-row a{text-decoration:none;font-size:15px}
+.fx-paso{font-size:11px;font-weight:800;color:var(--acc);text-transform:uppercase;letter-spacing:.4px}
+.fx-h{margin:4px 0 10px;font-size:18px;color:var(--ink)}
+.fx-p{font-size:13.5px;line-height:1.55;margin:0 0 10px;color:var(--ink)}
+.fx-ol{font-size:13.5px;line-height:1.55;padding-left:20px;margin:0 0 12px;color:var(--ink)}
+.fx-ol li{margin-bottom:6px}
+.fx-arbol{white-space:pre;font-size:12px;line-height:1.5;background:#fdf1f8;border:1px solid var(--border);border-radius:10px;padding:10px;margin:0 0 10px;overflow-x:auto}
 .fx-note{background:#fff7e0;border:1px solid #f0d58a;border-radius:10px;padding:8px 10px;font-size:12px;margin-bottom:10px;line-height:1.5}
 .fx-note.err{background:var(--blocked-bg);border-color:var(--blocked)}
 .fx-note.ok{background:var(--avail-bg);border-color:var(--avail)}
@@ -2088,6 +2094,7 @@ async function openFacturas() {
 }
 
 function closeFacturas() {
+  fxPararSondeo();
   $("#fx-panel").style.display = "none";
   if ($("#as-panel").style.display !== "flex") $("#as-fab").style.display = "block";
 }
@@ -2098,6 +2105,7 @@ async function fxLista() {
   const miPeticion = FX.peticion = (FX.peticion || 0) + 1;   // si el usuario cambia de mes mientras carga, solo vale la última
   const body = $("#fx-body");
   body.textContent = "";
+  if (!FX.cfg.habilitado) { fxConexion(1); return; }   // primer uso: asistente para conectar el Drive
   $("#fx-title").textContent = "🧾 Facturas · " + fxPropiedad();
   const nav = fxEl("div", "fx-nav", null, body);
   const prev = fxEl("button", "", "‹", nav);
@@ -2106,10 +2114,6 @@ async function fxLista() {
   prev.onclick = () => fxShift(-1);
   next.onclick = () => fxShift(1);
   const subir = fxEl("button", "fx-big", "＋ Subir factura (foto o PDF)", body);
-  if (!FX.cfg.habilitado) {
-    subir.disabled = true;
-    fxEl("div", "fx-note", "La subida de facturas aún no está activada: falta conectar la carpeta del Drive del cliente.", body);
-  }
   subir.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
   if (FX.aviso) { fxEl("div", "fx-note ok", FX.aviso, body); FX.aviso = ""; }
   const carga = fxEl("div", "fx-cat", "Cargando facturas…", body);
@@ -2137,6 +2141,99 @@ async function fxLista() {
     fxEl("div", "f-tot" + (f.tipo === "ingreso" ? " ing" : ""), (f.es_rectificativa ? "−" : "") + fxEur(f.total), row);
     if (f.url) { const a = fxEl("a", "", "📎", row); a.href = f.url; a.target = "_blank"; a.rel = "noopener"; a.title = "Abrir en el Drive"; }
   });
+}
+
+// Asistente de primer uso: conectar el Google Drive del cliente (3 pasos). Se ejecuta solo la primera vez que se abren las facturas.
+let FX_SONDEO = null;
+function fxPararSondeo() { if (FX_SONDEO) { clearInterval(FX_SONDEO); FX_SONDEO = null; } }
+
+function fxPaso(n, titulo, parrafos, lista) {
+  const body = $("#fx-body");
+  body.textContent = "";
+  $("#fx-title").textContent = "🧾 Activar facturas";
+  fxEl("div", "fx-paso", `Paso ${n} de 3`, body);
+  fxEl("h3", "fx-h", titulo, body);
+  (parrafos || []).forEach(t => fxEl("p", "fx-p", t, body));
+  if (lista) { const ol = fxEl("ol", "fx-ol", null, body); lista.forEach(t => fxEl("li", "", t, ol)); }
+  return body;
+}
+
+function fxConexion(paso) {
+  fxPararSondeo();
+  if (paso === 1) return fxConexionIntro();
+}
+
+function fxConexionIntro() {
+  const nombres = FX.cfg.propiedades.map(p => p.nombre).join(" y ");
+  const body = fxPaso(1, "Conecta tu Google Drive", [
+    "Tus facturas se guardarán ordenadas en TU Google Drive. Para eso necesito tu permiso una sola vez.",
+    "Al pulsar «Conectar mi Drive» se abre una pestaña de Google. Crearé en tu Drive una carpeta llamada «HostalFácil-Gestión», con una subcarpeta por propiedad (" + nombres + "), y la compartiré con la cuenta de HostalFácil para poder guardar ahí las facturas. No podré ver nada más de tu Drive.",
+  ]);
+  if (!FX.cfg.conector) {
+    fxEl("div", "fx-note err", "Falta terminar de configurar el conector en el servidor (lo hace HostalFácil). Vuelve a intentarlo más tarde.", body);
+  } else if (!FX.cfg.puede_conectar) {
+    fxEl("div", "fx-note", "Solo el administrador puede conectar el Drive: entra con el PIN de administrador para activar las facturas.", body);
+  } else {
+    const ir = fxEl("button", "fx-big", "Conectar mi Drive", body);
+    const msg = fxEl("div", "fx-note err", "", body);
+    msg.style.display = "none";
+    ir.onclick = async () => {
+      const ventana = window.open("", "_blank");   // se abre ya, en el clic, para que el navegador no bloquee la ventana
+      ir.disabled = true; ir.textContent = "Preparando…"; msg.style.display = "none";
+      let r;
+      try { r = await fxApi("/conectar", {method: "POST", body: JSON.stringify({pin: PIN, usuario: USER_NAME})}); } catch (e) { r = {d: {ok: false, error: "Error de conexión."}}; }
+      if (!r.d.ok) {
+        if (ventana) ventana.close();
+        msg.textContent = r.d.error || "No se pudo iniciar la conexión."; msg.style.display = "block";
+        ir.disabled = false; ir.textContent = "Conectar mi Drive";
+        return;
+      }
+      if (ventana) ventana.location.href = r.d.url;
+      fxConexionPermiso(r.d.url, !ventana);
+    };
+  }
+}
+
+function fxConexionPermiso(url, ventanaBloqueada) {
+  const body = fxPaso(2, "Dame permiso en Google", ["Se ha abierto una pestaña de Google. Sigue estos pasos allí:"], [
+    "Elige la cuenta de Google de ALC Homes.",
+    "Si Google dice «Google no ha verificado esta aplicación», es normal (es la aplicación de HostalFácil): pulsa «Configuración avanzada» y luego «Ir a … (no seguro)».",
+    "Pulsa «Permitir» (o «Continuar»).",
+    "Espera a ver «✓ Drive conectado» y vuelve a esta pestaña: aquí lo detectaré solo.",
+  ]);
+  if (ventanaBloqueada) fxEl("div", "fx-note", "Tu navegador ha bloqueado la pestaña nueva: pulsa «Abrir Google» para continuar.", body);
+  const estado = fxEl("div", "fx-note", "⏳ Esperando a que termines en Google…", body);
+  const btns = fxEl("div", "fx-btns", null, body);
+  const abrir = fxEl("button", "send", "Abrir Google", btns);
+  const cancelar = fxEl("button", "", "Cancelar", btns);
+  abrir.onclick = () => window.open(url, "_blank");
+  cancelar.onclick = () => { fxPararSondeo(); fxConexionIntro(); };
+  const inicio = Date.now();
+  FX_SONDEO = setInterval(async () => {
+    if ($("#fx-panel").style.display !== "flex") { fxPararSondeo(); return; }
+    if (Date.now() - inicio > 20 * 60 * 1000) {
+      fxPararSondeo();
+      estado.className = "fx-note err";
+      estado.textContent = "Ha pasado demasiado tiempo: pulsa «Cancelar» y vuelve a empezar.";
+      return;
+    }
+    try {
+      const {d} = await fxApi("/config");
+      if (d.ok && d.habilitado) { fxPararSondeo(); FX.cfg = d; fxConexionListo(); }
+    } catch (e) { /* un fallo de red puntual: se vuelve a probar en 3 s */ }
+  }, 3000);
+}
+
+function fxConexionListo() {
+  const anio = new Date().getFullYear();
+  const body = fxPaso(3, "✓ Listo: facturas activadas", [
+    "He creado en tu Google Drive la carpeta «HostalFácil-Gestión», con esta estructura, y ya está compartida con HostalFácil:",
+  ]);
+  const caja = fxEl("div", "fx-arbol", null, body);
+  caja.textContent = "📁 HostalFácil-Gestión\n  📁 Facturas\n" + FX.cfg.propiedades.map(p => `    📁 ${p.nombre}\n      📁 ${anio}\n        📁 1T · 2T · 3T · 4T\n          📁 Gastos · Ingresos`).join("\n");
+  fxEl("p", "fx-p", "A partir de ahora, cada factura que subas se guardará sola en su sitio (propiedad, año, trimestre y gastos o ingresos), con un nombre ordenado y una fila en la hoja «Registro de facturas».", body);
+  const seguir = fxEl("button", "fx-big", "Empezar a subir facturas", body);
+  seguir.onclick = () => fxLista();
 }
 
 // Una foto del móvil puede pesar 5-10 MB: se reduce a ≤2000 px (JPEG) antes de subirla. Los PDF van tal cual.

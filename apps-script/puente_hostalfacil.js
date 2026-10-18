@@ -7,7 +7,8 @@
  *   - ocr:      lea el texto de una foto o PDF escaneado (conversión de Google Drive, gratis);
  *   - guardar:  guarde la factura en <raíz>/<Propiedad>/<Año>/<nT>/<Gastos|Ingresos>/ y añada su fila a la hoja
  *               «Registro de facturas <Año>» de <raíz>/<Propiedad>/<Año>/;
- *   - ping:     compruebe que el script responde y que la carpeta raíz es accesible.
+ *   - ping:     compruebe que el script responde y que la carpeta raíz es accesible;
+ *   - estructura: cree las subcarpetas del cliente dentro de su carpeta raíz (al conectar su Drive).
  *
  * Requisitos (una vez):
  *   1. Servicios → añadir «Drive API» (servicio avanzado, identificador «Drive», versión v3).
@@ -34,6 +35,7 @@ function doPost(e) {
   }
   try {
     if (p.accion === 'ping') return json_(ping_(p));
+    if (p.accion === 'estructura') return json_(estructura_(p));
     if (p.accion === 'ocr') return json_(ocr_(p));
     if (p.accion === 'correo') return json_(correo_(p));
     if (p.accion === 'guardar') return json_(guardar_(p));
@@ -117,6 +119,20 @@ function hoja_(carpeta, titulo, cabecera) {
   sh.getRange(1, 1, 1, cabecera.length).setValues([cabecera]).setFontWeight('bold');
   sh.setFrozenRows(1);
   return ss;
+}
+
+/** Crea (si faltan) las carpetas de cada ruta dentro de la carpeta raíz del cliente. */
+function estructura_(p) {
+  const bloqueo = LockService.getScriptLock();
+  bloqueo.waitLock(30000);
+  try {
+    const raiz = DriveApp.getFolderById(p.raiz_id);
+    const rutas = p.rutas || [];
+    rutas.forEach(function (ruta) { carpeta_(raiz, ruta); });
+    return { ok: true, rutas: rutas.length };
+  } finally {
+    bloqueo.releaseLock();
+  }
 }
 
 function guardar_(p) {

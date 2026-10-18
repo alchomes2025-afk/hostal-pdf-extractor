@@ -32,10 +32,17 @@ leídos antes de guardar.
   servidor simulado. La lectura usa la cuenta de Groq de gestión del cliente (`GROQ_API_KEY_GESTION`, vía `services/groq_claves.py`).
 - Sin Drive configurado la pantalla se ve pero la subida sale desactivada (`habilitado` = false): fusionar a `main` no cambia nada hasta que se configure.
 
+## Primer uso: el sistema crea y conecta el Drive del cliente (2026-10-18)
+Asistente de 3 pasos en la pantalla de facturas (`fxConexion` en la app): «Conectar mi Drive» → pestaña de un Apps Script («conector»,
+`apps-script/conector_hostalfacil.js`, se ejecuta con la identidad del cliente y solo pide `drive.file`) que crea «HostalFácil-Gestión» en SU Drive, la
+comparte con hostalfacil@gmail.com y avisa al backend (`POST /mobile/facturas/conectado`, token de un solo uso de 20 min + secreto compartido). El backend
+(`services/drive_cliente.py`) comprueba, crea `Facturas/<Propiedad>/<Año>/<1T-4T>/<Gastos|Ingresos>` con el puente (acción `estructura`) y guarda el id de la
+carpeta por cliente en Firestore (`facturas_config`); la app lo detecta sola. Solo el PIN de administrador puede conectar. `tests/test_facturas_conexion.py`
+(11 pruebas) y prueba en Chrome con servidor simulado. Instalación: `apps-script/LEEME_conector.md`.
+
 ## Falta
-1. **Pasos de Adrián:** compartir (editor) su carpeta «HostalFácil-Gestión» con hostalfacil@gmail.com; poner en Render
-   `FACTURAS_DRIVE_RAIZ_ALC` (el id de esa carpeta, lo que va tras `/folders/` en su dirección), `PUENTE_URL` (URL `/exec` del Apps Script «Puente HostalFácil», cuenta hostalfacil) y `PUENTE_SECRETO`
-   (el mismo valor que la propiedad `SECRETO` del script).
+1. **Pasos de Adrián:** actualizar el puente (nueva versión), crear el conector y poner en Render `PUENTE_URL`, `PUENTE_SECRETO`, `CONECTOR_URL`
+   (ver `apps-script/LEEME_conector.md`); fusionar la rama; abrir Facturas con el PIN de administrador y seguir el asistente.
 2. Probar con una factura real (PDF con texto y foto de un tique) y comprobar carpeta, nombre del archivo y hoja «Registro de facturas».
 3. **Fase 2:** sustituir en `_informe_financiero` los costes estimados por los de las facturas; revisión periódica de la carpeta del Drive (el Drive manda)
    y reparto por propiedad.

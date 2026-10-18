@@ -3,7 +3,7 @@ services/puente_plataforma.py — Llamadas al «puente de la plataforma»: un Ap
 publicado como aplicación web, que hace lo que el servidor no puede hacer solo. Mismo patrón que services/email_send.py
 (petición POST con un secreto compartido).
 
-Acciones: ping (¿responde y llega a la carpeta?), ocr (texto de una foto o PDF escaneado, con la conversión de Google
+Acciones: ping (¿responde y llega a la carpeta?), estructura (crea las subcarpetas del cliente), ocr (texto de una foto o PDF escaneado, con la conversión de Google
 Drive: gratis), guardar (archivo en la carpeta del cliente + fila en su hoja de registro) y correo (aviso interno enviado
 desde la cuenta de la plataforma, no desde el buzón de huéspedes de ningún cliente).
 """
@@ -43,6 +43,11 @@ def _llamar(accion, **datos):
 def ping(raiz_id):
     """Nombre de la carpeta raíz si el puente responde y la carpeta está compartida con la cuenta de la plataforma."""
     return _llamar("ping", raiz_id=raiz_id).get("raiz")
+
+
+def estructura(raiz_id, rutas):
+    """Crea (si faltan) las carpetas de cada ruta (lista de listas de nombres) dentro de la carpeta raíz. Devuelve cuántas rutas se aseguraron."""
+    return _llamar("estructura", raiz_id=raiz_id, rutas=rutas).get("rutas")
 
 
 def ocr(contenido, mime):

@@ -123,6 +123,9 @@ GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
 #   GROQ_API_KEY_GESTION  → la GESTIÓN del cliente: asistente de la app de gestión y lectura de facturas (cada cliente tendrá la suya).
 #   (La cuenta INTERNA de HostalFácil —desarrollo y pruebas— no la lee el backend de ningún cliente: no hay variable para ella.)
 GROQ_API_KEY_GESTION = os.environ.get("GROQ_API_KEY_GESTION", "")
+# Dirección de la aplicación web del «conector» (Apps Script de la cuenta de la plataforma que se ejecuta con la identidad del CLIENTE y le crea
+# su carpeta «HostalFácil-Gestión» en su Drive la primera vez que usa las facturas). Ver services/drive_cliente.py.
+CONECTOR_URL = os.environ.get("CONECTOR_URL", "")
 # PIN que teclea el personal SIN PIN de administrador para enviar desde el asistente el correo con los códigos de acceso (el administrador
 # no lo necesita y el asistente se lo da si lo pide). Se puede cambiar con la variable de entorno de Render.
 PIN_ENVIO_CODIGOS = os.environ.get("PIN_ENVIO_CODIGOS", "1432")
