@@ -12,7 +12,7 @@ from services import facturas, groq_claves, puente_plataforma
 
 class Plazo(unittest.TestCase):
     def setUp(self):
-        for objeto, nombre, valor in ((groq_claves, "GROQ_API_KEY_GESTION", "k"), (facturas, "clave_gestion", lambda: "k")):
+        for objeto, nombre, valor in ((groq_claves, "GROQ_API_KEY_GESTION", "k"), (facturas, "clave_gestion", lambda: "k"), (facturas, "_modelo_vision", lambda: "")):
             p = mock.patch.object(objeto, nombre, valor)
             p.start()
             self.addCleanup(p.stop)

@@ -25,7 +25,7 @@ from datetime import date, datetime
 import requests
 
 import config
-from config import FACTURAS_DRIVE_RAIZ_ALC, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI
+from config import FACTURAS_DRIVE_RAIZ_ALC, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, GROQ_MODEL_VISION
 from services import drive_cliente, puente_plataforma
 from services.groq_claves import clave_gestion
 
@@ -157,24 +157,32 @@ def _restante():
     return (fin - time.time()) if fin else 45.0
 
 
+def capa_de_texto(contenido, mime):
+    """Texto que ya lleva un PDF por dentro (gratis, en el servidor); "" si no tiene (escaneo, foto) o no se puede leer."""
+    if mime != "application/pdf":
+        return ""
+    try:
+        import pdfplumber
+        with pdfplumber.open(io.BytesIO(contenido)) as pdf:
+            texto = "\n".join((pagina.extract_text() or "") for pagina in pdf.pages[:6])
+        return texto if len(texto.strip()) >= 40 else ""
+    except Exception as e:
+        logger.warning(f"[facturas] No se pudo leer el texto del PDF: {e}")
+        return ""
+
+
 def texto_de(contenido, mime):
-    """Texto de la factura: capa de texto del PDF (gratis, en el servidor) y, si no hay o es una imagen, OCR de Drive."""
-    if mime == "application/pdf":
-        try:
-            import pdfplumber
-            with pdfplumber.open(io.BytesIO(contenido)) as pdf:
-                texto = "\n".join((pagina.extract_text() or "") for pagina in pdf.pages[:6])
-            if len(texto.strip()) >= 40:
-                return texto
-        except Exception as e:
-            logger.warning(f"[facturas] No se pudo leer el texto del PDF: {e}")
+    """Texto de la factura: capa de texto del PDF y, si no hay o es una imagen, OCR de Drive."""
+    texto = capa_de_texto(contenido, mime)
+    if texto:
+        return texto
     restante = _restante()
     if restante < 12:
         raise FacturaError("la lectura tarda demasiado; vuelve a intentarlo", 504)
     return puente_plataforma.ocr(contenido, mime, timeout=min(30, restante - 10))
 
 
-def _prompt(c, texto):
+def _prompt(c, texto, en_imagen=False):
     return (
         "Eres un asistente contable español. Lee el TEXTO de una factura o tique y devuelve SOLO un objeto JSON, sin "
         "texto ni markdown, con estas claves:\n"
@@ -189,8 +197,10 @@ def _prompt(c, texto):
         "- retencion = retención de IRPF que se descuenta (0 si no hay).\n"
         f"- categoria (gasto): una de {json.dumps(CATEGORIAS['gasto'], ensure_ascii=False)}; "
         f"(ingreso): una de {json.dumps(CATEGORIAS['ingreso'], ensure_ascii=False)}.\n"
-        "- Si un dato no aparece, null. No inventes nada.\n\n"
-        f"TEXTO:\n{_recortar(texto)}"
+        "- Si un dato no aparece o no se lee, null. No inventes nada.\n\n"
+        + ("La factura va en la IMAGEN adjunta; puede ser un talonario escrito a mano o un escaneo: lee con cuidado los datos manuscritos "
+           "(fecha, número, importes) y el nombre y NIF impresos del emisor. «Razón social/Señor» es el CLIENTE (receptor), no el emisor."
+           if en_imagen else f"TEXTO:\n{_recortar(texto)}")
     )
 
 
@@ -248,6 +258,89 @@ def _preguntar_ia(prompt):
     if saturada:
         raise FacturaError("la IA está saturada ahora mismo (límite por minuto); se reintenta sola", 503)
     raise FacturaError("la IA no ha devuelto una lectura válida de esta factura; rellena los datos a mano", 422)
+
+
+# ── Visión: facturas sin texto (escaneos, fotos, talonarios escritos a mano) ──
+PREFERIDOS_VISION = ("meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct")
+_vision = {"t": 0.0, "modelo": ""}
+
+
+def _modelo_vision():
+    """Modelo de visión de Groq: GROQ_MODEL_VISION o, si no, uno de los que ofrece la cuenta (se consulta una vez por hora). "" si no hay."""
+    if GROQ_MODEL_VISION:
+        return GROQ_MODEL_VISION
+    if time.time() - _vision["t"] < 3600:
+        return _vision["modelo"]
+    clave = clave_gestion()
+    if not clave:
+        return ""
+    _vision["t"], _vision["modelo"] = time.time(), ""
+    try:
+        resp = requests.get(GROQ_API_URL.replace("/chat/completions", "/models"), headers={"Authorization": f"Bearer {clave}"}, timeout=8)
+        ids = [m.get("id", "") for m in resp.json().get("data", [])]
+        _vision["modelo"] = next((m for m in PREFERIDOS_VISION if m in ids), "") or \
+            next((m for m in ids if re.search(r"scout|maverick|vision|(^|[-/_])vl([-_/]|$)", m, re.I)), "")
+    except Exception as e:
+        logger.warning(f"[facturas] No se pudo consultar los modelos de visión de Groq: {e}")
+    return _vision["modelo"]
+
+
+def _imagenes_para_ia(contenido, mime, max_paginas=2, lado=1600):
+    """Imágenes JPEG (data URL base64) para el modelo de visión: la foto reducida, o las primeras páginas del PDF."""
+    import base64 as b64
+    from PIL import Image
+    imagenes = []
+    if mime == "application/pdf":
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(contenido)
+        for i in range(min(len(pdf), max_paginas)):
+            pagina = pdf[i]
+            imagenes.append(pagina.render(scale=lado / max(pagina.get_width(), pagina.get_height())).to_pil())
+    else:
+        imagenes.append(Image.open(io.BytesIO(contenido)))
+    salida = []
+    for im in imagenes:
+        im = im.convert("RGB")
+        im.thumbnail((lado, lado))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=82)
+        salida.append("data:image/jpeg;base64," + b64.b64encode(buf.getvalue()).decode())
+    return salida
+
+
+def _preguntar_ia_vision(prompt, imagenes):
+    clave = clave_gestion()
+    modelo = _modelo_vision()
+    if not clave or not modelo:
+        raise FacturaError("la lectura de imágenes no está disponible", 422)
+    contenido_msg = [{"type": "text", "text": prompt}] + [{"type": "image_url", "image_url": {"url": u}} for u in imagenes]
+    for modo_json in (True, False):
+        restante = _restante()
+        if restante < 6:
+            raise FacturaError("la lectura tarda demasiado; vuelve a intentarlo", 504)
+        cuerpo = {"model": modelo, "messages": [{"role": "user", "content": contenido_msg}], "temperature": 0, "max_tokens": MAX_SALIDA_IA}
+        if modo_json:
+            cuerpo["response_format"] = {"type": "json_object"}
+        try:
+            resp = requests.post(GROQ_API_URL, headers={"Authorization": f"Bearer {clave}", "Content-Type": "application/json"}, json=cuerpo,
+                                 timeout=min(40, restante - 2))
+            if resp.status_code in (429, 503):
+                raise FacturaError("la IA está saturada ahora mismo (límite por minuto); se reintenta sola", 503)
+            if resp.status_code == 400:
+                if modo_json:
+                    continue
+                _vision["modelo"] = ""   # el modelo no acepta imágenes: no se vuelve a intentar durante una hora
+                raise FacturaError("el modelo de visión no ha aceptado la imagen", 422)
+            resp.raise_for_status()
+            texto = (resp.json()["choices"][0]["message"].get("content") or "").strip()
+            texto = re.sub(r"^```(json)?|```$", "", texto, flags=re.M).strip()
+            return json.loads(texto[texto.find("{"): texto.rfind("}") + 1])
+        except FacturaError:
+            raise
+        except Exception as e:
+            logger.warning(f"[facturas] La visión ({modelo}) no devolvió datos válidos: {e}")
+            break
+    raise FacturaError("la IA no ha devuelto una lectura válida de esta imagen", 422)
 
 
 def normalizar(d):
@@ -415,14 +508,28 @@ def leer(cliente_id, propiedad_id, archivo, es_admin):
     previa = ya_guardada(cliente_id, huella(contenido))
     _plazo.fin = time.time() + PRESUPUESTO_LEER_SEG
     try:
-        try:
-            texto = texto_de(contenido, mime)
-        except puente_plataforma.PuenteError as e:
-            logger.error(f"[facturas] OCR: {e}")
-            raise FacturaError("no se ha podido leer el texto de la imagen; rellena los datos a mano", 502)
-        if len(texto.strip()) < 15:
-            raise FacturaError("la imagen no tiene texto legible; prueba con una foto más nítida o rellena los datos a mano", 422)
-        datos, avisos = normalizar(_preguntar_ia(_prompt(c, texto)))
+        crudo = None
+        # Un escaneo, una foto o un talonario escrito a mano no tienen texto que leer: se le enseña la imagen a un modelo de visión (lee la letra
+        # manuscrita mucho mejor que el OCR). Si no hay modelo o no acierta, se prueba con el OCR de siempre.
+        if not capa_de_texto(contenido, mime) and _modelo_vision():
+            try:
+                crudo = _preguntar_ia_vision(_prompt(c, None, en_imagen=True), _imagenes_para_ia(contenido, mime))
+            except FacturaError as e:
+                if e.status in (503, 504):
+                    raise
+                logger.warning(f"[facturas] Visión sin resultado ({e}); se prueba con el OCR")
+            except Exception as e:
+                logger.warning(f"[facturas] No se pudo preparar la imagen para la visión: {e}")
+        if crudo is None:
+            try:
+                texto = texto_de(contenido, mime)
+            except puente_plataforma.PuenteError as e:
+                logger.error(f"[facturas] OCR: {e}")
+                raise FacturaError("no se ha podido leer el texto de la imagen; rellena los datos a mano", 502)
+            if len(texto.strip()) < 15:
+                raise FacturaError("la imagen no tiene texto legible; prueba con una foto más nítida o rellena los datos a mano", 422)
+            crudo = _preguntar_ia(_prompt(c, texto))
+        datos, avisos = normalizar(crudo)
     finally:
         _plazo.fin = None
     if es_propia_empresa(c, datos):

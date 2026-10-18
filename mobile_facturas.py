@@ -107,6 +107,16 @@ def subir_extracto():
         return _error(e)
 
 
+@facturas_bp.route("/diag-ia", methods=["GET"])
+def diag_ia():
+    """Qué modelos usa la lectura de facturas (solo administrador; no devuelve claves)."""
+    if not _es_pin_admin():
+        return jsonify({"ok": False, "error": "Solo el administrador"}), 403
+    from config import GROQ_MODEL_FALL, GROQ_MODEL_PRI
+    return jsonify({"ok": True, "texto": [GROQ_MODEL_PRI, GROQ_MODEL_FALL], "vision": facturas._modelo_vision() or None,
+                    "vision_fijado_por_variable": bool(facturas.GROQ_MODEL_VISION)})
+
+
 @facturas_bp.route("/conocidas", methods=["POST"])
 def facturas_conocidas():
     """Qué archivos de una tanda ya están guardados (por su huella): la app los salta antes de gastar IA en leerlos."""

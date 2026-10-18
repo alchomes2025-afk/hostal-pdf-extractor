@@ -132,6 +132,8 @@ PIN_ENVIO_CODIGOS = os.environ.get("PIN_ENVIO_CODIGOS", "1432")
 GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL_PRI  = "openai/gpt-oss-120b"
 GROQ_MODEL_FALL = "openai/gpt-oss-20b"
+# Modelo de VISIÓN de Groq para leer facturas escaneadas o escritas a mano (sin capa de texto). Vacío = se elige solo entre los que ofrece la cuenta.
+GROQ_MODEL_VISION = os.environ.get("GROQ_MODEL_VISION", "")
 
 # ── Configuración: envío de email vía Apps Script (Gmail API) ─────────────
 # Para avisos que Beds24 no puede mandar automáticamente (Hostelworld no
