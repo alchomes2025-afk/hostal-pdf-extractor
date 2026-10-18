@@ -118,8 +118,12 @@ RPV_API_KEY_MAP = {
 }
 
 GROQ_API_KEY    = os.environ.get("GROQ_API_KEY", "")
-# Cuenta de Groq SEPARADA para el uso interno (asistente de la app de gestión y pruebas): así el personal y el desarrollo no gastan
-# el cupo por minuto de la cuenta que atiende a los huéspedes (chat de la web de check-in). Sin definir, el asistente usa GROQ_API_KEY.
+# Tres cuentas de Groq separadas (el cupo por minuto es por cuenta; el 17-oct el trabajo interno agotó el de la de los huéspedes):
+#   GROQ_API_KEY          → los HUÉSPEDES del cliente (chat de la web de check-in).
+#   GROQ_API_KEY_GESTION  → la GESTIÓN del cliente: asistente de la app de gestión y lectura de facturas (cada cliente tendrá la suya).
+#   GROQ_API_KEY_INTERNA  → trabajo interno de HostalFácil (desarrollo y pruebas); el backend del cliente NO debe usarla salvo como
+#                            respaldo temporal mientras no exista la de gestión (ver services/groq_claves.py).
+GROQ_API_KEY_GESTION = os.environ.get("GROQ_API_KEY_GESTION", "")
 GROQ_API_KEY_INTERNA = os.environ.get("GROQ_API_KEY_INTERNA", "")
 # PIN que teclea el personal SIN PIN de administrador para enviar desde el asistente el correo con los códigos de acceso (el administrador
 # no lo necesita y el asistente se lo da si lo pide). Se puede cambiar con la variable de entorno de Render.

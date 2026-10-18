@@ -12,7 +12,7 @@ from flask import Flask
 import mobile_asistente as asistente
 import mobile_routes
 import routes.acceso as acceso
-from services import limites
+from services import groq_claves, limites
 
 HABITACIONES = {"702399": {"nombre": "Cala del Moraig", "pin": "213456"},
                 "720841": {"nombre": "La Casa de la Primavera", "pin": "2486"},
@@ -179,25 +179,40 @@ class Conversacion(Base):
 
 
 class ClaveGroq(unittest.TestCase):
-    """El asistente usa la cuenta de Groq interna si existe; si no, la general (la que atiende a los huéspedes)."""
-    def test_interna_si_existe(self):
-        with mock.patch.object(asistente, "GROQ_API_KEY_INTERNA", "interna"), mock.patch.object(asistente, "GROQ_API_KEY", "general"):
-            self.assertEqual(asistente.clave_groq(), "interna")
+    """Cada parte usa su cuenta de Groq: gestión (asistente y facturas) ≠ huéspedes ≠ interna de HostalFácil."""
+    def _claves(self, gestion="", interna="", general=""):
+        return (mock.patch.object(groq_claves, "GROQ_API_KEY_GESTION", gestion), mock.patch.object(groq_claves, "GROQ_API_KEY_INTERNA", interna),
+                mock.patch.object(groq_claves, "GROQ_API_KEY", general))
 
-    def test_sin_interna_usa_la_general(self):
-        with mock.patch.object(asistente, "GROQ_API_KEY_INTERNA", ""), mock.patch.object(asistente, "GROQ_API_KEY", "general"):
-            self.assertEqual(asistente.clave_groq(), "general")
+    def _con(self, **claves):
+        ps = self._claves(**claves)
+        for p in ps:
+            p.start()
+            self.addCleanup(p.stop)
 
-    def test_la_llamada_a_groq_lleva_la_clave_interna(self):
+    def test_gestion_manda(self):
+        self._con(gestion="gestion", interna="interna", general="huespedes")
+        self.assertEqual(asistente.clave_groq(), "gestion")
+
+    def test_respaldo_temporal_sin_gestion_usa_la_interna_y_nunca_antes_la_de_huespedes(self):
+        self._con(interna="interna", general="huespedes")
+        self.assertEqual(asistente.clave_groq(), "interna")
+
+    def test_ultimo_recurso_la_general(self):
+        self._con(general="huespedes")
+        self.assertEqual(asistente.clave_groq(), "huespedes")
+
+    def test_la_llamada_a_groq_lleva_la_clave_de_gestion(self):
+        self._con(gestion="gestion", interna="interna", general="huespedes")
         visto = {}
 
         def post(url, headers=None, json=None, timeout=None):
             visto.update(headers)
             return mock.Mock(status_code=200, text="", json=lambda: {"choices": [{"message": {"content": "hola"}}]})
-        with mock.patch.object(asistente, "GROQ_API_KEY_INTERNA", "interna"), mock.patch.object(asistente.requests, "post", post),              mock.patch.object(asistente, "_habitaciones", return_value=[]), mock.patch.object(asistente, "_mr"):
+        with mock.patch.object(asistente.requests, "post", post),              mock.patch.object(asistente, "_habitaciones", return_value=[]), mock.patch.object(asistente, "_mr"):
             res, _ = asistente.responder([{"role": "user", "content": "hola"}], NORMAL)
         self.assertTrue(res["ok"])
-        self.assertEqual(visto["Authorization"], "Bearer interna")
+        self.assertEqual(visto["Authorization"], "Bearer gestion")
 
 
 class BotonEnviar(Base):

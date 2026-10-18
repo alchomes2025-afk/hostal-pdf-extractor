@@ -36,7 +36,8 @@ from datetime import date, datetime, timedelta, timezone
 
 import requests
 
-from config import GROQ_API_KEY, GROQ_API_KEY_INTERNA, GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, PIN_ENVIO_CODIGOS
+from config import GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, PIN_ENVIO_CODIGOS
+from services.groq_claves import clave_gestion
 from routes.acceso import ErrorCodigos, redactar_codigos, _EMAIL as EMAIL_VALIDO
 from services.beds24 import buscar_booking_por_id
 from services.email_send import es_email_relay_ota
@@ -84,8 +85,8 @@ _cache = {}   # property_id -> {"t": epoch, "reservas": [...], "canceladas": [..
 
 
 def clave_groq():
-    """Clave de Groq del asistente: la cuenta interna (GROQ_API_KEY_INTERNA) y, si no está definida, la general."""
-    return GROQ_API_KEY_INTERNA or GROQ_API_KEY
+    """Clave de Groq del asistente: la cuenta de GESTIÓN del cliente (services/groq_claves.py)."""
+    return clave_gestion()
 
 
 class ErrorHerramienta(Exception):
