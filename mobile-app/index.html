@@ -289,6 +289,17 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
 .fx-btns button{flex:1;padding:12px;border-radius:12px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:14px}
 .fx-btns button.send{background:var(--acc);color:#fff;border-color:var(--acc)}
 .fx-btns button:disabled{opacity:.5}
+#em-panel{position:fixed;left:0;right:0;bottom:0;z-index:48;margin:0 auto;width:100%;max-width:520px;height:92vh;background:#fff;border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.25);display:none;flex-direction:column}
+#em-head{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;padding:12px 14px;border-bottom:1.5px solid var(--border);font-weight:800;font-size:14px}
+#em-head button{background:none;border:none;font-size:17px;cursor:pointer;padding:2px 8px;color:var(--muted)}
+#em-body{flex:1;overflow-y:auto;padding:12px 14px 24px;font-size:13.5px;line-height:1.45}
+#em-body h3{font-size:15px;margin:18px 0 6px}
+#em-body h3:first-child{margin-top:4px}
+#em-body ol{margin:6px 0 10px 20px;padding:0}
+#em-body li{margin-bottom:6px}
+.em-aviso{background:#fff6e0;border:1.5px solid #f2d58a;border-radius:12px;padding:10px 12px;margin:8px 0}
+.em-btn{display:block;width:100%;text-align:left;margin:6px 0 10px;padding:11px 12px;border-radius:12px;border:1.5px solid var(--acc);background:#fdf1f8;font-weight:700;font-size:13.5px;cursor:pointer}
+#btn-emergencia{background:none;border:none;font-size:17px;cursor:pointer;padding:2px 6px}
 #as-panel.encima{z-index:60}
 #as-panel{
   position:fixed;left:0;right:0;bottom:0;z-index:45;margin:0 auto;width:100%;max-width:520px;
@@ -648,6 +659,7 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div id="month-bar">
       <span id="month-bar-text">Cargando…</span>
       <div style="display:flex;gap:6px;align-items:center">
+        <button id="btn-emergencia" type="button" title="Envíos de emergencia" onclick="openEmergencia()">🚨</button>
         <button id="btn-refresh" title="Actualizar datos">↺</button>
         <span id="month-bar-today">Hoy</span>
       </div>
@@ -675,6 +687,10 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
     <div id="fx-body"></div>
     <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z,.csv,.xls,.xlsx,.txt,text/csv" multiple style="display:none">
     <input type="file" id="fx-extracto" accept=".csv,.xls,.xlsx,.pdf,.txt,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
+  </div>
+  <div id="em-panel">
+    <div id="em-head"><span id="em-title">🚨 Envíos de emergencia</span><span><button type="button" onclick="ayudaPantalla('em')" title="Preguntar al asistente sobre esta pantalla">💬</button><button type="button" onclick="closeEmergencia()" title="Cerrar">✕</button></span></div>
+    <div id="em-body"></div>
   </div>
   <div id="ac-panel">
     <div id="ac-head"><span id="ac-title">🧮 Asesor Contable</span><span><button type="button" onclick="ayudaPantalla('ac')" title="Preguntar al asistente sobre esta pantalla">💬</button><button type="button" onclick="closeAsesor()" title="Cerrar">✕</button></span></div>
@@ -3484,14 +3500,85 @@ let AS_HISTORY = [];
 let AS_BUSY = false;
 let AS_PANTALLA = null;   // función que devuelve el texto de la pantalla desde la que se abrió el asistente (ayuda contextual)
 
+// ── Envíos de emergencia ─────────────────────────────────
+// Guía de qué se puede enviar y en qué orden. Cada botón abre el asistente con la petición ya escrita (sin enviarla): el usuario
+// completa el nº de reserva y pulsa enviar. Nada sale solo: el asistente solo redacta y los correos llevan su botón «Enviar».
+const EM_SECCIONES = [
+  {t: "A · El huésped no puede hacer el parte de viajeros", intro: "Cuando el enlace normal no le llega o no funciona. Orden:", pasos: [
+    "Pide aquí el mensaje con el enlace de emergencia (lleva el enlace de RPV de su habitación, las fechas exactas y la referencia).",
+    "Cópialo y mándaselo por el canal que tengas con él (mensajes de Booking/Airbnb, WhatsApp…).",
+    "Cuando diga que ha terminado, comprueba que el parte consta como completado y que las fechas y el nombre cuadran con la reserva.",
+    "Solo entonces envía los códigos (apartado B)."],
+   botones: [["📝 Preparar el mensaje con el enlace del parte", "Prepara el mensaje de emergencia con el enlace del parte para la reserva "],
+             ["🔎 Comprobar si consta el parte", "¿Está completado el parte de viajeros de la reserva "]]},
+  {t: "B · Enviar los códigos de acceso por correo", intro: "Con el parte ya completado, o si es una emergencia real de acceso:", pasos: [
+    "Pide el correo: el asistente deja un borrador, no envía nada. Necesita el nº de reserva, el correo del huésped y el idioma.",
+    "Si entras con el PIN normal, la app te pedirá antes el PIN de seguridad (te lo da el administrador). Con el de administrador no hace falta.",
+    "Revisa el borrador y pulsa «Enviar». El correo lleva el código del portal y el de la habitación (o el cajetín de la Casa de la Primavera)."],
+   botones: [["✉️ Preparar el correo con los códigos", "Prepara el correo de emergencia con los códigos de la reserva "]]},
+  {t: "C · Lo que NO se envía desde aquí", pasos: [
+    "No se manda nada a los huéspedes por WhatsApp ni por las plataformas: el mensaje del apartado A lo copias y lo mandas tú.",
+    "Los correos @guest.booking.com o de reenvío de Airbnb no sirven: rebotan. Pide al huésped un correo directo.",
+    "Los códigos no se envían solos nunca: siempre hay un borrador y un botón «Enviar» que pulsa una persona."]},
+  {t: "D · Si algo no aparece", pasos: [
+    "Una reserva que acaba de entrar y no se ve en el calendario: pulsa ↺ (la app también se actualiza sola cada 5 minutos con la pantalla abierta).",
+    "Una reserva que no consta en RPV: RPV importa de Beds24 cuatro veces al día (a lo largo de las 9, 13, 19 y 22 h). Para adelantarlo, pulsa «Actualizar reservas» en el panel de RPV; si aun así no está, créala a mano en RPV con el nº de Beds24 como referencia."]},
+];
+
+function emEl(tag, cls, texto, padre) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  if (texto != null) el.textContent = texto;
+  if (padre) padre.appendChild(el);
+  return el;
+}
+
+function emPreguntar(texto) {
+  AS_PANTALLA = () => "Envíos de emergencia" + String.fromCharCode(10) + $("#em-body").innerText.slice(0, 1400);
+  $("#as-panel").classList.add("encima");
+  AS_HISTORY = [];
+  $("#as-messages").textContent = "";
+  resetAsistente("Envíos de emergencia");
+  if ($("#as-panel").style.display !== "flex") toggleAsistente();
+  const input = $("#as-input");
+  input.value = texto;
+  input.focus();
+  input.setSelectionRange(texto.length, texto.length);
+}
+
+function openEmergencia() {
+  const body = $("#em-body");
+  body.textContent = "";
+  const aviso = emEl("div", "em-aviso", null, body);
+  aviso.textContent = "Para cuando el huésped no puede hacer el parte o entrar con el sistema normal. El asistente lo prepara todo; tú revisas y envías. Nada sale solo.";
+  EM_SECCIONES.forEach(sec => {
+    emEl("h3", "", sec.t, body);
+    if (sec.intro) emEl("p", "", sec.intro, body);
+    const ol = emEl("ol", "", null, body);
+    sec.pasos.forEach(t => emEl("li", "", t, ol));
+    (sec.botones || []).forEach(([etiqueta, texto]) => {
+      const b = emEl("button", "em-btn", etiqueta, body);
+      b.type = "button";
+      b.onclick = () => emPreguntar(texto);
+    });
+  });
+  $("#em-panel").style.display = "flex";
+  $("#as-fab").style.display = "none";
+}
+
+function closeEmergencia() {
+  $("#em-panel").style.display = "none";
+  if ($("#as-panel").style.display !== "flex") $("#as-fab").style.display = "block";
+}
+
 function ayudaPantalla(cual) {
   const titulo = $("#" + cual + "-title").textContent;
   AS_PANTALLA = () => titulo + "\n" + $("#" + cual + "-body").innerText.replace(/\n{2,}/g, "\n").slice(0, 1400);
   $("#as-panel").classList.add("encima");
   AS_HISTORY = [];
   $("#as-messages").textContent = "";
+  resetAsistente(titulo);   // antes de abrir: al abrir con el chat vacío, toggleAsistente() reiniciaría el contexto de pantalla
   if ($("#as-panel").style.display !== "flex") toggleAsistente();
-  resetAsistente(titulo);
 }
 
 function toggleAsistente() {
