@@ -15,14 +15,13 @@ logger = logging.getLogger(__name__)
 
 ROOM_ID_PRIMAVERA = "720841"
 
-# RPV recibe las reservas de Beds24 con cierto retraso (iCal una vez al día; la
-# integración directa "b24", frecuencia por confirmar). Una reserva creada hace menos
-# de estas horas que aún no está en RPV es lo normal; pasado ese tiempo ya es
-# una anomalía que conviene revisar.
-HORAS_NORMALES_SIN_RPV = 24
-# Si el huésped llega hoy o mañana va a necesitar el parte enseguida (puede hacerlo desde el día anterior),
-# así que ahí se da por anómalo antes. Valor provisional: se ajustará con la medición de services/rpv_latencia.py.
-HORAS_NORMALES_SIN_RPV_INMINENTE = 6
+# RPV importa de Beds24 (integración «b24») 4 veces al día, a lo largo de las horas 9, 13, 19 y 22 (Madrid; confirmado por RPV el 2026-10-20).
+# El hueco más largo es de 22 h a 9 h (≈ 12 h hasta acabar la importación de las 9), así que una reserva que lleva menos de 14 h sin constar en RPV es
+# lo normal; pasado ese tiempo es una anomalía que conviene revisar.
+HORAS_NORMALES_SIN_RPV = 14
+# Si el huésped llega hoy o mañana se da por anómalo antes, pero nunca por debajo del hueco nocturno (daría falsas alarmas cada noche); en ese caso
+# queda el botón «Actualizar reservas» del panel de RPV, que importa al momento.
+HORAS_NORMALES_SIN_RPV_INMINENTE = 14
 
 
 def horas_normales_sin_rpv(llegada_iso, hoy=None):
