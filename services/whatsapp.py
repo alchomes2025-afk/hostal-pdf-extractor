@@ -9,6 +9,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
+from services import avisos_registro
 from config import (
     AVISOS_CLIENTE, AVISOS_EMAIL, CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
     TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
@@ -101,12 +102,24 @@ def enviar_whatsapp_callmebot(mensaje):
     except Exception as e:
         error_whatsapp = e
     respaldos = _enviar_respaldos(mensaje)
+    seguidos = avisos_registro.registrar(mensaje, None if error_whatsapp is None else str(error_whatsapp), respaldos)
     if error_whatsapp is not None:
+        if seguidos == avisos_registro.FALLOS_PARA_AVISAR:
+            _avisar_callmebot_caido(seguidos)
         if not any(error is None for _, error in respaldos):
             raise error_whatsapp
         logger.error(f"[avisos] WhatsApp falló pero el aviso llegó por respaldo: {error_whatsapp}")
         return "respaldo: " + ", ".join(canal for canal, error in respaldos if error is None)
     return respuesta
+
+
+def _avisar_callmebot_caido(seguidos):
+    """Una sola vez al llegar a FALLOS_PARA_AVISAR fallos seguidos: por los respaldos (no por WhatsApp, que es lo que falla)."""
+    try:
+        _enviar_respaldos(f"🟡 ALCHOMES — CallMeBot no está entregando WhatsApp: {seguidos} avisos seguidos sin llegar. "
+                          "Los avisos siguen llegando por Telegram. Revisa CallMeBot (límite, número desvinculado o servicio caído).")
+    except Exception as e:
+        logger.error(f"[avisos] No se pudo avisar de que CallMeBot falla: {e}")
 
 
 def _enviar_callmebot(mensaje):

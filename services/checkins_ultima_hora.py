@@ -133,14 +133,14 @@ def comprobar_y_avisar_checkins_ultima_hora():
             titulo = "⚡ Check-in de última hora — La Casa de la Primavera"
             cuerpo = (
                 f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n{linea_estancia}\n\n"
-                f"(No estaba en el resumen diario — reserva de última hora.)"
+                f"(No estaba en el resumen diario — reserva de última hora.)\nSi la app de gestión aún no la muestra, ábrela y pulsa ↺."
             )
         else:
             titulo = "⚡ Check-in de última hora — Hostal ALC Homes"
             cuerpo = (
                 f"Habitación: {e.get('nombre_habitacion', '?')}\n"
                 f"Huésped: {e.get('huesped', '?')}\nCanal: {canal}\n\n"
-                f"(No estaba en el resumen diario — reserva de última hora.)"
+                f"(No estaba en el resumen diario — reserva de última hora.)\nSi la app de gestión aún no la muestra, ábrela y pulsa ↺."
             )
         alerta(titulo, cuerpo, nivel="info")
 

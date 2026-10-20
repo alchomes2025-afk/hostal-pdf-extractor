@@ -336,6 +336,24 @@ def diag_avisos():
     return jsonify(resultado), 200
 
 
+@debug_bp.route("/diag-avisos-enviados", methods=["GET"])
+def diag_avisos_enviados():
+    """
+    Diagnóstico de solo lectura: los últimos avisos internos (hora, primera línea y resultado de WhatsApp y de cada respaldo)
+    y los fallos seguidos de CallMeBot. Sin datos personales más allá de la primera línea del aviso.
+
+    Uso: /diag-avisos-enviados?token=<TOKEN>
+    """
+    token = request.args.get("token", "")
+    if token not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    from services import avisos_registro
+    datos = avisos_registro.leer()
+    if datos is None:
+        return jsonify({"ok": False, "error": "Firestore no disponible"}), 500
+    return jsonify({"ok": True, **datos}), 200
+
+
 @debug_bp.route("/diag-latencia-rpv", methods=["GET"])
 def diag_latencia_rpv():
     """

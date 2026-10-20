@@ -2124,6 +2124,7 @@ def check_changes():
         since = (datetime.utcnow() - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
 
     checked_at = datetime.utcnow().isoformat()
+    fallo_parcial = False   # si alguna consulta falla, el reloj del cliente NO avanza: lo que no se pudo ver se vuelve a pedir
 
     try:
         token = get_access_token()
@@ -2144,6 +2145,7 @@ def check_changes():
             if not resp.ok:
                 # 429 u otro error: informar sin romper la app, seguir con el resto
                 warnings.append(f"Beds24 {resp.status_code} (property {property_id})")
+                fallo_parcial = True
                 continue
 
             active_raw.extend(resp.json().get("data") or [])
@@ -2163,20 +2165,27 @@ def check_changes():
                 if resp_cancel.ok:
                     cancelled_raw.extend(resp_cancel.json().get("data") or [])
                 else:
+                    fallo_parcial = True
                     print(f"[check-changes] consulta de canceladas falló (property {property_id}): {resp_cancel.status_code} {resp_cancel.text[:200]}")
             except Exception as e:
+                fallo_parcial = True
                 print(f"[check-changes] error consultando canceladas (property {property_id}): {e}")
 
+        # Con un fallo parcial se devuelve el mismo «desde» que mandó el cliente, para que no dé por vistos los cambios
+        # de la propiedad que no respondió (antes el reloj avanzaba igual y esa reserva no se volvía a pedir hasta recargar).
+        reloj = since if fallo_parcial else checked_at
+
         if not active_raw and not cancelled_raw and warnings:
-            return jsonify({"ok": True, "changed": False, "checked_at": checked_at,
+            return jsonify({"ok": True, "changed": False, "checked_at": reloj, "incompleto": True,
                             "warning": "; ".join(warnings)})
 
         new_bookings = _parse_bookings_list(active_raw, include_cancelled=True) + \
                        _parse_bookings_list(cancelled_raw, include_cancelled=True)
-        _state["checked_at"] = checked_at
+        if not fallo_parcial:
+            _state["checked_at"] = checked_at
 
         if not new_bookings:
-            return jsonify({"ok": True, "changed": False, "checked_at": checked_at})
+            return jsonify({"ok": True, "changed": False, "checked_at": reloj, "incompleto": fallo_parcial})
 
         # Fusionar en el estado: eliminar versión antigua, añadir nueva.
         # Clave primaria: id de Beds24 (único por reserva). Solo si no hay id
@@ -2205,7 +2214,8 @@ def check_changes():
             "changed":      True,
             "new_bookings": new_bookings,
             "cancelled_count": len(cancelled_raw),
-            "checked_at":   checked_at,
+            "checked_at":   reloj,
+            "incompleto":   fallo_parcial,
         })
 
     except Exception as e:
@@ -2318,6 +2328,34 @@ def _lookup_booking_id(token, room_id, arrival, email=None):
         return None
 
 
+def _reservas_solapadas(token, room_id, arrival, departure):
+    """Reservas y bloqueos NO cancelados de esa habitación que ocupan alguna noche entre arrival (incl.) y departure (excl.),
+    consultados EN VIVO a Beds24 (no al estado en memoria de la app, que puede ir por detrás de lo que ya entró de un canal).
+    Lanza excepción si Beds24 no responde: es mejor no crear que crear a ciegas."""
+    d_in = datetime.strptime(arrival, "%Y-%m-%d").date()
+    d_out = datetime.strptime(departure, "%Y-%m-%d").date()
+    resp = b24_get(token, "/bookings", params={
+        "roomId": int(room_id),
+        "arrivalTo": (d_out - timedelta(days=1)).isoformat(),
+        "departureFrom": (d_in + timedelta(days=1)).isoformat(),
+        "limit": 100,
+    })
+    if not resp.ok:
+        raise RuntimeError(f"Beds24 respondió {resp.status_code}")
+    ocupan = []
+    for b in resp.json().get("data") or []:
+        if str(b.get("status", "")).lower() == "cancelled":
+            continue
+        try:
+            b_in = datetime.strptime(str(b.get("arrival"))[:10], "%Y-%m-%d").date()
+            b_out = datetime.strptime(str(b.get("departure"))[:10], "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if b_in < d_out and b_out > d_in:   # se pisan alguna noche (la salida de una y la entrada de otra el mismo día no cuentan)
+            ocupan.append(b)
+    return ocupan
+
+
 @mobile_bp.route("/create-booking", methods=["POST"])
 def create_booking():
     """Crea una nueva reserva en Beds24."""
@@ -2362,6 +2400,18 @@ def create_booking():
     try:
         token = get_access_token()
         
+        # Comprobación en vivo contra Beds24 antes de crear: si una reserva de un canal entró hace unos minutos y la app
+        # aún no la muestra, aquí se detecta (sin esto se habría creado un overbooking).
+        try:
+            ocupan = _reservas_solapadas(token, room_id, arrival, departure)
+        except Exception as e:
+            print(f"[create-booking] no se pudo comprobar la disponibilidad: {e}")
+            return jsonify({"ok": False, "error": "No he podido comprobar la disponibilidad en Beds24. Inténtalo de nuevo en un momento."}), 503
+        if ocupan:
+            o = ocupan[0]
+            return jsonify({"ok": False, "ocupada": True,
+                            "error": f"Esa habitación ya está ocupada del {o.get('arrival')} al {o.get('departure')} (reserva o bloqueo). No se ha creado nada; actualiza la app con ↺."}), 409
+
         first = name.split()[0]
         last  = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
 
