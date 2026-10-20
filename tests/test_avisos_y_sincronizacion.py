@@ -149,5 +149,49 @@ class CrearReserva(Base):
         post.assert_not_called()
 
 
+class BloquearYEditar(Base):
+    def _post(self, ruta, cuerpo, por_id, solapan):
+        def b24(token, path, params=None, timeout=20):
+            if params and "id" in params:
+                return Resp(por_id)
+            return Resp(solapan)
+        with mock.patch.object(mobile_routes, "b24_get", side_effect=b24), mock.patch.object(mobile_routes, "b24_post") as post:
+            post.return_value = mock.Mock(ok=True, json=lambda: [{"new": {"id": 77}}])
+            r = self.c.post("/mobile/" + ruta, json=cuerpo, headers={"x-app-pin": "1111"})
+        return r, post
+
+    def test_bloquear_sobre_una_reserva_se_rechaza(self):
+        r, post = self._post("block-dates", {"roomId": 720841, "from": "2026-10-18", "to": "2026-10-20"}, [],
+                             [{"id": 5, "status": "confirmed", "arrival": "2026-10-19", "departure": "2026-10-21"}])
+        self.assertEqual(r.status_code, 409)
+        post.assert_not_called()
+
+    def test_bloquear_sitio_libre_funciona(self):
+        r, post = self._post("block-dates", {"roomId": 720841, "from": "2026-10-18", "to": "2026-10-20"}, [], [])
+        self.assertEqual(r.status_code, 200)
+        post.assert_called_once()
+
+    def test_editar_fechas_a_un_hueco_ocupado_se_rechaza(self):
+        actual = [{"id": 10, "roomId": 720841, "arrival": "2026-10-18", "departure": "2026-10-19"}]
+        r, post = self._post("edit-booking", {"bookingId": 10, "departure": "2026-10-21"}, actual,
+                             [actual[0], {"id": 11, "status": "confirmed", "arrival": "2026-10-20", "departure": "2026-10-22"}])
+        self.assertEqual(r.status_code, 409)
+        post.assert_not_called()
+
+    def test_editar_no_choca_consigo_misma(self):
+        actual = [{"id": 10, "roomId": 720841, "arrival": "2026-10-18", "departure": "2026-10-19"}]
+        r, post = self._post("edit-booking", {"bookingId": 10, "departure": "2026-10-20"}, actual, [actual[0]])
+        self.assertEqual(r.status_code, 200)
+        post.assert_called_once()
+
+    def test_editar_solo_el_nombre_no_consulta_disponibilidad(self):
+        llamadas = []
+        with mock.patch.object(mobile_routes, "b24_get", side_effect=lambda *a, **k: llamadas.append(1) or Resp([])),              mock.patch.object(mobile_routes, "b24_post") as post:
+            post.return_value = mock.Mock(ok=True, json=lambda: [{}])
+            r = self.c.post("/mobile/edit-booking", json={"bookingId": 10, "name": "Ana Ruiz"}, headers={"x-app-pin": "1111"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(llamadas, [])
+
+
 if __name__ == "__main__":
     unittest.main()

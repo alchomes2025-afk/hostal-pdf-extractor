@@ -2328,7 +2328,7 @@ def _lookup_booking_id(token, room_id, arrival, email=None):
         return None
 
 
-def _reservas_solapadas(token, room_id, arrival, departure):
+def _reservas_solapadas(token, room_id, arrival, departure, excluir_id=None):
     """Reservas y bloqueos NO cancelados de esa habitación que ocupan alguna noche entre arrival (incl.) y departure (excl.),
     consultados EN VIVO a Beds24 (no al estado en memoria de la app, que puede ir por detrás de lo que ya entró de un canal).
     Lanza excepción si Beds24 no responde: es mejor no crear que crear a ciegas."""
@@ -2346,6 +2346,8 @@ def _reservas_solapadas(token, room_id, arrival, departure):
     for b in resp.json().get("data") or []:
         if str(b.get("status", "")).lower() == "cancelled":
             continue
+        if excluir_id is not None and str(b.get("id")) == str(excluir_id):
+            continue
         try:
             b_in = datetime.strptime(str(b.get("arrival"))[:10], "%Y-%m-%d").date()
             b_out = datetime.strptime(str(b.get("departure"))[:10], "%Y-%m-%d").date()
@@ -2354,6 +2356,20 @@ def _reservas_solapadas(token, room_id, arrival, departure):
         if b_in < d_out and b_out > d_in:   # se pisan alguna noche (la salida de una y la entrada de otra el mismo día no cuentan)
             ocupan.append(b)
     return ocupan
+
+
+def _respuesta_ocupada(token, room_id, arrival, departure, excluir_id=None):
+    """None si la habitación está libre esas noches; si no, la respuesta HTTP (409, o 503 si Beds24 no responde) para devolver tal cual."""
+    try:
+        ocupan = _reservas_solapadas(token, room_id, arrival, departure, excluir_id)
+    except Exception as e:
+        print(f"[disponibilidad] no se pudo comprobar: {e}")
+        return jsonify({"ok": False, "error": "No he podido comprobar la disponibilidad en Beds24. Inténtalo de nuevo en un momento."}), 503
+    if not ocupan:
+        return None
+    o = ocupan[0]
+    return jsonify({"ok": False, "ocupada": True,
+                    "error": f"Esa habitación ya está ocupada del {o.get('arrival')} al {o.get('departure')} (reserva o bloqueo). No se ha cambiado nada; actualiza la app con ↺."}), 409
 
 
 @mobile_bp.route("/create-booking", methods=["POST"])
@@ -2402,15 +2418,9 @@ def create_booking():
         
         # Comprobación en vivo contra Beds24 antes de crear: si una reserva de un canal entró hace unos minutos y la app
         # aún no la muestra, aquí se detecta (sin esto se habría creado un overbooking).
-        try:
-            ocupan = _reservas_solapadas(token, room_id, arrival, departure)
-        except Exception as e:
-            print(f"[create-booking] no se pudo comprobar la disponibilidad: {e}")
-            return jsonify({"ok": False, "error": "No he podido comprobar la disponibilidad en Beds24. Inténtalo de nuevo en un momento."}), 503
-        if ocupan:
-            o = ocupan[0]
-            return jsonify({"ok": False, "ocupada": True,
-                            "error": f"Esa habitación ya está ocupada del {o.get('arrival')} al {o.get('departure')} (reserva o bloqueo). No se ha creado nada; actualiza la app con ↺."}), 409
+        ocupada = _respuesta_ocupada(token, room_id, arrival, departure)
+        if ocupada:
+            return ocupada
 
         first = name.split()[0]
         last  = " ".join(name.split()[1:]) if len(name.split()) > 1 else ""
@@ -2719,6 +2729,9 @@ def block_dates():
 
     try:
         token = get_access_token()
+        ocupada = _respuesta_ocupada(token, room_id, date_from, date_to)
+        if ocupada:
+            return ocupada
         first = "Fecha"
         last  = "bloqueada" + (f" - {reason}" if reason else "")
 
@@ -2910,6 +2923,18 @@ def edit_booking():
 
     try:
         token = get_access_token()
+        if arrival or departure or room_id:
+            actual = b24_get(token, "/bookings", params={"id": int(booking_id)})
+            if not actual.ok:
+                return jsonify({"ok": False, "error": "No he podido comprobar la disponibilidad en Beds24. Inténtalo de nuevo en un momento."}), 503
+            filas = actual.json().get("data") or []
+            antes = next((b for b in filas if str(b.get("id")) == str(booking_id)), None)
+            if antes is None:
+                return jsonify({"ok": False, "error": "No encuentro esa reserva en Beds24."}), 404
+            ocupada = _respuesta_ocupada(token, room_id or antes.get("roomId"), arrival or antes.get("arrival"),
+                                         departure or antes.get("departure"), excluir_id=booking_id)
+            if ocupada:
+                return ocupada
         resp = b24_post(token, "/bookings", json_body=[payload])
         data = resp.json()
         if not resp.ok:
