@@ -17,6 +17,8 @@ modelo:
   - partes: estado del parte de viajeros (RPV) de las próximas llegadas.
   - disponibilidad: noches libres, ocupadas y bloqueadas con el precio de calendario.
   - finanzas_mes: el informe de la pestaña Finanzas (incluida la rentabilidad estimada).
+  - enlace_parte_emergencia: redacta el mensaje con el enlace de RPV de la habitación (fechas exactas y referencia) para que el huésped haga el parte
+    en una emergencia; solo texto para copiar, no envía nada ni lleva códigos.
   - preparar_correo_codigos (solo PIN de administrador): deja un BORRADOR del correo de emergencia con los códigos de
     acceso de una reserva. No envía nada: la app lo enseña con un botón «Enviar» y solo ese botón (POST
     /mobile/assistant/enviar-codigos, también solo con PIN de administrador) manda el correo.
@@ -37,6 +39,7 @@ from datetime import date, datetime, timedelta, timezone
 import requests
 
 from config import GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, PIN_ENVIO_CODIGOS
+from services.enlace_parte import ErrorEnlace, redactar_enlace_parte
 from services.groq_claves import clave_gestion
 from routes.acceso import ErrorCodigos, redactar_codigos, _EMAIL as EMAIL_VALIDO
 from services.beds24 import buscar_booking_por_id
@@ -776,6 +779,23 @@ def _t_preparar_correo_codigos(a, ctx):
                     "Responde solo: «Introduce el PIN de seguridad.» No le pidas el PIN por el chat ni lo menciones más: tú no lo conoces."}
 
 
+def _t_enlace_parte_emergencia(a, ctx):
+    """Mensaje para copiar con el enlace de RPV de la habitación de una reserva (emergencias). No envía nada ni lleva códigos."""
+    reserva = str(a.get("reserva") or "").strip()
+    if not reserva.isdigit():
+        raise ErrorHerramienta("Falta el número de reserva de Beds24 (sale de listar_reservas o agenda)")
+    booking = buscar_booking_por_id(reserva)
+    if not booking:
+        raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
+    try:
+        texto, habitacion, enlace = redactar_enlace_parte(booking, a.get("idioma"))
+    except ErrorEnlace as e:
+        raise ErrorHerramienta(str(e))
+    return {"mensaje": texto, "habitacion": habitacion, "enlace": enlace,
+            "nota": "NO se ha enviado nada. Pega el campo «mensaje» TAL CUAL (sin cambiar una palabra) para que el usuario lo copie y lo mande al huésped, "
+                    "y añade una frase: cuando el parte conste como completado (herramienta partes) ya se pueden enviar los códigos."}
+
+
 def _t_pin_envio_codigos(a, ctx):
     """El PIN con el que el personal sin PIN de administrador envía los correos de códigos. Solo se da al administrador."""
     if not ctx.get("es_admin"):
@@ -784,7 +804,7 @@ def _t_pin_envio_codigos(a, ctx):
             "nota": "Díselo solo a este usuario administrador, porque lo ha pedido. Es el PIN de seguridad que introduce el resto del personal."}
 
 
-HERRAMIENTAS = {"preparar_correo_codigos": _t_preparar_correo_codigos, "pin_envio_codigos": _t_pin_envio_codigos, "listar_reservas": _t_listar_reservas, "resumen": _t_resumen, "grafico": _t_grafico, "comparar": _t_comparar,
+HERRAMIENTAS = {"enlace_parte_emergencia": _t_enlace_parte_emergencia, "preparar_correo_codigos": _t_preparar_correo_codigos, "pin_envio_codigos": _t_pin_envio_codigos, "listar_reservas": _t_listar_reservas, "resumen": _t_resumen, "grafico": _t_grafico, "comparar": _t_comparar,
                 "cancelaciones": _t_cancelaciones, "agenda": _t_agenda, "partes": _t_partes, "disponibilidad": _t_disponibilidad,
                 "parte_huesped": _t_parte_huesped, "retraso_rpv": _t_retraso_rpv, "finanzas_mes": _t_finanzas_mes}
 
@@ -870,6 +890,13 @@ TOOLS = [
          "idioma": {"type": "string", "enum": ["es", "en"], "description": "Idioma del correo (por defecto en)"}},
         ["reserva", "email"]),
     _herramienta(
+        "enlace_parte_emergencia",
+        "EMERGENCIAS: redacta el mensaje con el enlace de RPV de la habitación de una reserva, para que el huésped haga el parte (con las fechas exactas y la referencia) cuando nada más funciona. "
+        "No envía nada y no lleva códigos de acceso: el usuario lo copia. Necesita el número de reserva y el idioma.",
+        {"reserva": {"type": "string", "description": "Número de reserva de Beds24"},
+         "idioma": {"type": "string", "enum": ["es", "en"], "description": "Idioma del mensaje (por defecto en)"}},
+        ["reserva"]),
+    _herramienta(
         "pin_envio_codigos",
         "Solo administrador: da el PIN de seguridad que introduce el resto del personal para preparar y enviar los correos de códigos. Úsala solo si el usuario pide ese PIN.",
         {}, []),
@@ -926,6 +953,8 @@ def _system(ctx):
                   "si es correcto, le muestra el borrador con un botón «Enviar». Tú no conoces ese PIN, nunca lo pidas por el chat y, si te lo preguntan, di que se lo dé el administrador; tú nunca envías correos. "
                   "Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario y el idioma (es o en): si falta algo, haz UNA pregunta corta. "
                   "Después responde solo «Introduce el PIN de seguridad.»")
+    regla7 += (" EMERGENCIA SIN PARTE: si el huésped aún no ha hecho el parte de viajeros y nada funciona, primero usa enlace_parte_emergencia (mensaje para copiar con el enlace de RPV de su habitación); "
+               "los códigos solo se mandan cuando el parte conste como completado (herramienta partes).")
     hostal = ", ".join(h["nombre"] for h in _habitaciones(mr.PROPERTY_ID))
     return f"""Eres el asistente de la app de gestión de ALC Homes. Ayudas al personal y a la propiedad a entender sus reservas, ocupación y finanzas, y puedes dibujar gráficos. Hoy es {DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}.
 
