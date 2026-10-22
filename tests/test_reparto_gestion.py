@@ -60,9 +60,11 @@ class Endpoint(unittest.TestCase):
         app.register_blueprint(mobile_routes.mobile_bp)
         self.c = app.test_client()
         self.intentos = {"n": 0}
+        self.llamadas_informe = []
+        mobile_routes._COMISION_RECIENTE.clear()
         informe = {"ok": True, "resumen": Informe.RESUMEN, "rentabilidad": {"comisiones_activas": True, "comision_gestion": 100.0, "comision_gestion_pct": 15}}
         for o, n, v in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "9999"),
-                        (mobile_routes, "_informe_financiero", lambda *a, **k: informe),
+                        (mobile_routes, "_informe_financiero", lambda *a, **k: self.llamadas_informe.append(a) or informe),
                         (mobile_routes, "COMISIONES_GESTION_ACTIVAS", True),
                         (sys.modules["services.limites"], "cantidad", lambda clave, seg: self.intentos["n"]),
                         (sys.modules["services.limites"], "anotar", lambda clave: self.intentos.__setitem__("n", self.intentos["n"] + 1))):
@@ -102,6 +104,21 @@ class Endpoint(unittest.TestCase):
     def test_otros_clientes_no_tienen_la_funcion(self):
         with mock.patch.object(mobile_routes, "COMISIONES_GESTION_ACTIVAS", False):
             self.assertEqual(self._post().status_code, 404)
+
+
+    def test_reutiliza_la_comision_que_acaba_de_mostrar_finanzas(self):
+        mobile_routes._recordar_comision("349341", "2026-09", {"completo": True, "resumen": Informe.RESUMEN, "rentabilidad": {"comisiones_activas": True, "comision_gestion": 127.5}})
+        d = self._post().get_json()
+        self.assertEqual(self.llamadas_informe, [])          # no recalcula el mes contra Beds24
+        self.assertEqual([x["importe"] for x in d["partes"]], [102.0, 25.5])
+
+    def test_si_lo_recordado_es_viejo_o_incompleto_recalcula(self):
+        mobile_routes._recordar_comision("349341", "2026-09", {"completo": False, "resumen": Informe.RESUMEN, "rentabilidad": {"comisiones_activas": True, "comision_gestion": 127.5}})
+        self._post()
+        self.assertEqual(len(self.llamadas_informe), 1)
+        mobile_routes._COMISION_RECIENTE[("349341", "2026-09")] = (0, 850.0, 127.5)   # de hace mucho
+        self._post()
+        self.assertEqual(len(self.llamadas_informe), 2)
 
 
 if __name__ == "__main__":

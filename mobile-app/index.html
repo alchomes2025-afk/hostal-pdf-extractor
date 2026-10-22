@@ -3541,8 +3541,8 @@ function pedirDesglose() {
     try {
       const r = await fetch(`${API}/finance/desglose`, {method: "POST", headers: {"x-app-pin": PIN, "content-type": "application/json"},
         body: JSON.stringify({propertyId: String(FIN_PROPERTY), month: `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`, pin_desglose: pin.value})});
-      d = await r.json();
-    } catch (e) { d = {ok: false, error: "Error de conexión."}; }
+      try { d = await r.json(); } catch (e2) { d = {ok: false, error: `El servidor no ha respondido bien (${r.status}). Espera un momento y vuelve a intentarlo.`}; }
+    } catch (e) { d = {ok: false, error: "Sin conexión con el servidor."}; }
     ok.disabled = false;
     if (!d.ok) { err.textContent = d.error || "No se pudo calcular."; pin.value = ""; pin.focus(); return; }
     mostrarDesglose(d);

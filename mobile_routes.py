@@ -1916,9 +1916,23 @@ def mobile_finance():
 
     costes = request.args.get("costes") if request.args.get("costes") in ("auto", "reales", "estimados") else "auto"
     try:
-        return jsonify(_informe_financiero(property_id, month_str, costes))
+        informe = _informe_financiero(property_id, month_str, costes)
+        _recordar_comision(property_id, month_str, informe)
+        return jsonify(informe)
     except InformeError as e:
         return jsonify({"ok": False, "error": str(e)}), e.status
+
+
+_COMISION_RECIENTE = {}   # (propiedad, mes) -> (instante, base neta, comisión de gestión): lo último que se mostró en Finanzas
+_COMISION_VIGENCIA_SEG = 900
+
+
+def _recordar_comision(property_id, month_str, informe):
+    """Guarda la comisión de gestión que acaba de calcular /finance: el desglose la reutiliza en vez de recalcular el mes entero contra Beds24
+    (lento, y con muchos tramos puede pasar el límite de tiempo del servidor)."""
+    rent = informe.get("rentabilidad") or {}
+    if informe.get("completo") and rent.get("comisiones_activas"):
+        _COMISION_RECIENTE[(str(property_id), str(month_str))] = (time.time(), informe["resumen"]["ingresos_netos"], rent["comision_gestion"])
 
 
 @mobile_bp.route("/finance/desglose", methods=["POST"])
@@ -1950,17 +1964,21 @@ def mobile_finance_desglose():
     if not PIN_DESGLOSE_GESTION or not hmac.compare_digest(recibido.encode(), PIN_DESGLOSE_GESTION.encode()):
         anotar("desglose-pin-fallos")
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 403
-    try:
-        informe = _informe_financiero(property_id, month_str)
-    except InformeError as e:
-        return jsonify({"ok": False, "error": str(e)}), e.status
-    rent = informe.get("rentabilidad") or {}
-    if not rent.get("comisiones_activas"):
-        return jsonify({"ok": False, "error": "Esta propiedad no tiene comisión de gestión"}), 404
+    reciente = _COMISION_RECIENTE.get((property_id, month_str))
+    if reciente and time.time() - reciente[0] < _COMISION_VIGENCIA_SEG:
+        _, base_neta, comision = reciente
+    else:
+        try:
+            informe = _informe_financiero(property_id, month_str)
+        except InformeError as e:
+            return jsonify({"ok": False, "error": str(e)}), e.status
+        rent = informe.get("rentabilidad") or {}
+        if not rent.get("comisiones_activas"):
+            return jsonify({"ok": False, "error": "Esta propiedad no tiene comisión de gestión"}), 404
+        base_neta, comision = informe["resumen"]["ingresos_netos"], rent["comision_gestion"]
     return jsonify({"ok": True, "mes": month_str, "propiedad": "hostal" if property_id == PROPERTY_ID else "primavera",
-                    "base_neta": informe["resumen"]["ingresos_netos"], "comision_gestion": rent["comision_gestion"],
-                    "comision_gestion_pct": rent["comision_gestion_pct"],
-                    **reparto.desglose(property_id == PROPERTY_ID, rent["comision_gestion"])})
+                    "base_neta": base_neta, "comision_gestion": comision, "comision_gestion_pct": round(PCT_COMISION_GESTION * 100),
+                    **reparto.desglose(property_id == PROPERTY_ID, comision)})
 
 
 @mobile_bp.route("/assistant", methods=["POST"])
