@@ -66,34 +66,31 @@ def correo_no_localizada(idioma):
     return asunto, cuerpo.format(tel=TELEFONO)
 
 
-def correo_codigos(idioma, url, nombre_habitacion, pin_habitacion, codigo_portal=None, codigo_urbanizacion=None):
-    """(asunto, cuerpo) con los códigos de acceso de un huésped ya alojado: portal del hostal (si lo hay) y habitación o,
-    en La Casa de la Primavera (`codigo_urbanizacion`), urbanización y cajetín de llaves.
-    Lo envía el equipo a mano en una emergencia (POST /enviar-codigos); solo en español e inglés."""
-    es = idioma == "es"
-    lineas = []
-    if codigo_urbanizacion:
-        lineas.append(f"• Urbanización Costa Hispania (entrada por calle Polonia, Avenida de Polonia 160, Gran Alacant): {codigo_urbanizacion}" if es
-                      else f"• Costa Hispania complex (entrance on calle Polonia, Avenida de Polonia 160, Gran Alacant): {codigo_urbanizacion}")
-        lineas.append(f"• Cajetín de llaves ({nombre_habitacion}): {pin_habitacion} — está en la puerta exterior del bungalow, a la izquierda. "
-                      "Tira de la pestaña superior para abrir la tapa e introduce el código." if es
-                      else f"• Key box ({nombre_habitacion}): {pin_habitacion} — on the bungalow's exterior door, on the left. "
-                           "Pull the tab at the top to open the lid and enter the code.")
-        codigos = "\n".join(lineas)
-        if es:
-            return ("Tus códigos de acceso — ALC Homes",
-                    f"Hola,\n\nEstos son tus códigos de acceso:\n\n{codigos}\n\nTu enlace personal de check-in: {url}\n\n"
-                    f"Si tienes cualquier problema, llama al teléfono de atención al cliente {TELEFONO} (24 h).\n\nEquipo ALC Homes")
-        return ("Your access codes — ALC Homes",
-                f"Hello,\n\nHere are your access codes:\n\n{codigos}\n\nYour personal check-in link: {url}\n\n"
-                f"If you have any problem, call customer service on {TELEFONO} (24 h).\n\nALC Homes Team")
-    if codigo_portal:
-        lineas.append(f"• Puerta de la calle (portal): {codigo_portal}# — introduce el código y empuja la puerta." if es
-                      else f"• Street door (building): {codigo_portal}# — enter the code and push the door.")
-    lineas.append(f"• Tu habitación ({nombre_habitacion}): {pin_habitacion} — introdúcelo en el teclado de la puerta. "
-                  "Pulsa el triángulo para cerrar desde fuera." if es
-                  else f"• Your room ({nombre_habitacion}): {pin_habitacion} — enter it on the door keypad. "
-                       "Press the triangle to lock from outside.")
+def _linea_urbanizacion(es, codigo):
+    return (f"• Urbanización Costa Hispania (entrada por calle Polonia, Avenida de Polonia 160, Gran Alacant): {codigo}" if es
+            else f"• Costa Hispania complex (entrance on calle Polonia, Avenida de Polonia 160, Gran Alacant): {codigo}")
+
+
+def _linea_cajetin(es, nombre, pin):
+    return (f"• Cajetín de llaves ({nombre}): {pin} — está en la puerta exterior del bungalow, a la izquierda. "
+            "Tira de la pestaña superior para abrir la tapa e introduce el código." if es
+            else f"• Key box ({nombre}): {pin} — on the bungalow's exterior door, on the left. "
+                 "Pull the tab at the top to open the lid and enter the code.")
+
+
+def _linea_portal(es, codigo):
+    return (f"• Puerta de la calle (portal): {codigo}# — introduce el código y empuja la puerta." if es
+            else f"• Street door (building): {codigo}# — enter the code and push the door.")
+
+
+def _linea_habitacion(es, nombre, pin):
+    return (f"• Tu habitación ({nombre}): {pin} — introdúcelo en el teclado de la puerta. "
+            "Pulsa el triángulo para cerrar desde fuera." if es
+            else f"• Your room ({nombre}): {pin} — enter it on the door keypad. "
+                 "Press the triangle to lock from outside.")
+
+
+def _correo(es, lineas, url):
     codigos = "\n".join(lineas)
     if es:
         return ("Tus códigos de acceso — ALC Homes",
@@ -102,3 +99,41 @@ def correo_codigos(idioma, url, nombre_habitacion, pin_habitacion, codigo_portal
     return ("Your access codes — ALC Homes",
             f"Hello,\n\nHere are your access codes:\n\n{codigos}\n\nYour personal check-in link: {url}\n\n"
             f"If you have any problem, call customer service on {TELEFONO} (24 h).\n\nALC Homes Team")
+
+
+def correo_codigos(idioma, url, nombre_habitacion, pin_habitacion, codigo_portal=None, codigo_urbanizacion=None):
+    """(asunto, cuerpo) con los códigos de acceso de un huésped ya alojado: portal del hostal (si lo hay) y habitación o,
+    en La Casa de la Primavera (`codigo_urbanizacion`), urbanización y cajetín de llaves.
+    Lo envía el equipo a mano en una emergencia (POST /enviar-codigos); solo en español e inglés."""
+    es = idioma == "es"
+    lineas = []
+    if codigo_urbanizacion:
+        lineas.append(_linea_urbanizacion(es, codigo_urbanizacion))
+        lineas.append(_linea_cajetin(es, nombre_habitacion, pin_habitacion))
+    else:
+        if codigo_portal:
+            lineas.append(_linea_portal(es, codigo_portal))
+        lineas.append(_linea_habitacion(es, nombre_habitacion, pin_habitacion))
+    return _correo(es, lineas, url)
+
+
+def correo_codigos_grupo(idioma, url, habitaciones, codigo_portal=None, codigo_urbanizacion=None):
+    """Lo mismo para una reserva de VARIAS habitaciones: un solo correo con el portal una vez y el código de cada habitación.
+    `habitaciones` es una lista de (nombre, pin, es_primavera). Con una sola habitación sale igual que `correo_codigos`."""
+    es = idioma == "es"
+    lineas = []
+    hostal = [(n, p) for n, p, prim in habitaciones if not prim]
+    primavera = [(n, p) for n, p, prim in habitaciones if prim]
+    if primavera and codigo_urbanizacion:
+        lineas.append(_linea_urbanizacion(es, codigo_urbanizacion))
+        lineas.extend(_linea_cajetin(es, n, p) for n, p in primavera)
+    if hostal:
+        if codigo_portal:
+            lineas.append(_linea_portal(es, codigo_portal))
+        if len(hostal) == 1:
+            lineas.append(_linea_habitacion(es, *hostal[0]))
+        else:
+            for n, p in hostal:
+                lineas.append(f"• {n}: {p} — introdúcelo en el teclado de la puerta. Pulsa el triángulo para cerrar desde fuera." if es
+                              else f"• {n}: {p} — enter it on the door keypad. Press the triangle to lock from outside.")
+    return _correo(es, lineas, url)

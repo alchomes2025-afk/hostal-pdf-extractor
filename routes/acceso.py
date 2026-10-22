@@ -17,9 +17,9 @@ import re
 from flask import Blueprint, jsonify, request
 
 from config import API_TOKEN, ROOM_CONFIG, TEST_TOKEN
-from services.acceso_correos import correo_codigos, correo_enlace, correo_no_localizada
+from services.acceso_correos import correo_codigos, correo_codigos_grupo, correo_enlace, correo_no_localizada
 from services.acceso_enlace import IDIOMAS, habilitado, url_checkin
-from services.beds24 import buscar_booking_por_id, buscar_booking_por_nombre, buscar_booking_por_ref
+from services.beds24 import buscar_booking_por_id, buscar_booking_por_nombre, buscar_booking_por_ref, reservas_del_grupo
 from services.email_send import enviar_email, es_email_relay_ota
 from services.limites import ip_cliente, permitir
 
@@ -83,17 +83,36 @@ class ErrorCodigos(Exception):
         self.codigo, self.status = codigo, status
 
 
-def redactar_codigos(booking, idioma):
-    """(asunto, cuerpo, nombre de la habitación) del correo de emergencia con los códigos de acceso de esa reserva.
-    La usan POST /enviar-codigos y el asistente de la app (borrador + botón de confirmar)."""
-    cfg = ROOM_CONFIG.get(str(booking.get("roomId", "")), {})
-    if not cfg.get("pin"):
-        raise ErrorCodigos("habitacion_sin_codigo", 409)
-    primavera = str(booking.get("roomId", "")) == ROOM_ID_PRIMAVERA   # urbanización + cajetín de llaves, sin portal del hostal
-    asunto, cuerpo = correo_codigos(idioma, url_checkin(booking.get("id"), idioma), cfg.get("nombre", ""), cfg["pin"],
-                                    codigo_portal=None if primavera else CODIGO_PORTAL,
-                                    codigo_urbanizacion=CODIGO_URBANIZACION if primavera else None)
-    return asunto, cuerpo, cfg.get("nombre", "")
+def miembros_del_grupo(booking):
+    """Las reservas (una por habitación) de la misma reserva de varias habitaciones, incluida `booking`; [booking] si no es de grupo
+    o si falla la consulta (un fallo aquí nunca debe impedir enviar los códigos de la habitación que se pidió)."""
+    try:
+        return reservas_del_grupo(booking) or [booking]
+    except Exception as e:
+        logger.error(f"[acceso] No se pudo consultar el grupo de habitaciones: {e}")
+        return [booking]
+
+
+def redactar_codigos(booking, idioma, miembros=None):
+    """(asunto, cuerpo, nombre de la habitación) del correo de emergencia con los códigos de acceso de esa reserva. Si es de VARIAS habitaciones
+    (`miembros`, ver miembros_del_grupo) el correo lleva los códigos de TODAS y el nombre es «A + B». Si a alguna le falta el código, no se
+    redacta nada (un correo con códigos a medias es peor que ninguno). La usan POST /enviar-codigos y el asistente de la app."""
+    miembros = miembros or [booking]
+    habitaciones = []
+    for m in miembros:
+        rid = str(m.get("roomId", ""))
+        cfg = ROOM_CONFIG.get(rid, {})
+        if not cfg.get("pin"):
+            raise ErrorCodigos("habitacion_sin_codigo", 409)
+        habitaciones.append((cfg.get("nombre", ""), cfg["pin"], rid == ROOM_ID_PRIMAVERA))
+    url = url_checkin(booking.get("id"), idioma)
+    if len(habitaciones) == 1:
+        nombre, pin, primavera = habitaciones[0]   # urbanización + cajetín de llaves en la casa, sin portal del hostal
+        asunto, cuerpo = correo_codigos(idioma, url, nombre, pin, codigo_portal=None if primavera else CODIGO_PORTAL,
+                                        codigo_urbanizacion=CODIGO_URBANIZACION if primavera else None)
+        return asunto, cuerpo, nombre
+    asunto, cuerpo = correo_codigos_grupo(idioma, url, habitaciones, codigo_portal=CODIGO_PORTAL, codigo_urbanizacion=CODIGO_URBANIZACION)
+    return asunto, cuerpo, " + ".join(n for n, _, _ in habitaciones)
 
 
 @acceso_bp.route("/enviar-codigos", methods=["POST"])
@@ -119,7 +138,7 @@ def enviar_codigos():
     if not booking:
         return jsonify({"ok": False, "error": "reserva_no_encontrada"}), 404
     try:
-        asunto, cuerpo, _habitacion = redactar_codigos(booking, idioma)
+        asunto, cuerpo, _habitacion = redactar_codigos(booking, idioma, miembros_del_grupo(booking))
     except ErrorCodigos as e:
         return jsonify({"ok": False, "error": e.codigo}), e.status
     try:

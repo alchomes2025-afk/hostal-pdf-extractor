@@ -41,7 +41,7 @@ import requests
 from config import GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, PIN_ENVIO_CODIGOS
 from services.enlace_parte import ErrorEnlace, redactar_enlace_parte
 from services.groq_claves import clave_gestion
-from routes.acceso import ErrorCodigos, redactar_codigos, _EMAIL as EMAIL_VALIDO
+from routes.acceso import ErrorCodigos, miembros_del_grupo, redactar_codigos, _EMAIL as EMAIL_VALIDO
 from services.beds24 import buscar_booking_por_id
 from services.email_send import es_email_relay_ota
 from services.fechas import hoy_madrid
@@ -752,13 +752,15 @@ def borrador_codigos(reserva, email, idioma):
     booking = buscar_booking_por_id(reserva)
     if not booking:
         raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
+    miembros = miembros_del_grupo(booking)
     try:
-        asunto, cuerpo, habitacion = redactar_codigos(booking, idioma)
+        asunto, cuerpo, habitacion = redactar_codigos(booking, idioma, miembros)
     except ErrorCodigos:
-        raise ErrorHerramienta("Esa habitación no tiene código de acceso configurado")
+        raise ErrorHerramienta("Esa habitación (o alguna de las de su grupo) no tiene código de acceso configurado" if len(miembros) > 1
+                               else "Esa habitación no tiene código de acceso configurado")
     huesped = " ".join(x for x in (booking.get("firstName"), booking.get("lastName")) if x).strip()
     return {"reserva": reserva, "email": email, "idioma": idioma, "asunto": asunto, "cuerpo": cuerpo, "habitacion": habitacion,
-            "huesped": huesped, "llegada": booking.get("arrival"), "salida": booking.get("departure")}
+            "huesped": huesped, "llegada": booking.get("arrival"), "salida": booking.get("departure"), "habitaciones": len(miembros)}
 
 
 def _t_preparar_correo_codigos(a, ctx):
@@ -787,11 +789,12 @@ def _t_enlace_parte_emergencia(a, ctx):
     booking = buscar_booking_por_id(reserva)
     if not booking:
         raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
+    miembros = miembros_del_grupo(booking)
     try:
-        texto, habitacion, enlace = redactar_enlace_parte(booking, a.get("idioma"))
+        texto, habitacion, enlace = redactar_enlace_parte(booking, a.get("idioma"), miembros)
     except ErrorEnlace as e:
         raise ErrorHerramienta(str(e))
-    return {"mensaje": texto, "habitacion": habitacion, "enlace": enlace,
+    return {"mensaje": texto, "habitacion": habitacion, "enlace": enlace, "habitaciones": len(miembros),
             "nota": "NO se ha enviado nada. Pega el campo «mensaje» TAL CUAL (sin cambiar una palabra) para que el usuario lo copie y lo mande al huésped, "
                     "y añade una frase: cuando el parte conste como completado (herramienta partes) ya se pueden enviar los códigos."}
 
