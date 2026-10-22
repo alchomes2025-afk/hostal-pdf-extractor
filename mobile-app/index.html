@@ -200,6 +200,14 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
   background:var(--blocked);color:#fff;border:none;border-radius:8px;
   padding:6px 10px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0;
 }
+#dg-fondo{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center;padding:16px}
+#dg-caja{background:#fff;border-radius:16px;max-width:380px;width:100%;padding:18px 16px;box-shadow:0 8px 30px rgba(0,0,0,.3);max-height:88vh;overflow-y:auto}
+#dg-caja h3{margin:0 0 6px;font-size:16px}
+#dg-caja input[type=password],#dg-caja input[type=text]{width:100%;padding:11px;border:1.5px solid var(--border);border-radius:10px;font-size:18px;letter-spacing:4px;text-align:center;margin:10px 0 6px}
+#dg-err{color:#c0392b;font-size:12.5px;min-height:16px}
+#dg-caja .dg-btns{display:flex;gap:8px;margin-top:10px}
+#dg-caja .dg-btns button{flex:1;padding:11px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:800}
+#dg-caja .dg-btns button.send{background:var(--acc);border-color:var(--acc);color:#fff}
 .fin-toggle{width:100%;margin-top:10px;padding:9px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:800;font-size:12.5px;color:var(--ink)}
 #fin-note{font-size:10px;color:var(--muted);margin-top:16px;line-height:1.5;text-align:center}
 .fin-occ-row{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--border);font-size:12px}
@@ -688,6 +696,7 @@ table.fin-table td.num{text-align:right;font-variant-numeric:tabular-nums}
     <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z,.csv,.xls,.xlsx,.txt,text/csv" multiple style="display:none">
     <input type="file" id="fx-extracto" accept=".csv,.xls,.xlsx,.pdf,.txt,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
   </div>
+  <div id="dg-fondo"><div id="dg-caja"></div></div>
   <div id="em-panel">
     <div id="em-head"><span id="em-title">🚨 Envíos de emergencia</span><span><button type="button" onclick="ayudaPantalla('em')" title="Preguntar al asistente sobre esta pantalla">💬</button><button type="button" onclick="closeEmergencia()" title="Cerrar">✕</button></span></div>
     <div id="em-body"></div>
@@ -3500,6 +3509,78 @@ let AS_HISTORY = [];
 let AS_BUSY = false;
 let AS_PANTALLA = null;   // función que devuelve el texto de la pantalla desde la que se abrió el asistente (ayuda contextual)
 
+// ── Desglose de la comisión de gestión (solo ALC Homes) ───
+// Pide el PIN propio del desglose; las cifras las calcula el servidor y solo salen con ese PIN.
+const dgEur = n => (n || 0).toLocaleString("es-ES", {style: "currency", currency: "EUR"});   // con céntimos: el reparto se cuadra al céntimo
+function dgCerrar() { $("#dg-fondo").style.display = "none"; $("#dg-caja").textContent = ""; }
+
+function pedirDesglose() {
+  const caja = $("#dg-caja");
+  caja.textContent = "";
+  emEl("h3", "", "🔒 Desglose de la comisión de gestión", caja);
+  emEl("p", "", "Introduce el PIN del desglose.", caja);
+  const pin = emEl("input", "", null, caja);
+  pin.type = "password"; pin.inputMode = "numeric"; pin.maxLength = 8; pin.autocomplete = "off";
+  const ver = emEl("label", "", null, caja);
+  const chk = emEl("input", "", null, ver);
+  chk.type = "checkbox";
+  ver.appendChild(document.createTextNode(" Mostrar el PIN"));
+  chk.onchange = () => { pin.type = chk.checked ? "text" : "password"; };
+  const err = emEl("div", "", "", caja);
+  err.id = "dg-err";
+  const btns = emEl("div", "dg-btns", null, caja);
+  const cancelar = emEl("button", "", "Cancelar", btns);
+  const ok = emEl("button", "send", "Ver desglose", btns);
+  cancelar.type = ok.type = "button";
+  cancelar.onclick = dgCerrar;
+  const enviar = async () => {
+    err.textContent = "";
+    if (!pin.value) { err.textContent = "Escribe el PIN."; return; }
+    ok.disabled = true;
+    let d;
+    try {
+      const r = await fetch(`${API}/finance/desglose`, {method: "POST", headers: {"x-app-pin": PIN, "content-type": "application/json"},
+        body: JSON.stringify({propertyId: String(FIN_PROPERTY), month: `${FIN_YEAR}-${String(FIN_MONTH).padStart(2, "0")}`, pin_desglose: pin.value})});
+      d = await r.json();
+    } catch (e) { d = {ok: false, error: "Error de conexión."}; }
+    ok.disabled = false;
+    if (!d.ok) { err.textContent = d.error || "No se pudo calcular."; pin.value = ""; pin.focus(); return; }
+    mostrarDesglose(d);
+  };
+  ok.onclick = enviar;
+  pin.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); enviar(); } });
+  $("#dg-fondo").style.display = "flex";
+  setTimeout(() => pin.focus(), 50);
+}
+
+function mostrarDesglose(d) {
+  const caja = $("#dg-caja");
+  caja.textContent = "";
+  emEl("h3", "", "Reparto de la comisión de gestión", caja);
+  emEl("p", "", `${MONTHS_LONG[FIN_MONTH - 1]} ${FIN_YEAR} · ${d.propiedad === "hostal" ? "Hostal" : "La Casa de la Primavera"}. Comisión de gestión: ${dgEur(d.comision_gestion)} (${d.comision_gestion_pct}% de ${dgEur(d.base_neta)} de ingresos netos).`, caja);
+  const tabla = emEl("table", "fin-table", null, caja);
+  const cuerpo = emEl("tbody", "", null, tabla);
+  d.partes.forEach(x => {
+    const tr = emEl("tr", "", null, cuerpo);
+    emEl("td", "", `${x.nombre}: ${x.concepto}`, tr);
+    emEl("td", "num", dgEur(x.importe), tr);
+  });
+  if (d.totales) {
+    emEl("div", "fin-channels-title", "Total por persona", caja);
+    const t2 = emEl("table", "fin-table", null, caja);
+    const c2 = emEl("tbody", "", null, t2);
+    d.totales.forEach(x => {
+      const tr = emEl("tr", "", null, c2);
+      emEl("td", "", x.nombre, tr);
+      emEl("td", "num", dgEur(x.importe), tr);
+    });
+  }
+  const btns = emEl("div", "dg-btns", null, caja);
+  const cerrar = emEl("button", "send", "Cerrar", btns);
+  cerrar.type = "button";
+  cerrar.onclick = dgCerrar;
+}
+
 // ── Envíos de emergencia ─────────────────────────────────
 // Guía de qué se puede enviar y en qué orden. Cada botón abre el asistente con la petición ya escrita (sin enviarla): el usuario
 // completa el nº de reserva y pulsa enviar. Nada sale solo: el asistente solo redacta y los correos llevan su botón «Enviar».
@@ -4005,7 +4086,8 @@ function renderFinance(d) {
     let boton = "";
     if (real) boton = `<button type="button" class="fin-toggle" onclick="setFinCostes('estimados')">Ver con costes estimados</button>`;
     else if (r2.facturas_mes) boton = `<button type="button" class="fin-toggle" onclick="setFinCostes('auto')">Ver con costes reales (${r2.facturas_mes} facturas)</button>`;
-    const blockademyRow = r2.comision_blockademy !== undefined
+    const conGestion = r2.comisiones_activas !== false;   // otros clientes no las ven por defecto
+    const blockademyRow = conGestion && r2.comision_blockademy !== undefined
       ? `<tr><td>Comisión Blockademy (${r2.comision_blockademy_pct}%)</td><td class="num">− ${fmtEUR(r2.comision_blockademy)}</td></tr>`
       : "";
     let detalleFijos = "";
@@ -4020,7 +4102,7 @@ function renderFinance(d) {
       <table class="fin-table">
         <tbody>
           <tr><td>Ingresos netos (tras comisión de portal)</td><td class="num">${fmtEUR(r.ingresos_netos)}</td></tr>
-          <tr><td>Comisión de gestión (${r2.comision_gestion_pct}%)</td><td class="num">− ${fmtEUR(r2.comision_gestion)}</td></tr>
+          ${conGestion ? `<tr><td>Comisión de gestión (${r2.comision_gestion_pct}% de los ingresos netos)</td><td class="num">− ${fmtEUR(r2.comision_gestion)}</td></tr>` : ""}
           ${blockademyRow}
           <tr><td>${costesFijosLabel}</td><td class="num">− ${fmtEUR(r2.costes_fijos)}</td></tr>
           <tr><td>${real ? "Limpieza y consumibles según facturas" : "Limpieza"}</td><td class="num">− ${fmtEUR(r2.costes_limpieza)}</td></tr>
@@ -4031,8 +4113,9 @@ function renderFinance(d) {
       </table>
       <div class="fin-summary" style="margin-top:10px">
         <div class="fin-card net"><div class="fin-label">Beneficio neto (propietario)</div><div class="fin-value">${fmtEUR(r2.beneficio_neto_propietario)}</div></div>
-        <div class="fin-card"><div class="fin-label">Gestión (${r2.comision_gestion_pct}%)</div><div class="fin-value">${fmtEUR(r2.comision_gestion)}</div></div>
+        ${conGestion ? `<div class="fin-card"><div class="fin-label">Gestión (${r2.comision_gestion_pct}%)</div><div class="fin-value">${fmtEUR(r2.comision_gestion)}</div></div>` : ""}
       </div>
+      ${conGestion ? `<button type="button" class="fin-toggle" onclick="pedirDesglose()">🔒 Desglose</button>` : ""}
       ${detalleFijos}
       ${boton}
       <div id="fin-note">${notaFuente}</div>`;

@@ -125,3 +125,7 @@ Registros de interacción respaldados por Firestore. **Login con Google Sign-In 
 - Sin entorno local hasta ahora — viene de trabajar 100% desde GitHub web UI, con commits directos a `main` que disparan auto-deploy en Render. Verificar en local con Claude Code antes de hacer push.
 - Antes de cualquier cambio con impacto en producción (sobre todo tokens de Beds24 o el flujo de check-in en vivo), avisar explícitamente y confirmar antes de hacer commit/push.
 - Ya hubo un incidente grave por intercambiar tokens de Beds24 — tratar cualquier cambio relacionado con `MOBILE_BEDS24_TOKEN` / `BEDS24_REFRESH_TOKEN` con máxima precaución y confirmación explícita.
+
+## Comisión de gestión y su desglose (2026-10-22, solo ALC Homes)
+- La comisión de gestión es el **15 % de los ingresos NETOS** (facturación ya sin las comisiones de los portales); la de Blockademy (5 %) sigue sobre los brutos. Solo se muestran en ALC Homes (`CLIENTES_CON_COMISIONES_GESTION` en `mobile_routes.py`; otros clientes no las ven por defecto).
+- Botón «🔒 Desglose» en Finanzas: pide el PIN `PIN_DESGLOSE_GESTION` (por defecto 1379, también al administrador; 5 fallos = bloqueo de 1 h) y `POST /mobile/finance/desglose` devuelve el reparto (`services/reparto.py`): Primavera, Ione 80 % y Adrián 20 %; Hostal, Ione 30 % de gestión, del 70 % restante Adrián 20 % y de lo que queda Ione 70 % y Conchi 30 %. Las cifras solo salen del servidor con el PIN.

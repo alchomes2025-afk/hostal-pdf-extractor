@@ -1438,8 +1438,12 @@ PCT_IMPUESTO_SOCIEDADES = 0.25
 # adicional de Blockademy SL — mismas tasas en las dos propiedades, según
 # confirma Adrián el 19/09/2026 (antes Primavera estaba al 20% sin
 # Blockademy; ahora ambas van a 15% + 5%, igual que el Hostal).
-PCT_COMISION_GESTION = 0.15
-PCT_COMISION_BLOCKADEMY = 0.05
+PCT_COMISION_GESTION = 0.15        # sobre la facturación NETA (ya sin las comisiones de los portales), confirmado por Adrián el 2026-10-22
+PCT_COMISION_BLOCKADEMY = 0.05     # sobre los ingresos brutos
+# Las comisiones de gestión y de Blockademy (y su desglose) son solo de ALC Homes y La Casa de la Primavera: otros clientes no las ven por defecto.
+CLIENTE_APP_ID = "alc-homes"
+CLIENTES_CON_COMISIONES_GESTION = ("alc-homes",)
+COMISIONES_GESTION_ACTIVAS = CLIENTE_APP_ID in CLIENTES_CON_COMISIONES_GESTION
 
 # Rentabilidad estimada del Hostal (pedido directamente por Adrián en esta
 # sesión, 18/09/2026 — sin recibos reales, son estimaciones a ajustar).
@@ -1654,8 +1658,8 @@ def _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, c
         est_limpieza = round(horas_limpieza_dia * HOSTAL_COSTE_LIMPIEZA_EUR_HORA * dias_mes, 2)
     else:
         return None
-    comision_gestion = round(resumen["ingresos_brutos"] * PCT_COMISION_GESTION, 2)
-    comision_blockademy = round(resumen["ingresos_brutos"] * PCT_COMISION_BLOCKADEMY, 2)
+    comision_gestion = round(resumen["ingresos_netos"] * PCT_COMISION_GESTION, 2) if COMISIONES_GESTION_ACTIVAS else 0.0
+    comision_blockademy = round(resumen["ingresos_brutos"] * PCT_COMISION_BLOCKADEMY, 2) if COMISIONES_GESTION_ACTIVAS else 0.0
     base = resumen["ingresos_netos"] - comision_gestion - comision_blockademy
 
     # Limpieza ESTIMADA según lo que haya contestado el Asesor Contable (por estancia, por horas, cuota fija, externa o sin limpieza) o, si no ha contestado, la
@@ -1696,6 +1700,7 @@ def _rentabilidad(property_id, resumen, dias_mes, ocupacion_total_pct, reales, c
     impuesto = round(max(0.0, beneficio_antes_impuestos) * PCT_IMPUESTO_SOCIEDADES, 2)
     estimado_antes = round(base - est_fijos - est_limpieza, 2)
     return {
+        "comisiones_activas":        COMISIONES_GESTION_ACTIVAS,
         "comision_gestion":          comision_gestion,
         "comision_gestion_pct":      round(PCT_COMISION_GESTION * 100),
         "comision_blockademy":       comision_blockademy,
@@ -1914,6 +1919,48 @@ def mobile_finance():
         return jsonify(_informe_financiero(property_id, month_str, costes))
     except InformeError as e:
         return jsonify({"ok": False, "error": str(e)}), e.status
+
+
+@mobile_bp.route("/finance/desglose", methods=["POST"])
+def mobile_finance_desglose():
+    """
+    Reparto de la comisión de gestión del mes entre las personas (ver services/reparto.py). Solo ALC Homes. Pide un PIN propio (`pin_desglose`,
+    config.PIN_DESGLOSE_GESTION) incluso al administrador; tras 5 PIN incorrectos se bloquea una hora. Las cifras se calculan aquí, no en la app:
+    sin el PIN no salen del servidor.
+
+    Cuerpo: {"propertyId": "349341", "month": "2026-09", "pin_desglose": "..."}
+    """
+    import hmac
+    from config import PIN_DESGLOSE_GESTION
+    from services import reparto
+    from services.limites import anotar, cantidad
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    if not COMISIONES_GESTION_ACTIVAS:
+        return jsonify({"ok": False, "error": "Esta función no está disponible"}), 404
+    data = request.get_json(silent=True) or {}
+    property_id, month_str = str(data.get("propertyId") or ""), str(data.get("month") or "")
+    if not property_id or not month_str:
+        return jsonify({"ok": False, "error": "Faltan propertyId o month"}), 400
+    if property_id == PROPERTY_ID and not _es_pin_admin():
+        return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
+    if cantidad("desglose-pin-fallos", 3600) >= 5:
+        return jsonify({"ok": False, "error": "Demasiados intentos: espera una hora"}), 429
+    recibido = str(data.get("pin_desglose") or "")
+    if not PIN_DESGLOSE_GESTION or not hmac.compare_digest(recibido.encode(), PIN_DESGLOSE_GESTION.encode()):
+        anotar("desglose-pin-fallos")
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 403
+    try:
+        informe = _informe_financiero(property_id, month_str)
+    except InformeError as e:
+        return jsonify({"ok": False, "error": str(e)}), e.status
+    rent = informe.get("rentabilidad") or {}
+    if not rent.get("comisiones_activas"):
+        return jsonify({"ok": False, "error": "Esta propiedad no tiene comisión de gestión"}), 404
+    return jsonify({"ok": True, "mes": month_str, "propiedad": "hostal" if property_id == PROPERTY_ID else "primavera",
+                    "base_neta": informe["resumen"]["ingresos_netos"], "comision_gestion": rent["comision_gestion"],
+                    "comision_gestion_pct": rent["comision_gestion_pct"],
+                    **reparto.desglose(property_id == PROPERTY_ID, rent["comision_gestion"])})
 
 
 @mobile_bp.route("/assistant", methods=["POST"])
