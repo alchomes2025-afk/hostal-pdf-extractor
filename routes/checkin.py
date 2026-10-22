@@ -12,9 +12,10 @@ from config import (
     API_TOKEN, TEST_TOKEN, ROOM_CONFIG, RPV_LINKS, TEST_BOOKINGS,
     BEDS24_API_BASE, BEDS24_PROPERTY_ID,
 )
-from services.acceso_enlace import crear_token, verificar_token
+from services import grupos_acceso
+from services.acceso_enlace import crear_token, crear_token_habitacion, interpretar_token, verificar_token
 from services.beds24 import (
-    buscar_booking_por_id, buscar_booking_por_ref, buscar_booking_por_nombre, reservas_del_grupo, reservas_encadenadas,
+    buscar_booking_por_id, buscar_booking_por_ref, buscar_booking_por_nombre, reservas_del_grupo, reservas_encadenadas, clave_grupo,
     get_beds24_access_token, _extraer_nombre_huesped_beds24,
 )
 from services.limites import ip_cliente, permitir
@@ -144,9 +145,10 @@ def check_in_status():
         return jsonify({"ok": False, "error": "demasiadas_peticiones"}), 429
 
     token_acceso = request.args.get("t", "").strip()
+    solo_habitacion = False   # enlace de UNA habitación de una reserva de varias: solo se ve esa habitación (services/grupos_acceso.py)
     if token_acceso:
         # Enlace personal: identifica la reserva sin teclear el nombre (el id sale de un token firmado).
-        book_id_token = verificar_token(token_acceso)
+        book_id_token, solo_habitacion = interpretar_token(token_acceso)
         booking = buscar_booking_por_id(book_id_token) if book_id_token else None
         if not booking:
             return jsonify({"ok": False, "error": "enlace_no_valido"}), 404
@@ -182,7 +184,7 @@ def check_in_status():
         "guest_name": _extraer_nombre_huesped_beds24(booking),
         "arrival": booking.get("arrival", ""), "departure": booking.get("departure", ""),
         "book_id": booking.get("id"),
-        "acceso": crear_token(booking.get("id")),   # enlace personal: la web lo recuerda para la próxima vez (None si no hay clave)
+        "acceso": (crear_token_habitacion if solo_habitacion else crear_token)(booking.get("id")),   # enlace personal: la web lo recuerda para la próxima vez (None si no hay clave)
     }
     respuesta = {**base, **estado}
 
@@ -190,10 +192,12 @@ def check_in_status():
     # Los campos de arriba son los de la habitación encontrada (así la web antigua sigue funcionando); `habitaciones` trae
     # TODAS, cada una con su propio estado, parte y código, y `estado_grupo` el más avanzado de todas.
     try:
-        miembros = reservas_del_grupo(booking)
+        miembros = [booking] if solo_habitacion else reservas_del_grupo(booking)   # con el enlace de una habitación no se enseña el resto del grupo
     except Exception as e:   # un fallo al buscar el resto de habitaciones nunca debe impedir el check-in de esta
         logger.error(f"[check-in] No se pudo consultar el grupo de habitaciones: {e}")
         miembros = [booking]
+    if solo_habitacion:
+        respuesta["solo_habitacion"] = True
     if len(miembros) > 1:
         habitaciones = []
         for m in miembros:
@@ -206,12 +210,16 @@ def check_in_status():
         if len(habitaciones) > 1:
             respuesta["habitaciones"] = habitaciones
             respuesta["estado_grupo"] = min((h["estado"] for h in habitaciones), key=lambda e: PRIORIDAD_ESTADOS.index(e) if e in PRIORIDAD_ESTADOS else 99)
+            try:   # quién ve los códigos: todos juntos, o cada habitación con su enlace (services/grupos_acceso.py)
+                grupos_acceso.aplicar_eleccion(respuesta, clave_grupo(booking))
+            except Exception as e:
+                logger.error(f"[check-in] No se pudo aplicar la elección del grupo: {e}")
 
     # ── Otras reservas vigentes del mismo huésped (reservas encadenadas) ──
     # Quien encadena dos reservas puede registrar la siguiente desde el día antes: la web le muestra las dos y le deja
     # pasar de una a otra con su enlace personal, sin quedarse atrapado en la que tiene recordada en el dispositivo.
     try:
-        otras = reservas_encadenadas(booking)
+        otras = [] if solo_habitacion else reservas_encadenadas(booking)   # las otras reservas del huésped no se enseñan con el enlace de una habitación
     except Exception as e:   # es un extra: nunca debe impedir el check-in
         logger.error(f"[check-in] No se pudieron buscar las otras reservas del huésped: {e}")
         otras = []
@@ -362,3 +370,35 @@ def diagnostico_checkin():
         "ejemplos":      encontrados,
         "no_disponibles": no_encontrados or None,
     })
+
+
+@checkin_bp.route("/grupo-acceso", methods=["POST"])
+def grupo_acceso():
+    """
+    POST /grupo-acceso  { "t": "<token personal de la reserva>", "modo": "juntos" | "separados" }
+
+    La persona que reservó varias habitaciones elige cómo se reparten los códigos (ver services/grupos_acceso.py). Solo vale el token de la
+    RESERVA (no el de una habitación) y solo para reservas de más de una habitación. Responde {"ok": true, "modo": ...}.
+    """
+    if not permitir([(f"grupo-acceso:{ip_cliente()}", 30, 3600)]):
+        return jsonify({"ok": False, "error": "demasiadas_peticiones"}), 429
+    data = request.get_json(silent=True) or {}
+    modo = data.get("modo")
+    if modo not in grupos_acceso.MODOS:
+        return jsonify({"ok": False, "error": "modo_no_valido"}), 400
+    book_id, solo_habitacion = interpretar_token(str(data.get("t") or "").strip())
+    if not book_id or solo_habitacion:
+        return jsonify({"ok": False, "error": "enlace_no_valido"}), 404
+    booking = buscar_booking_por_id(book_id)
+    if not booking:
+        return jsonify({"ok": False, "error": "enlace_no_valido"}), 404
+    try:
+        miembros = reservas_del_grupo(booking)
+    except Exception as e:
+        logger.error(f"[grupo-acceso] No se pudo consultar el grupo: {e}")
+        return jsonify({"ok": False, "error": "error_interno"}), 500
+    if len(miembros) < 2:
+        return jsonify({"ok": False, "error": "no_es_un_grupo"}), 400
+    if not grupos_acceso.guardar(clave_grupo(booking), modo):
+        return jsonify({"ok": False, "error": "no_guardado"}), 503
+    return jsonify({"ok": True, "modo": modo})

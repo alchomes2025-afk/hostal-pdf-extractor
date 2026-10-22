@@ -60,6 +60,36 @@ def verificar_token(token):
     return book_id
 
 
+def _firma_hab(book_id):
+    return _b64(hmac.new(CHECKIN_LINK_SECRET.encode(), f"checkin-room:{book_id}".encode(), hashlib.sha256).digest()[:16])
+
+
+def crear_token_habitacion(book_id):
+    """Token del enlace de UNA habitación de una reserva de varias: abre solo esa habitación (ver services/grupos_acceso.py).
+    Lleva la «h» delante del id y otro dominio de firma, así que un token de habitación nunca vale como token de la reserva ni al revés."""
+    if not habilitado() or book_id in (None, ""):
+        return None
+    book_id = str(book_id)
+    return f"{_b64(('h' + book_id).encode())}.{_firma_hab(book_id)}"
+
+
+def interpretar_token(token):
+    """(id de reserva, solo_habitacion) si el token es auténtico, de la reserva (False) o de una habitación (True); (None, False) si no."""
+    book_id = verificar_token(token)
+    if book_id:
+        return book_id, False
+    if not habilitado() or not isinstance(token, str) or token.count(".") != 1 or len(token) > 120:
+        return None, False
+    parte_id, firma = token.split(".")
+    try:
+        crudo = base64.urlsafe_b64decode(parte_id + "=" * (-len(parte_id) % 4)).decode()
+    except (ValueError, UnicodeDecodeError):
+        return None, False
+    if not crudo.startswith("h") or not crudo[1:].isdigit() or not hmac.compare_digest(firma, _firma_hab(crudo[1:])):
+        return None, False
+    return crudo[1:], True
+
+
 def url_checkin(book_id=None, idioma=None):
     """Enlace a la web de check-in: el personal de esa reserva si se puede (con el idioma del huésped), o el general."""
     token = crear_token(book_id)
