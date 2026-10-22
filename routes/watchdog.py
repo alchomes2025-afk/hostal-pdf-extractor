@@ -3,6 +3,7 @@ routes/watchdog.py — Punto de control completo del sistema: variables de
 entorno, Beds24, RPV, Groq, Firebase, CallMeBot y Firestore.
 """
 import logging
+import time
 import requests
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -16,7 +17,7 @@ from config import (
     CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
     GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI,
 )
-from services.beds24 import get_beds24_access_token
+from services.beds24 import get_beds24_access_token, _token_cache as _token_cache_beds24
 from services.rpv import comprobar_cuentas, TTL_SEGUNDO_PLANO
 from services.ical_beds24 import comprobar_feeds_ical
 from services.whatsapp import alerta
@@ -74,6 +75,62 @@ def _watchdog_debe_avisar(problemas):
         logger.error(f"[watchdog] Error guardando estado en Firestore: {e}")
 
     return (debe_avisar, es_recuperacion)
+
+
+INTENTOS_BEDS24 = 2          # el watchdog corre dentro de un worker con timeout de 60 s: pocos intentos y cortos
+PAUSA_BEDS24 = 2             # segundos entre intentos
+TIMEOUT_BEDS24 = (5, 10)     # (conexión, lectura)
+
+# Textos FIJOS (sin el error de la excepción): la firma de deduplicación del watchdog depende de la descripción, y un
+# texto como «Connection to beds24.com timed out … at 0x77ec52…» cambia en cada fallo y repetiría el WhatsApp.
+_BEDS24_CREDENCIAL = ("critico", "Beds24 rechaza las credenciales (BEDS24_REFRESH_TOKEN)",
+                      "Verificar BEDS24_REFRESH_TOKEN en Render — puede haber caducado o haberse revocado")
+_BEDS24_LIMITADO = ("warning", "Beds24 está limitando peticiones (429)",
+                    "No hay que tocar nada: el backend reintenta solo. Si dura más de una hora, revisar el volumen de llamadas")
+_BEDS24_SIN_RESPUESTA = ("warning", "Beds24 no responde (no contesta a tiempo o devuelve error del servidor)",
+                         "Suele ser un fallo puntual de Beds24 o de la red: no hay que tocar nada y se avisa cuando se recupere. "
+                         "Si dura más de una hora, mirar el estado de Beds24 y, solo entonces, BEDS24_REFRESH_TOKEN en Render")
+
+
+def _clasificar_fallo_beds24(error):
+    """Problema del watchdog para un error al hablar con Beds24: credenciales (401/403), límite (429) o sin respuesta."""
+    codigo = getattr(getattr(error, "response", None), "status_code", None)
+    if codigo in (400, 401, 403):
+        return _BEDS24_CREDENCIAL
+    if codigo == 429:
+        return _BEDS24_LIMITADO
+    return _BEDS24_SIN_RESPUESTA
+
+
+def _comprobar_beds24():
+    """
+    Prueba real de Beds24: token y 1 consulta de reservas. Un fallo de red puntual (timeout, 5xx) se reintenta antes de
+    darlo por malo, y solo un rechazo de credenciales es «crítico» con la acción de revisar el refresh token.
+    Devuelve (resultado_para_el_informe, problema_o_None).
+    """
+    ultimo_error = None
+    for intento in range(INTENTOS_BEDS24):
+        try:
+            tok = get_beds24_access_token()
+            r = requests.get(
+                f"{BEDS24_API_BASE}/bookings",
+                headers={"token": tok, "accept": "application/json"},
+                params={"propertyId": BEDS24_PROPERTY_ID, "arrivalFrom": hoy_madrid().isoformat(),
+                        "arrivalTo": (hoy_madrid() + timedelta(days=1)).isoformat()},
+                timeout=TIMEOUT_BEDS24,
+            )
+            r.raise_for_status()
+            return {"ok": True, "reservas_hoy_mañana": len(r.json().get("data", [])), "intentos": intento + 1}, None
+        except Exception as e:
+            ultimo_error = e
+            if _clasificar_fallo_beds24(e) is _BEDS24_CREDENCIAL:
+                # puede ser solo el token guardado en memoria, que Beds24 haya anulado: se descarta y se pide otro
+                _token_cache_beds24.update({"token": None, "expira": 0.0})
+                continue
+            if intento < INTENTOS_BEDS24 - 1:
+                time.sleep(PAUSA_BEDS24)
+    logger.warning(f"[watchdog] Beds24 falla tras {INTENTOS_BEDS24} intento(s): {ultimo_error}")
+    return {"ok": False, "error": str(ultimo_error)}, _clasificar_fallo_beds24(ultimo_error)
 
 
 @watchdog_bp.route("/watchdog", methods=["GET", "POST"])
@@ -146,23 +203,9 @@ def watchdog():
             "Añadir en Render → Environment (PIN_HABITACION_2, PIN_HABITACION_3, PIN_DOBLE, PIN_DELUXE)"))
 
     # ── 2. Beds24 ─────────────────────────────────────────────────────────
-    try:
-        tok = get_beds24_access_token()
-        # Prueba real: obtener 1 reserva
-        r = requests.get(
-            f"{BEDS24_API_BASE}/bookings",
-            headers={"token": tok, "accept": "application/json"},
-            params={"propertyId": BEDS24_PROPERTY_ID, "arrivalFrom": hoy_madrid().isoformat(),
-                    "arrivalTo": (hoy_madrid() + timedelta(days=1)).isoformat()},
-            timeout=10,
-        )
-        r.raise_for_status()
-        resultados["beds24"] = {"ok": True, "reservas_hoy_mañana": len(r.json().get("data", []))}
-    except Exception as e:
-        resultados["beds24"] = {"ok": False, "error": str(e)}
-        problemas.append(("critico",
-            f"Beds24 no responde: {e}",
-            "Verificar BEDS24_REFRESH_TOKEN en Render — puede haber caducado"))
+    resultados["beds24"], problema_beds24 = _comprobar_beds24()
+    if problema_beds24:
+        problemas.append(problema_beds24)
 
     # ── 3. RPV API (una consulta por cuenta de RPV) ───────────────────────
     # Va por services/rpv.comprobar_cuentas, con la misma copia en memoria que
