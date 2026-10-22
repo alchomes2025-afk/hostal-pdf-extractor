@@ -26,6 +26,7 @@ from services.fechas import hoy_madrid
 from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
 from services.registro_completado_avisos import enviar_avisos_registro_completado
 from services.sin_mensajeria_avisos import avisar_reservas_sin_mensajeria
+from services.solapes import avisar_solapes
 from services.rpv_sin_importar import avisar_reservas_sin_importar
 from services.resumen_programado import enviar_resumenes_programados
 
@@ -382,6 +383,14 @@ def watchdog():
         avisar_reservas_sin_mensajeria()
     except Exception as e:
         logger.error(f"[watchdog] Error avisando de reservas sin mensajería: {e}")
+
+    # ── 14. Reservas que se pisan (posible sobreventa) ─────────────────────
+    # Dos reservas activas de la misma habitación con noches en común: una sobreventa que Beds24 sí ha registrado.
+    # Se comprueba como mucho cada hora (ver services/solapes.py); dedupe por par de reservas en Firestore.
+    try:
+        avisar_solapes()
+    except Exception as e:
+        logger.error(f"[watchdog] Error comprobando solapes de reservas: {e}")
 
     # ── Resumen y alerta WhatsApp (con deduplicación) ─────────────────────
     n_criticos = sum(1 for nivel, _, _ in problemas if nivel == "critico")

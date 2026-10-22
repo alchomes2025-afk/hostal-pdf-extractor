@@ -567,3 +567,17 @@ def diag_ip():
     nombres = ("CF-Connecting-IP", "True-Client-IP", "X-Forwarded-For", "X-Real-IP")
     return jsonify({"ok": True, "ip_usada": ip_cliente(), "remote_addr": request.remote_addr,
                     "cabeceras": {n: request.headers.get(n) for n in nombres}}), 200
+
+
+@debug_bp.route("/diag-solapes", methods=["GET"])
+def diag_solapes():
+    """Diagnóstico de solo lectura: reservas activas de la misma habitación que se pisan ahora mismo (posible sobreventa),
+    sin enviar ningún aviso. Uso: /diag-solapes?token=<TOKEN>"""
+    from services.solapes import calcular_solapes
+    if request.args.get("token", "") not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    try:
+        solapes = calcular_solapes()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Beds24: {e}"}), 502
+    return jsonify({"ok": True, "total": len(solapes), "solapes": solapes}), 200
