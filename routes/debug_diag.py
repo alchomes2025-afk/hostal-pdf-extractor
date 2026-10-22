@@ -510,7 +510,7 @@ def diag_contacto():
     5 días a +60 (ambas propiedades), para decidir cuándo un huésped no puede recibir mensajes por la plataforma.
     Con `ref` devuelve además el JSON crudo de la reserva cuyo id, apiReference o referencia lo contenga.
 
-    Uso: /diag-contacto?token=<TOKEN>[&canal=expedia][&ref=2577279377]
+    Uso: /diag-contacto?token=<TOKEN>[&canal=expedia][&ref=2577279377][&dias=300]  (dias: hasta cuántos días por delante)
     """
     token = request.args.get("token", "")
     if token not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
@@ -523,20 +523,33 @@ def diag_contacto():
         return jsonify({"ok": False, "error": f"Beds24 auth: {e}"}), 500
     hoy = hoy_madrid()
     reservas, crudas, errores = [], [], []
+    try:   # `dias`: hasta cuántos días por delante (por defecto 60, máximo 400); en trozos de 30 días con limit 500
+        dias = max(1, min(int(request.args.get("dias", "60")), 400))
+    except ValueError:
+        dias = 60
     for property_id in BEDS24_PROPERTY_IDS:
-        try:
-            resp = requests.get(
-                f"{BEDS24_API_BASE}/bookings",
-                headers={"token": access_token, "accept": "application/json"},
-                params={"propertyId": property_id, "includePersonalInfo": "true",
-                        "arrivalFrom": (hoy - timedelta(days=5)).isoformat(),
-                        "arrivalTo": (hoy + timedelta(days=60)).isoformat()},
-                timeout=20,
-            )
-            resp.raise_for_status()
-            data = resp.json().get("data", [])
-        except Exception as e:
-            errores.append(f"property {property_id}: {e}")
+        data, vistos, inicio, fallo = [], set(), hoy - timedelta(days=5), False
+        while inicio <= hoy + timedelta(days=dias):
+            fin = min(inicio + timedelta(days=30), hoy + timedelta(days=dias))
+            try:
+                resp = requests.get(
+                    f"{BEDS24_API_BASE}/bookings",
+                    headers={"token": access_token, "accept": "application/json"},
+                    params={"propertyId": property_id, "includePersonalInfo": "true", "limit": 500,
+                            "arrivalFrom": inicio.isoformat(), "arrivalTo": fin.isoformat()},
+                    timeout=20,
+                )
+                resp.raise_for_status()
+                for b in resp.json().get("data", []):
+                    if b.get("id") not in vistos:
+                        vistos.add(b.get("id"))
+                        data.append(b)
+            except Exception as e:
+                errores.append(f"property {property_id} {inicio}→{fin}: {e}")
+                fallo = True
+                break
+            inicio = fin + timedelta(days=1)
+        if fallo and not data:
             continue
         for b in data:
             guest = b.get("guest") or {}
@@ -548,6 +561,7 @@ def diag_contacto():
                 "email": guest.get("email") or b.get("email"),
                 "telefono": guest.get("phone") or b.get("phone"), "movil": guest.get("mobile") or b.get("mobile"),
                 "pais": guest.get("country") or b.get("country"),
+                "creada": b.get("bookingTime"), "modificada": b.get("modifiedTime"), "cancelada": b.get("cancelTime"),
             }
             if ref and ref in str(b).lower():
                 crudas.append(b)
