@@ -38,10 +38,10 @@ from datetime import date, datetime, timedelta, timezone
 
 import requests
 
-from config import GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, PIN_ENVIO_CODIGOS
+from config import GROQ_API_URL, GROQ_MODEL_FALL, GROQ_MODEL_PRI, PIN_ENVIO_CODIGOS, ROOM_CONFIG
 from services.enlace_parte import ErrorEnlace, redactar_enlace_parte
 from services.groq_claves import clave_gestion
-from routes.acceso import ErrorCodigos, miembros_del_grupo, redactar_codigos, _EMAIL as EMAIL_VALIDO
+from routes.acceso import ErrorCodigos, miembros_del_grupo, redactar_codigos, reparto_separado, _EMAIL as EMAIL_VALIDO
 from services.beds24 import buscar_booking_por_id
 from services.email_send import es_email_relay_ota
 from services.fechas import hoy_madrid
@@ -752,7 +752,9 @@ def borrador_codigos(reserva, email, idioma):
     booking = buscar_booking_por_id(reserva)
     if not booking:
         raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
-    miembros = miembros_del_grupo(booking)
+    todos = miembros_del_grupo(booking)
+    separado = reparto_separado(booking, todos)
+    miembros = [booking] if separado else todos   # con «códigos por habitación» cada habitación lleva su propio correo
     try:
         asunto, cuerpo, habitacion = redactar_codigos(booking, idioma, miembros)
     except ErrorCodigos:
@@ -760,7 +762,10 @@ def borrador_codigos(reserva, email, idioma):
                                else "Esa habitación no tiene código de acceso configurado")
     huesped = " ".join(x for x in (booking.get("firstName"), booking.get("lastName")) if x).strip()
     return {"reserva": reserva, "email": email, "idioma": idioma, "asunto": asunto, "cuerpo": cuerpo, "habitacion": habitacion,
-            "huesped": huesped, "llegada": booking.get("arrival"), "salida": booking.get("departure"), "habitaciones": len(miembros)}
+            "huesped": huesped, "llegada": booking.get("arrival"), "salida": booking.get("departure"), "habitaciones": len(miembros),
+            "reparto": "separados" if separado else None,
+            "otras_habitaciones": [{"reserva": str(m.get("id")), "habitacion": ROOM_CONFIG.get(str(m.get("roomId", "")), {}).get("nombre", "")}
+                                   for m in todos if str(m.get("id")) != str(booking.get("id"))] if separado else []}
 
 
 def _t_preparar_correo_codigos(a, ctx):
@@ -771,7 +776,11 @@ def _t_preparar_correo_codigos(a, ctx):
         ctx["borradores"].append(borrador)
         return {"borrador_preparado": True, "para": borrador["email"], "huesped": borrador["huesped"], "habitacion": borrador["habitacion"],
                 "llegada": borrador["llegada"], "salida": borrador["salida"], "idioma": borrador["idioma"],
-                "nota": "NO se ha enviado nada. Responde al usuario en una frase: «Aquí tienes el borrador: revísalo y pulsa Enviar.»"}
+                "nota": "NO se ha enviado nada. Responde al usuario en una frase: «Aquí tienes el borrador: revísalo y pulsa Enviar.»" + (
+                    " AVISO: esta reserva es de varias habitaciones y el titular eligió repartir los códigos POR HABITACIÓN: este correo lleva solo los de esta habitación. "
+                    "Dile en otra frase que cada persona necesita su propio correo y ofrécele preparar el de las otras habitaciones (otras_habitaciones: número de reserva de cada una)."
+                    if borrador.get("reparto") else ""),
+                "otras_habitaciones": borrador.get("otras_habitaciones") or []}
     # Sin PIN de administrador NO se elabora el borrador: la app pide antes el PIN de seguridad (cuadro propio, nunca por el chat) y solo
     # entonces el servidor consulta la reserva y devuelve el borrador (POST /mobile/assistant/preparar-codigos).
     reserva, email, idioma = validar_destino(a.get("reserva"), a.get("email"), a.get("idioma"))
@@ -789,7 +798,21 @@ def _t_enlace_parte_emergencia(a, ctx):
     booking = buscar_booking_por_id(reserva)
     if not booking:
         raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
-    miembros = miembros_del_grupo(booking)
+    todos = miembros_del_grupo(booking)
+    if reparto_separado(booking, todos):
+        # El titular eligió repartir por habitación: un mensaje por habitación, cada uno con SU enlace de RPV, fechas y referencia.
+        try:
+            mensajes = []
+            for m in sorted(todos, key=lambda b: int(b.get("id") or 0)):
+                texto, habitacion, _enlace = redactar_enlace_parte(m, a.get("idioma"), [m])
+                mensajes.append({"reserva": str(m.get("id")), "habitacion": habitacion, "mensaje": texto})
+        except ErrorEnlace as e:
+            raise ErrorHerramienta(str(e))
+        return {"reparto": "separados", "habitaciones": len(mensajes), "mensajes": mensajes,
+                "nota": "NO se ha enviado nada. El titular eligió repartir por habitación: cada persona recibe SOLO su mensaje. Pega cada «mensaje» TAL CUAL (sin cambiar una palabra), "
+                        "uno detrás de otro, indicando antes de cada uno la habitación, para que el usuario copie cada uno a su destinatario. Añade una frase: cuando el parte de cada "
+                        "habitación conste como completado (herramienta partes) ya se pueden enviar sus códigos."}
+    miembros = todos
     try:
         texto, habitacion, enlace = redactar_enlace_parte(booking, a.get("idioma"), miembros)
     except ErrorEnlace as e:
@@ -957,7 +980,8 @@ def _system(ctx):
                   "Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario y el idioma (es o en): si falta algo, haz UNA pregunta corta. "
                   "Después responde solo «Introduce el PIN de seguridad.»")
     regla7 += (" EMERGENCIA SIN PARTE: si el huésped aún no ha hecho el parte de viajeros y nada funciona, primero usa enlace_parte_emergencia (mensaje para copiar con el enlace de RPV de su habitación); "
-               "los códigos solo se mandan cuando el parte conste como completado (herramienta partes).")
+               "los códigos solo se mandan cuando el parte conste como completado (herramienta partes). Si la reserva es de varias habitaciones y su titular eligió repartir los códigos por habitación, "
+               "cada habitación va con su propio mensaje y su propio correo: las herramientas te lo indican.")
     hostal = ", ".join(h["nombre"] for h in _habitaciones(mr.PROPERTY_ID))
     return f"""Eres el asistente de la app de gestión de ALC Homes. Ayudas al personal y a la propiedad a entender sus reservas, ocupación y finanzas, y puedes dibujar gráficos. Hoy es {DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}.
 

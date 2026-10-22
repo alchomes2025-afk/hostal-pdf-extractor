@@ -17,9 +17,10 @@ import re
 from flask import Blueprint, jsonify, request
 
 from config import API_TOKEN, ROOM_CONFIG, TEST_TOKEN
+from services import grupos_acceso
 from services.acceso_correos import correo_codigos, correo_codigos_grupo, correo_enlace, correo_no_localizada
 from services.acceso_enlace import IDIOMAS, habilitado, url_checkin
-from services.beds24 import buscar_booking_por_id, buscar_booking_por_nombre, buscar_booking_por_ref, reservas_del_grupo
+from services.beds24 import buscar_booking_por_id, buscar_booking_por_nombre, buscar_booking_por_ref, clave_grupo, reservas_del_grupo
 from services.email_send import enviar_email, es_email_relay_ota
 from services.limites import ip_cliente, permitir
 
@@ -93,6 +94,22 @@ def miembros_del_grupo(booking):
         return [booking]
 
 
+def reparto_separado(booking, miembros):
+    """True si es una reserva de varias habitaciones cuyo titular eligió repartir los códigos POR HABITACIÓN (services/grupos_acceso.py): cada
+    persona recibe solo lo suyo, así que las herramientas de emergencia no deben juntar las habitaciones en un mismo mensaje o correo."""
+    try:
+        return len(miembros) > 1 and grupos_acceso.obtener(clave_grupo(booking)) == "separados"
+    except Exception as e:
+        logger.error(f"[acceso] No se pudo leer el reparto del grupo: {e}")
+        return False
+
+
+def miembros_para_envio(booking):
+    """Las habitaciones que van en un mismo envío de emergencia: todas las del grupo, o solo la pedida si el titular eligió repartir por habitación."""
+    miembros = miembros_del_grupo(booking)
+    return [booking] if reparto_separado(booking, miembros) else miembros
+
+
 def redactar_codigos(booking, idioma, miembros=None):
     """(asunto, cuerpo, nombre de la habitación) del correo de emergencia con los códigos de acceso de esa reserva. Si es de VARIAS habitaciones
     (`miembros`, ver miembros_del_grupo) el correo lleva los códigos de TODAS y el nombre es «A + B». Si a alguna le falta el código, no se
@@ -138,7 +155,7 @@ def enviar_codigos():
     if not booking:
         return jsonify({"ok": False, "error": "reserva_no_encontrada"}), 404
     try:
-        asunto, cuerpo, _habitacion = redactar_codigos(booking, idioma, miembros_del_grupo(booking))
+        asunto, cuerpo, _habitacion = redactar_codigos(booking, idioma, miembros_para_envio(booking))
     except ErrorCodigos as e:
         return jsonify({"ok": False, "error": e.codigo}), e.status
     try:

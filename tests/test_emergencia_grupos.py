@@ -98,5 +98,45 @@ class Herramientas(unittest.TestCase):
             self.assertEqual(acceso.miembros_del_grupo(H3), [H3])
 
 
+class Separados(unittest.TestCase):
+    """El titular eligió repartir por habitación: cada habitación con su propio mensaje y su propio correo."""
+
+    def setUp(self):
+        for o, n, v in ((asistente, "buscar_booking_por_id", lambda i: H3), (asistente, "miembros_del_grupo", lambda b: GRUPO),
+                        (acceso.grupos_acceso, "obtener", lambda m: "separados")):
+            p = mock.patch.object(o, n, v)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_el_mensaje_del_parte_sale_uno_por_habitacion(self):
+        res = asistente.ejecutar_herramienta("enlace_parte_emergencia", json.dumps({"reserva": "100", "idioma": "es"}), {"es_admin": False, "borradores": []})
+        self.assertEqual(res["reparto"], "separados")
+        self.assertEqual(len(res["mensajes"]), 3)
+        for m in res["mensajes"]:
+            enlaces = [l for l in enlace_parte.RPV_LINKS.values() if l in m["mensaje"]]
+            self.assertEqual(len(enlaces), 1)                    # cada mensaje lleva SOLO el enlace de su habitación
+            self.assertIn(f"Referencia: {m['reserva']}" if "Referencia" in m["mensaje"] else m["reserva"], m["mensaje"])
+
+    def test_el_correo_de_codigos_lleva_solo_la_habitacion_pedida(self):
+        b = asistente.borrador_codigos("100", "uno@empresa.com", "es")
+        self.assertEqual((b["habitaciones"], b["reparto"], b["habitacion"]), (1, "separados", "Cala del Moraig"))
+        self.assertIn("213456", b["cuerpo"])
+        self.assertNotIn("654321", b["cuerpo"])
+        self.assertNotIn("777777", b["cuerpo"])
+        self.assertEqual({o["reserva"] for o in b["otras_habitaciones"]}, {"101", "102"})
+
+    def test_la_herramienta_avisa_de_que_hacen_falta_mas_correos(self):
+        res = asistente.ejecutar_herramienta("preparar_correo_codigos", json.dumps({"reserva": "100", "email": "uno@empresa.com", "idioma": "es"}),
+                                             {"es_admin": True, "borradores": []})
+        self.assertIn("POR HABITACIÓN", res["nota"])
+        self.assertEqual(len(res["otras_habitaciones"]), 2)
+
+    def test_juntos_o_sin_elegir_siguen_igual(self):
+        with mock.patch.object(acceso.grupos_acceso, "obtener", lambda m: "juntos"):
+            b = asistente.borrador_codigos("100", "uno@empresa.com", "es")
+        self.assertEqual((b["habitaciones"], b["reparto"], b["otras_habitaciones"]), (3, None, []))
+        self.assertIn("654321", b["cuerpo"])
+
+
 if __name__ == "__main__":
     unittest.main()
