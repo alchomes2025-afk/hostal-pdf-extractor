@@ -64,17 +64,17 @@ class Rentabilidad(unittest.TestCase):
         r = mr._rentabilidad(mr.PROPERTY_ID_CASA_PRIMAVERA, RESUMEN, 31, 0.0, None)
         self.assertEqual(r["origen_costes"], "estimados")
         self.assertEqual((r["costes_fijos"], r["costes_limpieza"], r["costes_otros"]), (round(3100 / 365 * 31, 2), 345.0, 0.0))
-        self.assertEqual(r["beneficio_antes_impuestos"], round(650 - round(3100 / 365 * 31, 2) - 345.0, 2))
+        self.assertEqual(r["beneficio_antes_impuestos"], round(672.5 - round(3100 / 365 * 31, 2) - 345.0, 2))
 
     def test_con_facturas_manda_lo_real_y_se_guarda_la_estimacion_para_comparar(self):
         r = mr._rentabilidad(mr.PROPERTY_ID_CASA_PRIMAVERA, RESUMEN, 31, 0.0, self._reales())
         self.assertEqual(r["origen_costes"], "reales")
         self.assertEqual((r["costes_fijos"], r["costes_limpieza"], r["costes_otros"]), (100.0, 80.0, 30.0))
-        self.assertEqual(r["beneficio_antes_impuestos"], 440.0)                              # 850 − 150 (gestión) − 50 (Blockademy) − 210
-        self.assertEqual(r["impuesto_sociedades"], 110.0)
-        self.assertEqual(r["beneficio_neto_propietario"], 330.0)
+        self.assertEqual(r["beneficio_antes_impuestos"], 462.5)                              # 850 − 127,5 (15 % de los netos) − 50 (Blockademy) − 210
+        self.assertEqual(r["impuesto_sociedades"], round(462.5 * 0.25, 2))
+        self.assertEqual(r["beneficio_neto_propietario"], round(462.5 - round(462.5 * 0.25, 2), 2))
         self.assertEqual(r["facturas_mes"], 4)
-        self.assertEqual(r["estimado"]["beneficio_antes_impuestos"], round(650 - round(3100 / 365 * 31, 2) - 345.0, 2))
+        self.assertEqual(r["estimado"]["beneficio_antes_impuestos"], round(672.5 - round(3100 / 365 * 31, 2) - 345.0, 2))
 
     def test_se_puede_forzar_estimados(self):
         r = mr._rentabilidad(mr.PROPERTY_ID_CASA_PRIMAVERA, RESUMEN, 31, 0.0, self._reales(), costes="estimados")
