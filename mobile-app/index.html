@@ -799,6 +799,7 @@ body.sin-registro #btn-history{display:none!important}
     <div id="fx-head"><span id="fx-title">🧾 Facturas</span><span><button type="button" onclick="ayudaPantalla('fx')" title="Preguntar al asistente sobre esta pantalla">💬</button><button type="button" onclick="closeFacturas()" title="Cerrar">✕</button></span></div>
     <div id="fx-body"></div>
     <input type="file" id="fx-file" accept="application/pdf,image/*,.pdf,.zip,application/zip,application/x-zip-compressed,.rar,.7z,.csv,.xls,.xlsx,.txt,text/csv" multiple style="display:none">
+    <input type="file" id="fx-camara" accept="image/*" capture="environment" style="display:none">
     <input type="file" id="fx-extracto" accept=".csv,.xls,.xlsx,.pdf,.txt,text/csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none">
   </div>
   <div id="dg-fondo"><div id="dg-caja"></div></div>
@@ -2792,6 +2793,8 @@ async function fxLista() {
   }).catch(() => {});
   const subir = fxEl("button", "fx-big", "＋ Subir factura (foto o PDF)", body);
   subir.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
+  const foto = fxEl("button", "fx-big", "📷 Hacer foto a un ticket o factura", body);   // abre la cámara del móvil; la foto entra en el mismo flujo de lectura y revisión
+  foto.onclick = () => { $("#fx-camara").value = ""; $("#fx-camara").click(); };
   fxEl("div", "fx-cat", "Puedes elegir varias facturas a la vez o un archivo .zip con todas.", body);
   if (FX.aviso) { fxEl("div", "fx-note ok", FX.aviso, body); FX.aviso = ""; }
   const extr = fxEl("button", "fx-sec", "📑 Cotejar con el extracto bancario", body);
@@ -3115,7 +3118,7 @@ async function fxExpandir(files) {
   return {docs, avisos};
 }
 
-$("#fx-file").addEventListener("change", async (e) => {
+async function fxArchivosElegidos(e) {
   const files = [...(e.target.files || [])];
   if (!files.length) return;
   const body = $("#fx-body");
@@ -3140,7 +3143,9 @@ $("#fx-file").addEventListener("change", async (e) => {
   }
   FX.lote = {items: docs.map(d => ({archivo: d, estado: "pendiente"})), avisos, cancelado: false, fuera, extractos, propiedad: String(FIN_PROPERTY)};
   await fxLeerLote();
-});
+}
+$("#fx-file").addEventListener("change", fxArchivosElegidos);
+$("#fx-camara").addEventListener("change", fxArchivosElegidos);
 
 // Huella SHA-256 del contenido que se sube (la misma que calcula el servidor): sirve para reconocer lo ya guardado.
 async function fxHuella(base64) {
@@ -3491,6 +3496,8 @@ function fxResultadoCotejo(d) {
   if (res.abonos_sin_factura) fxEl("div", "fx-cat", `Además hay ${res.abonos_sin_factura} cobros en el banco (${fxEur(res.importe_abonos_sin_factura)}) sin factura emitida asociada: reservas, liquidaciones…`, body);
   const mas = fxEl("button", "fx-sec", "Subir más facturas", body);
   mas.onclick = () => { $("#fx-file").value = ""; $("#fx-file").click(); };
+  const masFoto = fxEl("button", "fx-sec", "📷 Hacer otra foto", body);
+  masFoto.onclick = () => { $("#fx-camara").value = ""; $("#fx-camara").click(); };
   const fin = fxEl("button", "fx-sec", "Terminar", body);
   fin.onclick = () => { FX.lote = null; fxLista(); };
 }
