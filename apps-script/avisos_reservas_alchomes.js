@@ -3,7 +3,8 @@
  *
  * Va en el proyecto «ALC Homes — Orquestador» (cuenta alchomes2025@gmail.com), que es donde llegan los avisos de las
  * plataformas. SOLO LEE: nunca responde, reenvía ni envía correos. Cada pasada manda al backend los avisos nuevos
- * (POST /reserva-correo); el backend los analiza y el watchdog los coteja con Beds24 (services/reservas_correo.py).
+ * (POST /reserva-correo), más los correos «<canal> returned an error message for … roomId …» con los que Beds24 avisa de errores
+ * de canal; el backend los analiza y el watchdog los coteja con Beds24 (services/reservas_correo.py).
  *
  * Instalación:
  *  1. Pegar este archivo como un archivo nuevo del proyecto (no sustituye a ejecutarWatchdog).
@@ -30,7 +31,7 @@ function revisarAvisosReserva() {
     var conocidos = {};
     vistos.forEach(function (id) { conocidos[id] = true; });
 
-    var hilos = GmailApp.search("from:(" + AVISOS_REMITENTES + ") newer_than:" + AVISOS_DIAS + "d", 0, 50);
+    var hilos = GmailApp.search("(from:(" + AVISOS_REMITENTES + ") OR from:(noreply_htl@trip.com) OR subject:\"returned an error message\") newer_than:" + AVISOS_DIAS + "d", 0, 50);
     var nuevos = [];
     hilos.forEach(function (hilo) {
       hilo.getMessages().forEach(function (m) {

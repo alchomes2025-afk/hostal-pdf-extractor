@@ -170,7 +170,7 @@ class Flujo(unittest.TestCase):
         return rc.verificar_pendientes(ahora=ahora, leer_beds24=lambda d, h: reservas)
 
     def test_recibir_guarda_pendiente_sin_el_cuerpo_y_no_repite(self):
-        self.assertEqual(rc.recibir_avisos([self.mensaje()]), {"nuevos": 1, "sin_entender": 0, "repetidos": 0, "ignorados": 0})
+        self.assertEqual(rc.recibir_avisos([self.mensaje()]), {"nuevos": 1, "sin_entender": 0, "repetidos": 0, "ignorados": 0, "errores_canal": 0})
         self.assertEqual(rc.recibir_avisos([self.mensaje()])["repetidos"], 1)
         d = self.col.datos["m1"]
         self.assertEqual((d["estado"], d["ref"]), ("pendiente", "4521896307"))
@@ -237,6 +237,49 @@ class Flujo(unittest.TestCase):
         self.col.datos["m1"]["recibido"] = (AHORA - timedelta(hours=rc.VIGILAR_HORAS + 1)).isoformat()
         self.pasada([])
         self.assertEqual(self.col.datos["m1"]["estado"], "caducada")
+
+
+class ErroresDeCanal(Flujo):
+    def error(self, id, room, canal="Booking.com"):
+        return {"id": id, "fecha": "2026-10-24", "de": "noreply@beds24.com",
+                "asunto": f"{canal} returned an error message for Alc Homes SelfCheck in - roomId {room} - {canal} report a problem updating", "cuerpo": "x"}
+
+    def registrar(self, *errores, minutos=10):
+        r = rc.recibir_avisos(list(errores))
+        for e in errores:
+            self.col.datos[e["id"]]["recibido"] = (AHORA - timedelta(minutes=minutos)).isoformat()
+        return r
+
+    def test_el_error_se_reconoce_y_no_es_un_aviso_de_reserva(self):
+        a = rc.analizar_aviso(self.error("e", 702395)["asunto"], "noreply", "")
+        self.assertEqual((a["plataforma"], a["tipo"], a["ref"], a["entendido"]), ("Booking.com", "error_canal", "702395", False))
+        self.assertEqual(self.registrar(self.error("e1", 702395))["errores_canal"], 1)
+        self.assertEqual(self.col.datos["e1"]["estado"], "error_canal")
+
+    def test_un_error_suelto_no_avisa(self):
+        self.registrar(self.error("e1", 702395))
+        self.assertEqual(rc.avisar_errores_canal(AHORA), [])
+        self.assertEqual(self.envios, [])
+
+    def test_varias_habitaciones_avisan_una_vez_por_episodio(self):
+        self.registrar(self.error("e1", 702395), self.error("e2", 702399), self.error("e3", 702398))
+        self.assertEqual(rc.avisar_errores_canal(AHORA), ["Booking.com"])
+        self.assertIn("connectivity-status.booking.com", self.envios[0])
+        self.assertIn("no hace falta reautorizar", self.envios[0].lower())
+        self.assertEqual(rc.avisar_errores_canal(AHORA + timedelta(minutes=15)), [])
+        self.assertEqual(len(self.envios), 1)
+
+    def test_la_misma_habitacion_repetida_no_cuenta_como_varias(self):
+        self.registrar(self.error("e1", 702395), self.error("e2", 702395))
+        self.assertEqual(rc.avisar_errores_canal(AHORA), [])
+
+    def test_errores_viejos_no_cuentan(self):
+        self.registrar(self.error("e1", 702395), self.error("e2", 702399), minutos=rc.ERRORES_VENTANA_HORAS * 60 + 5)
+        self.assertEqual(rc.avisar_errores_canal(AHORA), [])
+
+    def test_otro_canal_se_avisa_por_separado(self):
+        self.registrar(self.error("e1", 702398, "Expedia.com"), self.error("e2", 702399, "Expedia.com"))
+        self.assertEqual(rc.avisar_errores_canal(AHORA), ["Expedia.com"])
 
 
 class Endpoint(unittest.TestCase):

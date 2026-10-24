@@ -57,6 +57,8 @@ _ETIQUETA_REF = r"(?:reserva|reservation|booking|confirmation|confirmaci[oó]n|c
 # Aviso del propio Beds24 («Booking: <casa>: <habitación> - Wed 28 Oct 2026: 95179058 - Huésped - Canal - New Booking Notification…»):
 # lo manda Beds24 cuando YA tiene la reserva, así que compararlo con Beds24 no detecta nada. Se ignora.
 _AVISO_BEDS24 = re.compile(r"^\s*Booking(?: Cancelled)?:\s.+?:\s.+?\s-\s[A-Za-z]{3} \d{1,2} [A-Za-z]{3} \d{4}:\s*\d+", re.I)
+# Error de canal que avisa el propio Beds24: «Booking.com returned an error message for <casa> - roomId 702395 - …».
+_ERROR_CANAL = re.compile(r"^\s*(?P<canal>[A-Za-z][\w.]*?)(?:\.com)? returned an error message for (?P<casa>.+?) - roomId (?P<room>\d+)", re.I)
 _REF_HOSTELWORLD = re.compile(r"(?<![\d-])(\d{5,7}-\d{8,10})(?![\d-])")
 _REF_TRIP = re.compile(r"#(\d{13,18})#")
 _REF_HOLIDU = re.compile(r"(?:ID DE LA RESERVA|booking id|reservation id)\W{0,5}(\d{5,9})|\((\d{5,9})\)", re.I)
@@ -99,6 +101,9 @@ def analizar_aviso(asunto, remitente, cuerpo):
     tipo: nueva | modificada | cancelada | None. Nunca falla: lo que no entiende queda en None.
     `entendido` es True solo si hay tipo Y número de reserva (sin eso no se puede cotejar)."""
     asunto, cuerpo = asunto or "", (cuerpo or "")[:MAX_CUERPO]
+    if (m_err := _ERROR_CANAL.match(asunto)):
+        return {"plataforma": m_err.group("canal") + ".com", "tipo": "error_canal", "ref": m_err.group("room"), "llegada": None,
+                "salida": None, "entendido": False, "error_canal": True}
     if _AVISO_BEDS24.match(asunto):
         return {"plataforma": "Beds24", "tipo": None, "ref": None, "llegada": None, "salida": None, "entendido": False, "ignorar": True}
     origen = f"{remitente or ''} {asunto}".lower()
@@ -211,13 +216,18 @@ def recibir_avisos(mensajes):
     coleccion = _coleccion()
     if coleccion is None:
         raise RuntimeError("Firestore no disponible")
-    nuevos = sin_entender = repetidos = ignorados = 0
+    nuevos = sin_entender = repetidos = ignorados = errores = 0
     for m in (mensajes or [])[:MAX_MENSAJES]:
         mensaje_id = re.sub(r"[^\w-]", "", str(m.get("id") or ""))[:80]
         if not mensaje_id or coleccion.document(mensaje_id).get().exists:
             repetidos += 1
             continue
         datos = analizar_aviso(m.get("asunto"), m.get("de"), m.get("cuerpo"))
+        if datos.pop("error_canal", False):
+            coleccion.document(mensaje_id).set({**datos, "estado": "error_canal", "asunto": str(m.get("asunto") or "")[:200],
+                                                "recibido": _ahora().isoformat(), "avisado": False})
+            errores += 1
+            continue
         if datos.pop("ignorar", False):
             ignorados += 1
             continue
@@ -227,7 +237,7 @@ def recibir_avisos(mensajes):
             "fecha_correo": str(m.get("fecha") or ""), "recibido": _ahora().isoformat(), "avisado": False})
         nuevos += estado == "pendiente"
         sin_entender += estado == "sin_entender"
-    return {"nuevos": nuevos, "sin_entender": sin_entender, "repetidos": repetidos, "ignorados": ignorados}
+    return {"nuevos": nuevos, "sin_entender": sin_entender, "repetidos": repetidos, "ignorados": ignorados, "errores_canal": errores}
 
 
 # ── Avisos ───────────────────────────────────────────────────────────────
@@ -351,6 +361,66 @@ def verificar_pendientes(ahora=None, leer_beds24=None):
         except Exception as e:
             logger.error(f"[reservas_correo] No se pudo anotar el estado de {doc_id}: {e}")
     return resumen
+
+
+# ── Errores de canal (Beds24 → Booking/Expedia…) ─────────────────────────
+
+ERRORES_VENTANA_HORAS = 3        # errores de la misma plataforma dentro de esta ventana forman un mismo episodio
+ERRORES_MIN_HABITACIONES = 2     # un error suelto puede ser un fallo puntual; en dos o más habitaciones, es del canal
+ERRORES_SILENCIO_HORAS = 6       # tras avisar de un canal, no se vuelve a avisar de él durante este tiempo
+URL_ESTADO_BOOKING = "https://connectivity-status.booking.com/incidents.html"
+
+
+def mensaje_errores_canal(canal, habitaciones, desde_iso):
+    nombres = ", ".join(ROOM_ID_DISPLAY_NAME.get(r, f"Room {r}") for r in sorted(habitaciones))
+    lineas = [f"⚠️ ALCHOMES — {canal} está rechazando actualizaciones de Beds24", "",
+              f"Beds24 (nuestro calendario) ha avisado por correo de errores al actualizar {canal} en {len(habitaciones)} habitaciones: {nombres}.", "",
+              "Suele ser un problema del propio canal y no nuestro: el 22-oct Booking.com tuvo un incidente crítico en sus APIs y se recuperó solo. "
+              "No hace falta reautorizar nada ni tocar el sistema.", "",
+              "Qué hacer:"]
+    if canal.lower().startswith("booking"):
+        lineas.append(f"1. Mira si Booking.com tiene un incidente abierto: {URL_ESTADO_BOOKING} (la página carga con JavaScript).")
+    else:
+        lineas.append(f"1. Mira la página de estado de {canal}, por si tiene un incidente abierto.")
+    lineas += ["2. Mientras dure, una reserva nueva puede tardar en reflejarse en las demás plataformas: si entra alguna, comprueba que esas noches están bloqueadas en todas.",
+               "3. Si sigue así pasadas 2-3 horas, avisa a Adrián.", "",
+               f"Este aviso no se repetirá para {canal} en {ERRORES_SILENCIO_HORAS} h."]
+    return "\n".join(lineas)
+
+
+def avisar_errores_canal(ahora=None):
+    """Avisa (una vez por episodio y canal) cuando Beds24 notifica errores de un canal en varias habitaciones a la vez.
+    Para llamar desde /watchdog; devuelve los canales avisados. Si falla el envío no se anota y se reintenta en la siguiente pasada."""
+    coleccion = _coleccion()
+    if coleccion is None:
+        return []
+    ahora = ahora or _ahora()
+    por_canal = {}
+    for d in coleccion.where("estado", "in", ["error_canal"]).stream():
+        e = d.to_dict() or {}
+        minutos = _minutos(e.get("recibido"), ahora)
+        if minutos is not None and minutos <= ERRORES_VENTANA_HORAS * 60:
+            por_canal.setdefault(e.get("plataforma") or "?", {"rooms": set(), "desde": e["recibido"]})["rooms"].add(str(e.get("ref")))
+    if not por_canal:
+        return []
+    estado_ref = coleccion.document("_estado")
+    estado = estado_ref.to_dict() if estado_ref.get().exists else {}
+    avisados = []
+    for canal, datos in por_canal.items():
+        if len(datos["rooms"]) < ERRORES_MIN_HABITACIONES:
+            continue
+        ultimo = _minutos(estado.get(canal), ahora)
+        if ultimo is not None and ultimo < ERRORES_SILENCIO_HORAS * 60:
+            continue
+        enviar_whatsapp_callmebot(mensaje_errores_canal(canal, datos["rooms"], datos["desde"]))
+        estado[canal] = ahora.isoformat()
+        avisados.append(canal)
+    if avisados:
+        try:
+            estado_ref.set(estado)
+        except Exception as e:
+            logger.error(f"[reservas_correo] No se pudo anotar el aviso de errores de canal: {e}")
+    return avisados
 
 
 def ultimos_avisos(limite=40):

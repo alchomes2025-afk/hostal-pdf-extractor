@@ -28,7 +28,7 @@ from services.registro_completado_avisos import enviar_avisos_registro_completad
 from services.sin_mensajeria_avisos import avisar_reservas_sin_mensajeria
 from services.solapes import avisar_solapes
 from services.rpv_sin_importar import avisar_reservas_sin_importar
-from services.reservas_correo import verificar_pendientes as verificar_reservas_correo
+from services.reservas_correo import verificar_pendientes as verificar_reservas_correo, avisar_errores_canal
 from services.resumen_programado import enviar_resumenes_programados
 
 logger = logging.getLogger(__name__)
@@ -368,6 +368,10 @@ def watchdog():
         verificar_reservas_correo()
     except Exception as e:
         logger.error(f"[watchdog] Error cotejando los avisos de reserva del correo: {e}")
+    try:
+        avisar_errores_canal()
+    except Exception as e:
+        logger.error(f"[watchdog] Error comprobando los errores de canal de Beds24: {e}")
 
     # ── 11. Email de check-in para huéspedes de Hostelworld ────────────────
     # Hostelworld no permite plantillas de mensaje preprogramadas en Beds24,
