@@ -2197,7 +2197,7 @@ def mobile_assistant():
     # Lo que puede ver y hacer sale del PERFIL de la sesión; el `finanzas` que mande el navegador se ignora.
     ctx = {"es_admin": tiene_permiso(accesos.FINANZAS_HOSTAL), "finanzas": tiene_permiso(accesos.FINANZAS_PRIMAVERA),
            "emergencia": tiene_permiso(accesos.EMERGENCIA), "sin_pin": tiene_permiso(accesos.EMERGENCIA_SIN_PIN),
-           "ver_pin": tiene_permiso(accesos.EMERGENCIA_VER_PIN), "primavera": tiene_permiso(accesos.PRIMAVERA), "pantalla": str(data.get("pantalla") or "")[:1500]}
+           "ver_pin": tiene_permiso(accesos.EMERGENCIA_VER_PIN), "primavera": tiene_permiso(accesos.PRIMAVERA), "alcance_completo": tiene_permiso(accesos.ASISTENTE_COMPLETO), "pantalla": str(data.get("pantalla") or "")[:1500]}
     resultado, status = asistente_responder(mensajes, ctx)
     return jsonify(resultado), status
 

@@ -87,3 +87,12 @@ perfil oculta lo que no le toca: pestaña Finanzas (y la barra Hostal solo para 
 El candado de Finanzas del navegador (con el PIN 9999 escrito en el código) ya no existe. Al entrar: el 1379 pregunta «¿Ione o Adrián?» si el dispositivo es nuevo; el 2589
 pide el nombre y avisa de que su actividad queda registrada; el 9999 entra como Hermann; el 2486 y el 4268 siguen como antes. Si la sesión caduca (12 h) o el
 servidor reinicia, la app avisa y pide volver a entrar.
+
+## El asistente por perfil (fase 4)
+- **Propietario (1379):** alcance completo.
+- **2486, 9999 y 2589:** solo calendario y reservas, cómo funciona la app y el puesto de gestora del hostal (tareas, llamadas, plataformas, limpieza, incidencias, escalado).
+  Fuera de eso declina con amabilidad (barrera blanda, por el prompt). **Finanzas es barrera dura:** sin acceso a datos económicos, una pregunta de dinero (ingresos, beneficio,
+  comisiones, costes, rentabilidad, impuestos…) ni llega al modelo: el servidor responde «Dirígete a tu superior.»; y la herramienta `finanzas_mes` ni existe para ellos.
+  El 9999 ve la Primavera pero no el hostal: el modelo y las herramientas lo limitan, y se le manda al superior.
+- **Base de conocimiento** (`services/operativa_kb.py`, colección `kb_operativa`): herramienta `buscar_operativa`, solo con entradas **aprobadas**. Si no hay nada, el asistente
+  dice «Eso todavía no está recogido: consúltalo con tu superior» y no inventa procedimientos. La edición, el alta y el Entrenamiento llegan en las fases 5 y 6.
