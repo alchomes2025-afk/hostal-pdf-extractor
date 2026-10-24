@@ -135,3 +135,6 @@ Quien reserva varias habitaciones elige (una vez) en la web de check-in: «junto
 
 ## Incidencias de limpieza de La Casa de la Primavera (2026-10-24)
 PIN de la limpiadora `PIN_LIMPIEZA` (por defecto 4268): `check_pin` NO lo acepta, así que no abre ningún otro endpoint; `/mobile/login` devuelve `rol: "limpieza"` y la app solo le muestra su pantalla (calendario de la casa ocupado/libre, sin nombres ni precios; `mobile_limpieza.py`). Al pulsar un día y confirmar (✔) se guarda una incidencia (Firestore `incidencias_limpieza/<fecha>`, `services/incidencias_limpieza.py`) y `alerta()` avisa por WhatsApp/Telegram (con aviso si ese día hay salida/entrada de huéspedes); también puede quitarla. En el calendario de gestión el día lleva el letrero ámbar «INCIDENCIA» (haya reserva o no) y al pulsarlo sale «LIMPIEZA NO DISPONIBLE» con el rango de días consecutivos.
+
+## Perfiles por PIN (2026-10-24, en curso)
+Encargo «perfiles por PIN y Operativa de Gestión»: ver `ACCESOS.md` (perfiles, PIN, permisos y qué permiso pedirá cada ruta). Fase 1 hecha: modelo en `services/accesos.py` (aún sin aplicar a las rutas; la app sigue con MOBILE_APP_PIN y MOBILE_APP_PIN_ADMIN). Siguientes: 2 núcleo de acceso (sesión firmada + permiso por ruta + test de cobertura), 3 interfaz por rol, 4 asistente acotado, 5 Operativa, 6 Entrenamiento, 7 Historial, 8 despliegue.
