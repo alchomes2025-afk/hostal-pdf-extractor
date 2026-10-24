@@ -1086,7 +1086,7 @@ async function doLogin() {
         await enterMainScreen();
       }
     } else {
-      $("#login-err").textContent = "PIN incorrecto";
+      $("#login-err").textContent = d.error || "PIN incorrecto";
       PIN = ""; renderDots();
     }
   } catch {

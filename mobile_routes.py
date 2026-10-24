@@ -1235,13 +1235,48 @@ def _pin_recibido():
     )
 
 
-def check_pin():
-    pin = _pin_recibido()
-    if not MOBILE_APP_PIN:
+# Límite de intentos de PIN: un PIN de 4 dígitos tiene solo 10.000 combinaciones, así que sin freno se adivina en minutos. Tras MAX_FALLOS_PIN PIN
+# equivocados desde la misma IP en VENTANA_FALLOS_PIN segundos se rechaza TODO desde esa IP (incluso el PIN bueno) hasta que pase la ventana. Cuenta
+# cualquier endpoint de la app (no solo /login), porque el PIN viaja en cada petición. El contador está en memoria (services/limites.py).
+MAX_FALLOS_PIN = 8
+VENTANA_FALLOS_PIN = 900
+
+
+def pin_bloqueado():
+    from services.limites import cantidad, ip_cliente
+    return cantidad(f"pin-fallos:{ip_cliente()}", VENTANA_FALLOS_PIN) >= MAX_FALLOS_PIN
+
+
+def _pin_correcto_de_algun_perfil():
+    """¿El PIN recibido es válido para algún perfil de la app (normal, administrador o limpieza)? No cuenta intentos."""
+    pin = str(_pin_recibido() or "")
+    if not pin:
         return False
-    return str(pin) == str(MOBILE_APP_PIN) or (
+    if MOBILE_APP_PIN and pin == str(MOBILE_APP_PIN):
+        return True
+    if MOBILE_APP_PIN_ADMIN and pin == str(MOBILE_APP_PIN_ADMIN):
+        return True
+    return _es_pin_limpieza()
+
+
+def anotar_fallo_si_pin_desconocido():
+    """Anota un intento fallido si llegó un PIN y no es de ningún perfil. Un PIN válido de otro perfil (p. ej. la limpiadora en una ruta que no
+    es suya) NO cuenta como intento de adivinar."""
+    if _pin_recibido() and not _pin_correcto_de_algun_perfil():
+        from services.limites import anotar, ip_cliente
+        anotar(f"pin-fallos:{ip_cliente()}")
+
+
+def check_pin():
+    if pin_bloqueado():
+        return False
+    pin = _pin_recibido()
+    ok = bool(MOBILE_APP_PIN) and (str(pin) == str(MOBILE_APP_PIN) or (
         bool(MOBILE_APP_PIN_ADMIN) and str(pin) == str(MOBILE_APP_PIN_ADMIN)
-    )
+    ))
+    if not ok:
+        anotar_fallo_si_pin_desconocido()
+    return ok
 
 
 def _es_pin_admin():
@@ -1418,10 +1453,14 @@ def get_logs():
 
 @mobile_bp.route("/login", methods=["POST", "GET"])
 def mobile_login():
+    if pin_bloqueado():
+        return jsonify({"ok": False, "error": "Demasiados intentos. Espera 15 minutos y vuelve a probar."}), 429
     if check_pin():
         return jsonify({"ok": True, "admin": _es_pin_admin()})
     if _es_pin_limpieza():   # la limpiadora: la app solo le abre el calendario de la casa (ver mobile_limpieza.py)
         return jsonify({"ok": True, "admin": False, "rol": "limpieza"})
+    if pin_bloqueado():   # este intento fallido ha agotado el cupo
+        return jsonify({"ok": False, "error": "Demasiados intentos. Espera 15 minutos y vuelve a probar."}), 429
     return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
 
