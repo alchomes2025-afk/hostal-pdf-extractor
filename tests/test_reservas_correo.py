@@ -88,6 +88,36 @@ class Analizar(unittest.TestCase):
         self.assertFalse(rc.analizar_aviso(None, None, None)["entendido"])
 
 
+class FormatosReales(unittest.TestCase):
+    """Asuntos vistos en el buzón real (datos de ejemplo inventados)."""
+
+    def test_el_aviso_de_beds24_se_ignora(self):
+        for asunto in ("Booking: Alc Homes SelfCheck in: Double Room - Wed 28 Oct 2026: 95179058 - Perez Lopez - Booking.com",
+                       "Booking Cancelled: Alc Homes SelfCheck in: Queen Room - Fri 5 Mar 2027: 92643265 - Ejemplo - Booking.com",
+                       "Booking: La Casa de la Primavera: La Casa de la Primavera - Sun 11 Oct 2026: 94475726 - BLOCKED by Holidu - iCal import 1"):
+            self.assertTrue(rc.analizar_aviso(asunto, "bookings", "New Booking Notification").get("ignorar"), asunto)
+
+    def test_hostelworld_confirmed_booking(self):
+        a = rc.analizar_aviso("Hostelworld Confirmed Booking - ALC HOMES Self Check In, Alicante", "Market Support",
+                              "This booking was made on 19th Oct 2026 by the customer (ref: 341220-580685291). Arrival: 2026-11-02")
+        self.assertEqual((a["plataforma"], a["tipo"], a["ref"], a["llegada"]), ("Hostelworld", "nueva", "341220-580685291", "2026-11-02"))
+
+    def test_holidu_nueva_reserva(self):
+        a = rc.analizar_aviso("Confirmación de reserva Holidu (7771763)", "Holidu <host@holidu.com>",
+                              "¡Hola! Tienes una nueva reserva.\nID DE LA RESERVA: 7771763\nPROPIEDAD: La Casa De La Primavera\nFECHAS: 17 sept 2026 - 20 sept 2026")
+        self.assertEqual((a["plataforma"], a["tipo"], a["ref"], a["llegada"], a["salida"]), ("Holidu", "nueva", "7771763", "2026-09-17", "2026-09-20"))
+
+    def test_trip_aceptada_y_cancelacion(self):
+        a = rc.analizar_aviso("Booking no. #1321665408558772# accepted#1321665408558772# - Print", "noreply_htl", "")
+        self.assertEqual((a["plataforma"], a["tipo"], a["ref"]), ("Trip.com", "nueva", "1321665408558772"))
+        c = rc.analizar_aviso("Cancellation request accepted (booking no. #1598742168515769#)#1598742168515769#", "noreply_htl", "")
+        self.assertEqual((c["tipo"], c["ref"]), ("cancelada", "1598742168515769"))
+
+    def test_mensajes_de_huespedes_y_errores_no_son_avisos_de_reserva(self):
+        for asunto in ("Hemos recibido este mensaje de Lauri Maran", "Booking.com returned an error message for Alc Homes SelfCheck in - roomId 702395"):
+            self.assertFalse(rc.analizar_aviso(asunto, "noreply", "Número de reserva: 6162178509")["entendido"], asunto)
+
+
 class Cotejar(unittest.TestCase):
     def aviso(self, **kw):
         return {"tipo": "nueva", "ref": "4521896307", "llegada": "2026-11-02", "salida": "2026-11-04", **kw}
@@ -140,7 +170,7 @@ class Flujo(unittest.TestCase):
         return rc.verificar_pendientes(ahora=ahora, leer_beds24=lambda d, h: reservas)
 
     def test_recibir_guarda_pendiente_sin_el_cuerpo_y_no_repite(self):
-        self.assertEqual(rc.recibir_avisos([self.mensaje()]), {"nuevos": 1, "sin_entender": 0, "repetidos": 0})
+        self.assertEqual(rc.recibir_avisos([self.mensaje()]), {"nuevos": 1, "sin_entender": 0, "repetidos": 0, "ignorados": 0})
         self.assertEqual(rc.recibir_avisos([self.mensaje()])["repetidos"], 1)
         d = self.col.datos["m1"]
         self.assertEqual((d["estado"], d["ref"]), ("pendiente", "4521896307"))

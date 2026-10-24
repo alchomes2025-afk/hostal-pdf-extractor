@@ -49,11 +49,18 @@ _PLATAFORMAS = (("booking.com", "Booking.com"), ("airbnb", "Airbnb"), ("hostelwo
 _TIPOS = (
     ("cancelada", ("cancel", "anulad", "stornier", "annul")),
     ("modificada", ("modif", "changed", "change to", "updated", "alteration", "amended", "cambio en", "ha cambiado", "reservation change")),
-    ("nueva", ("new booking", "new reservation", "nueva reserva", "reserva nueva", "booking confirmed", "reservation confirmed",
+    ("nueva", ("new booking", "new reservation", "confirmed booking", "nueva reserva", "reserva nueva", "booking confirmed", "reservation confirmed",
                "reserva confirmada", "confirmed:", "booking confirmation", "confirmación de reserva", "has booked", "ha reservado",
                "you have a new", "tienes una nueva", "instant booking", "reservation request")),
 )
 _ETIQUETA_REF = r"(?:reserva|reservation|booking|confirmation|confirmaci[oó]n|c[oó]digo|code|n[ºo°]\.?|number|n[uú]mero|ref(?:erence|erencia)?)"
+# Aviso del propio Beds24 («Booking: <casa>: <habitación> - Wed 28 Oct 2026: 95179058 - Huésped - Canal - New Booking Notification…»):
+# lo manda Beds24 cuando YA tiene la reserva, así que compararlo con Beds24 no detecta nada. Se ignora.
+_AVISO_BEDS24 = re.compile(r"^\s*Booking(?: Cancelled)?:\s.+?:\s.+?\s-\s[A-Za-z]{3} \d{1,2} [A-Za-z]{3} \d{4}:\s*\d+", re.I)
+_REF_HOSTELWORLD = re.compile(r"(?<![\d-])(\d{5,7}-\d{8,10})(?![\d-])")
+_REF_TRIP = re.compile(r"#(\d{13,18})#")
+_REF_HOLIDU = re.compile(r"(?:ID DE LA RESERVA|booking id|reservation id)\W{0,5}(\d{5,9})|\((\d{5,9})\)", re.I)
+_RANGO_FECHAS = re.compile(r"(?:fechas|dates)\W{0,5}" + r"(\d{1,2}\s+" + r"[a-záéíóú]{3,10}\.?\s+\d{4})\s*[-–]\s*(\d{1,2}\s+[a-záéíóú]{3,10}\.?\s+\d{4})", re.I)
 _REF_NUM = re.compile(rf"{_ETIQUETA_REF}[^\d\n]{{0,25}}(\d{{8,12}})\b", re.I)
 _REF_AIRBNB = re.compile(r"\b(HM[A-Z0-9]{8})\b")
 _REF_SUELTA = re.compile(r"\b(\d{9,10})\b")
@@ -92,6 +99,8 @@ def analizar_aviso(asunto, remitente, cuerpo):
     tipo: nueva | modificada | cancelada | None. Nunca falla: lo que no entiende queda en None.
     `entendido` es True solo si hay tipo Y número de reserva (sin eso no se puede cotejar)."""
     asunto, cuerpo = asunto or "", (cuerpo or "")[:MAX_CUERPO]
+    if _AVISO_BEDS24.match(asunto):
+        return {"plataforma": "Beds24", "tipo": None, "ref": None, "llegada": None, "salida": None, "entendido": False, "ignorar": True}
     origen = f"{remitente or ''} {asunto}".lower()
     plataforma = next((nombre for clave, nombre in _PLATAFORMAS if clave in origen), None)
     plataforma = plataforma or next((nombre for clave, nombre in _PLATAFORMAS if clave in cuerpo[:800].lower()), None)
@@ -102,11 +111,21 @@ def analizar_aviso(asunto, remitente, cuerpo):
         inicio = cuerpo[:400].lower()
         tipo = next((t for t, claves in _TIPOS if any(c in inicio for c in claves)), None)
 
+    if re.search(r"hostelworld", origen + cuerpo[:300].lower()):
+        plataforma = "Hostelworld"
+    elif "noreply_htl" in origen or re.search(r"booking no\. #\d", asunto, re.I):
+        plataforma = "Trip.com"                      # «Booking no. #…# accepted» / «Cancellation request accepted (booking no. #…#)»
+        if tipo is None and "accepted" in asunto_l:
+            tipo = "nueva"
+
     ref = None
     for fuente in (asunto, cuerpo):
-        m = _REF_AIRBNB.search(fuente) or _REF_NUM.search(fuente)
+        m = ((_REF_TRIP.search(fuente) if plataforma == "Trip.com" else None)
+             or (_REF_HOSTELWORLD.search(fuente) if plataforma == "Hostelworld" else None)
+             or (_REF_HOLIDU.search(fuente) if plataforma == "Holidu" else None)
+             or _REF_AIRBNB.search(fuente) or _REF_NUM.search(fuente))
         if m:
-            ref = m.group(1)
+            ref = next(g for g in m.groups() if g)
             break
     if ref is None and plataforma == "Booking.com":
         m = _REF_SUELTA.search(asunto) or _REF_SUELTA.search(cuerpo)
@@ -115,6 +134,8 @@ def analizar_aviso(asunto, remitente, cuerpo):
     texto = f"{asunto}\n{cuerpo}"
     m_llegada, m_salida = _LLEGADA.search(texto), _SALIDA.search(texto)
     llegada, salida = _a_iso(m_llegada.group(1)) if m_llegada else None, _a_iso(m_salida.group(1)) if m_salida else None
+    if not (llegada and salida) and (m_rango := _RANGO_FECHAS.search(texto)):   # Holidu: «FECHAS: 17 sept 2026 - 20 sept 2026»
+        llegada, salida = _a_iso(m_rango.group(1)), _a_iso(m_rango.group(2))
     if llegada and salida and salida <= llegada:
         llegada = salida = None            # fechas incoherentes: mejor no comparar que comparar mal
     return {"plataforma": plataforma, "tipo": tipo, "ref": ref, "llegada": llegada, "salida": salida,
@@ -190,20 +211,23 @@ def recibir_avisos(mensajes):
     coleccion = _coleccion()
     if coleccion is None:
         raise RuntimeError("Firestore no disponible")
-    nuevos = sin_entender = repetidos = 0
+    nuevos = sin_entender = repetidos = ignorados = 0
     for m in (mensajes or [])[:MAX_MENSAJES]:
         mensaje_id = re.sub(r"[^\w-]", "", str(m.get("id") or ""))[:80]
         if not mensaje_id or coleccion.document(mensaje_id).get().exists:
             repetidos += 1
             continue
         datos = analizar_aviso(m.get("asunto"), m.get("de"), m.get("cuerpo"))
+        if datos.pop("ignorar", False):
+            ignorados += 1
+            continue
         estado = "pendiente" if datos["entendido"] else "sin_entender"
         coleccion.document(mensaje_id).set({
             **datos, "estado": estado, "asunto": str(m.get("asunto") or "")[:200], "de": str(m.get("de") or "")[:120],
             "fecha_correo": str(m.get("fecha") or ""), "recibido": _ahora().isoformat(), "avisado": False})
         nuevos += estado == "pendiente"
         sin_entender += estado == "sin_entender"
-    return {"nuevos": nuevos, "sin_entender": sin_entender, "repetidos": repetidos}
+    return {"nuevos": nuevos, "sin_entender": sin_entender, "repetidos": repetidos, "ignorados": ignorados}
 
 
 # ── Avisos ───────────────────────────────────────────────────────────────
