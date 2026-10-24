@@ -22,6 +22,8 @@ PERMISOS_RUTAS = {
     "mobile.all_data": (a.CALENDARIO,),
     "mobile.reload_data": (a.CALENDARIO,),
     "mobile.check_changes": (a.CALENDARIO,),
+    # Avisos de la app para el historial del sustituto (botones, reservas que mira)
+    "mobile.mobile_registro_evento": (a.OPERATIVA,),
     # Identidad del propietario por dispositivo (Ione o Adrián)
     "mobile.mobile_dispositivo": (a.IDENTIFICAR,),
     # Reservas y precios
@@ -77,6 +79,9 @@ PERMISOS_RUTAS = {
     "entrenamiento.temas": (a.ENTRENAMIENTO,),
     "entrenamiento.sesion": (a.ENTRENAMIENTO,),
     "entrenamiento.mensaje": (a.ENTRENAMIENTO,),
+    # Historial de sustitución (solo el propietario)
+    "historial_sustitucion.eventos": (a.HISTORIAL,),
+    "historial_sustitucion.preguntar": (a.HISTORIAL,),
     # Limpieza
     "limpieza.calendario": (a.LIMPIEZA_CALENDARIO,),
     "limpieza.incidencia": (a.LIMPIEZA_MARCAR,),

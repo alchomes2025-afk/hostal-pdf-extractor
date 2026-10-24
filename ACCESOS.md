@@ -115,3 +115,10 @@ si procede, entradas nuevas. **Las entradas se guardan siempre como BORRADOR** (
 La conversación queda en Firestore (`entrenamiento_sesiones`) para seguirla otro día. Las entradas de escalado llevan los apartados: ejemplos, lo que resuelve y no resuelve el sustituto, a quién avisar,
 medio, horario, datos a dar, qué hacer si no responde y cuándo es urgente. Además, «Importar las preguntas frecuentes de la web de check-in» carga 24 entradas (12 del hostal, 12 de la Primavera) como borradores
 (`datos/faq_checkin.json`); las de la Primavera solo las ven quienes tienen acceso a esa propiedad (campo `propiedad` de cada entrada).
+
+## Historial de sustitución (fase 7)
+Todo lo que hace el **2589** lo registra el **servidor** (no el navegador) en Firestore `historial_sustitucion`, con fecha y hora y con el nombre de su sesión firmada (el que escribió al entrar; no se puede
+cambiar ni desactivar desde ese perfil): entradas, calendario abierto, **cada pregunta al asistente con su respuesta**, tareas de la operativa consultadas, reservas **creadas, modificadas (antes y después) y canceladas**,
+bloqueos, envíos de emergencia (correo del huésped enmascarado) y los **escalados** (cuando el asistente le remite a Ione o a Adrián). Sin teléfono ni correo de los huéspedes. La app avisa además, de mejor esfuerzo, de los
+botones que pulsa y las reservas que mira en pantalla (no generan petición). Se conserva 12 meses. Lo lee solo el propietario: «🕵 Historial de sustitución» en la pestaña Operativa, con filtros por sustituto, día y tipo, y un
+asistente («¿qué hizo ayer?»: traduce la pregunta a filtros y responde solo con los registros). Rutas: `/mobile/historial-sustitucion` y `/preguntar`; el registro del cliente, `/mobile/registro/evento`.

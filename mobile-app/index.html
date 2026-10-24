@@ -428,6 +428,13 @@ body.sin-gestion-kb .solo-kb{display:none!important}
 .op-etq.borrador{background:#fff3cd;color:#7a5b00}
 .op-etq.aprobado{background:#d9f2e3;color:#1f5c3a}
 .op-msg{font-size:13px;margin:10px 0;min-height:16px}
+.hs-filtros{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.hs-filtros select,.hs-filtros input{min-width:0}
+.hs-ev{border-top:1px solid var(--border);padding:9px 2px;font-size:13.5px}
+.hs-ev .hs-cab{display:flex;gap:8px;justify-content:space-between;color:var(--muted);font-size:12px}
+.hs-ev .hs-detalle{white-space:pre-wrap;background:#faf5f8;border-radius:8px;padding:7px 9px;margin-top:5px;font-size:12.5px;display:none}
+.hs-ev.abierto .hs-detalle{display:block}
+.hs-resp{background:#eef6ff;border-radius:10px;padding:10px 12px;margin:8px 0;white-space:pre-wrap}
 #en-chat{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
 .en-msg{max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;white-space:pre-wrap}
 .en-bot{background:#f3eef6;align-self:flex-start;border-bottom-left-radius:4px}
@@ -1017,7 +1024,7 @@ body.sin-registro #btn-history{display:none!important}
 const API = "https://hostal-pdf-extractor.onrender.com/mobile";
 // Sesión firmada: al entrar con el PIN el servidor da un token con el perfil y el nombre; desde ese momento cada petición a la API lo lleva en
 // `Authorization` (el servidor lo prefiere al PIN y es quien decide qué puede hacer cada perfil: ocultar pestañas aquí es solo comodidad).
-let SESSION = "", PERFIL = "", PERMISOS = new Set(), _sesionCaducada = false;
+let SESSION = "", PERFIL = "", PERMISOS = new Set(), _sesionCaducada = false, AUDITADO = false;
 const tiene = permiso => PERMISOS.has(permiso);
 const _fetchNativo = window.fetch.bind(window);
 window.fetch = async (url, opts = {}) => {
@@ -1146,6 +1153,7 @@ function accEl(tag, texto, padre, cls) {
 function aplicarSesion(d) {
   SESSION = d.token || "";
   PERFIL = d.perfil || "";
+  AUDITADO = !!d.auditado;
   PERMISOS = new Set(d.permisos || []);
   IS_ADMIN = tiene("finanzas.hostal");
   const clases = document.body.classList;
@@ -1506,6 +1514,7 @@ function openDaySheet(ds, room) {
   const bk = blockBooking ? null : bkRaw;
   const {price1, numAvail, isOverride} = getDateInfo(room.id, ds);
   const bl = !!blockBooking || numAvail === 0;
+  if (bk) registrarEvento("reserva_consultada", {habitacion: room.name, llegada: bk.arrival, salida: bk.departure, huesped: bk.guestName});
 
   const rl = ROOM_LABEL[room.id] || {name: room.name};
   $("#sh-day-title").textContent = dateLabel(ds, {weekday:"long",day:"numeric",month:"long"});
@@ -2203,6 +2212,7 @@ $("#btn-history").addEventListener("click", openHistoryPanel);
 $("#history-close").addEventListener("click", closeSheet);
 
 $("#btn-refresh").addEventListener("click", async () => {
+  registrarEvento("boton", {nombre: "↺ Actualizar el calendario"});
   const btn = $("#btn-refresh");
   btn.classList.add("spinning");
   setPill("Comprobando…");
@@ -2309,6 +2319,7 @@ function checkFinLockPin() {
 }
 
 function showTab(tab) {
+  registrarEvento("boton", {nombre: "Pestaña " + ({calendar: "Calendario", finance: "Finanzas", operativa: "Operativa"}[tab] || tab)});
   const isCal = tab === "calendar", isFin = tab === "finance", isOp = tab === "operativa";
   $("#calendar-screen").style.display = isCal ? "flex" : "none";
   $("#finance-screen").style.display = isFin ? "flex" : "none";
@@ -3728,6 +3739,13 @@ let AS_BUSY = false;
 let AS_CHIPS_PANTALLA = null;   // sugerencias propias de la pantalla desde la que se abre el asistente (Operativa)
 let AS_PANTALLA = null;   // función que devuelve el texto de la pantalla desde la que se abrió el asistente (ayuda contextual)
 
+// Avisa al servidor de lo que no genera petición propia (botones, reservas que se miran) para el historial del sustituto. De mejor esfuerzo y sin ninguna opción para apagarlo;
+// lo que sí genera petición (reservas creadas, modificadas, canceladas, consultas al asistente…) lo registra el servidor por su cuenta.
+function registrarEvento(tipo, datos) {
+  if (!AUDITADO) return;
+  try { fetch(`${API}/registro/evento`, {method: "POST", headers: {"x-app-pin": PIN, "content-type": "application/json"}, body: JSON.stringify({tipo, datos})}).catch(() => {}); } catch (_) { /* nada */ }
+}
+
 // ── Operativa de Gestión ───────────────────────────────
 // Tareas diarias, teléfonos, preguntas frecuentes y escalado de problemas, con lo que sabe Ione (base de conocimiento). La ven el sustituto y el propietario;
 // el propietario además puede editar la base de conocimiento. Todo lo decide el servidor (services/operativa_kb.py).
@@ -3757,6 +3775,10 @@ async function cargarOperativa() {
   entreno.type = "button";
   emEl("small", "", "Entrevista a Ione, una pregunta cada vez: lo que cuente queda como borrador para revisar.", entreno);
   entreno.onclick = abrirEntrenamiento;
+  const hist = emEl("button", "op-btn solo-kb", "🕵 Historial de sustitución", cuerpo);
+  hist.type = "button";
+  emEl("small", "", "Todo lo que hace quien sustituye a Ione, con fecha y hora.", hist);
+  hist.onclick = abrirHistorialSustitucion;
   const editor = emEl("button", "op-btn solo-kb", "📚 Base de conocimiento", cuerpo);
   editor.type = "button";
   emEl("small", "", "Revisar, editar y aprobar lo que sabe el asistente.", editor);
@@ -3794,6 +3816,73 @@ async function verEntradaOp(id) {
   if (!d.ok) { $("#op-ptitulo").textContent = "No disponible"; emEl("div", "op-vacio", d.error || "No se ha podido cargar.", cuerpo); return; }
   $("#op-ptitulo").textContent = d.entrada.titulo;
   emEl("div", "op-texto", d.entrada.contenido, cuerpo);
+}
+
+// Historial de sustitución (solo el propietario): lo registra el servidor (services/historial_sustitucion.py); aquí se consulta, con filtros y un asistente.
+async function hsApi(ruta, opciones) {
+  const r = await fetch(`${API}/historial-sustitucion${ruta}`, {headers: {"x-app-pin": PIN, "content-type": "application/json"}, ...opciones});
+  let d; try { d = await r.json(); } catch (_) { d = {ok: false, error: "Respuesta no válida del servidor"}; }
+  return d;
+}
+
+async function abrirHistorialSustitucion() {
+  const cuerpo = abrirOpPanel("🕵 Historial de sustitución");
+  const preg = emEl("input", "", null, cuerpo);
+  preg.placeholder = "Pregunta: ¿qué hizo ayer? ¿qué reservas modificó esta semana?";
+  preg.style.cssText = "width:100%;padding:10px;border:1.5px solid var(--border);border-radius:10px;font:inherit;box-sizing:border-box";
+  const preguntar = emEl("button", "op-btn principal", "🤖 Preguntar al historial", cuerpo);
+  preguntar.type = "button";
+  preguntar.style.marginTop = "8px";
+  const respuesta = emEl("div", "", null, cuerpo);
+  const filtros = emEl("div", "hs-filtros", null, cuerpo);
+  const quien = emEl("select", "", null, filtros);
+  const dia = emEl("input", "", null, filtros);
+  dia.type = "date";
+  const tipo = emEl("select", "", null, filtros);
+  const lista = emEl("div", "", null, cuerpo);
+  const cargar = async () => {
+    lista.textContent = "";
+    emEl("div", "op-vacio", "Cargando…", lista);
+    const qs = new URLSearchParams({sustituto: quien.value, dia: dia.value, tipo: tipo.value});
+    const d = await hsApi("?" + qs.toString());
+    lista.textContent = "";
+    if (!d.ok) { emEl("div", "op-vacio", d.error || "No se ha podido cargar.", lista); return; }
+    if (!quien.options.length) {
+      const todos = emEl("option", "", "Todos los sustitutos", quien); todos.value = "";
+      d.sustitutos.forEach(x => { const o = emEl("option", "", x.nombre, quien); o.value = x.nombre; });
+      const tt = emEl("option", "", "Toda la actividad", tipo); tt.value = "";
+      Object.entries(d.tipos).forEach(([k, v]) => { const o = emEl("option", "", v, tipo); o.value = k; });
+    }
+    if (!d.eventos.length) { emEl("div", "op-vacio", "No hay actividad registrada con esos filtros.", lista); return; }
+    d.eventos.forEach(e => {
+      const fila = emEl("div", "hs-ev", null, lista);
+      const cab = emEl("div", "hs-cab", null, fila);
+      emEl("span", "", `${e.fecha.split("-").reverse().join("/")} ${e.hora} · ${e.sustituto}`, cab);
+      emEl("span", "", d.tipos[e.tipo] || e.tipo, cab);
+      emEl("div", "", e.resumen, fila);
+      const det = e.detalle || {};
+      const texto = e.tipo === "consulta_asistente" || e.tipo === "escalado" ? `Pregunta: ${det.pregunta || ""}\n\nRespuesta: ${det.respuesta || ""}`
+        : (det.antes || det.despues) ? `Antes: ${JSON.stringify(det.antes || null)}\nDespués: ${JSON.stringify(det.despues || null)}` : "";
+      if (texto) {
+        emEl("div", "hs-detalle", texto, fila);
+        fila.style.cursor = "pointer";
+        fila.onclick = () => fila.classList.toggle("abierto");
+      }
+    });
+  };
+  quien.onchange = dia.onchange = tipo.onchange = cargar;
+  preguntar.onclick = async () => {
+    if (!preg.value.trim()) return;
+    preguntar.disabled = true;
+    respuesta.textContent = "";
+    emEl("div", "op-vacio", "Consultando el historial…", respuesta);
+    const r = await hsApi("/preguntar", {method: "POST", body: JSON.stringify({pregunta: preg.value})});
+    preguntar.disabled = false;
+    respuesta.textContent = "";
+    emEl("div", "hs-resp", r.ok ? r.respuesta : (r.error || "No se ha podido responder."), respuesta);
+  };
+  preg.addEventListener("keydown", e => { if (e.key === "Enter") preguntar.click(); });
+  await cargar();
 }
 
 // Entrenamiento (solo el propietario): entrevista a Ione sobre su puesto. Una pregunta cada vez; lo que cuenta se guarda como BORRADOR (services/entrevista.py).
@@ -4180,6 +4269,7 @@ function emPreguntar(texto) {
 }
 
 function openEmergencia() {
+  registrarEvento("boton", {nombre: "🚨 Envíos de emergencia"});
   const body = $("#em-body");
   body.textContent = "";
   const aviso = emEl("div", "em-aviso", null, body);
@@ -4218,6 +4308,7 @@ function ayudaPantalla(cual) {
 function toggleAsistente() {
   const panel = $("#as-panel");
   const opening = panel.style.display !== "flex";
+  if (opening) registrarEvento("boton", {nombre: "💬 Asistente"});
   if (!opening) { panel.classList.remove("encima"); AS_PANTALLA = null; }
   panel.style.display = opening ? "flex" : "none";
   $("#as-fab").style.display = opening ? "none" : "block";

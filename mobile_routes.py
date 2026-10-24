@@ -31,7 +31,7 @@ from flask import Blueprint, g, request, jsonify, Response
 import re
 
 from rutas_permisos import PERMISOS_RUTAS, RUTAS_PUBLICAS
-from services import accesos, dispositivos
+from services import accesos, dispositivos, historial_sustitucion as historial
 from mobile_asistente import ErrorHerramienta, borrador_codigos, clave_groq, responder as asistente_responder
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
@@ -1401,10 +1401,118 @@ def exigir_permiso():
         return jsonify({"ok": False, "error": "No tienes permiso para esta función"}), 403
     if endpoint in RUTAS_CON_HABITACION and _toca_primavera_sin_permiso(request.get_json(silent=True) or {}):
         return jsonify({"ok": False, "error": "No tienes permiso para esta propiedad"}), 403
+    if perfil.auditado and endpoint in ("mobile.edit_booking", "mobile.cancel_booking"):   # para el registro: cómo era la reserva ANTES
+        g.reserva_antes = _resumen_reserva(next((b for b in _state.get("bookings", []) if str(b.get("id", "")) == str((request.get_json(silent=True) or {}).get("bookingId"))), None))
     return None
 
 
+# ── Registro de la actividad del sustituto (services/historial_sustitucion.py) ──
+def _nombre_habitacion(room_id):
+    return next((r.get("name") for r in ROOMS if str(r.get("id")) == str(room_id)), str(room_id))
+
+
+def _resumen_reserva(b):
+    """Lo mínimo para entender una reserva en el historial (sin teléfono ni correo del huésped)."""
+    if not b:
+        return None
+    return {"id": b.get("id"), "habitacion": _nombre_habitacion(b.get("roomId")), "llegada": b.get("arrival"), "salida": b.get("departure"),
+            "huesped": b.get("guestName"), "precio": b.get("price")}
+
+
+def _texto_reserva(r):
+    if not r:
+        return "reserva desconocida"
+    return f"{r.get('habitacion')}, {r.get('llegada')} → {r.get('salida')}" + (f", {r.get('huesped')}" if r.get("huesped") else "")
+
+
+def _enmascarar(email):
+    usuario, _, dominio = str(email or "").partition("@")
+    return f"{usuario[:1]}***@{dominio}" if dominio else "***"
+
+
+def _anotar_actividad(perfil, nombre, tipo, resumen, detalle=None):
+    historial.registrar(perfil, nombre, tipo, resumen, detalle)
+    return resumen
+
+
+def _auditar_asistente(perfil, nombre, respuesta):
+    cuerpo = request.get_json(silent=True) or {}
+    mensajes = cuerpo.get("mensajes") or [{"content": cuerpo.get("pregunta")}]
+    pregunta = str((mensajes[-1] or {}).get("content") or "")
+    datos = respuesta.get_json(silent=True) or {}
+    texto = str(datos.get("respuesta") or "")
+    _anotar_actividad(perfil, nombre, "consulta_asistente", f"Preguntó: {pregunta[:200]}", {"pregunta": pregunta, "respuesta": texto})
+    destino = historial.detectar_escalado(texto)
+    if destino:
+        _anotar_actividad(perfil, nombre, "escalado", f"El asistente le remitió a {destino}: {pregunta[:150]}", {"a": destino, "pregunta": pregunta, "respuesta": texto})
+
+
+def _auditar_reserva_creada(perfil, nombre, respuesta):
+    c = request.get_json(silent=True) or {}
+    despues = {"habitacion": _nombre_habitacion(c.get("roomId")), "llegada": c.get("arrival"), "salida": c.get("departure"), "huesped": c.get("name"), "precio": c.get("price")}
+    _anotar_actividad(perfil, nombre, "reserva_creada", f"Creó una reserva: {_texto_reserva(despues)}", {"despues": despues})
+
+
+def _auditar_reserva_modificada(perfil, nombre, respuesta):
+    c = request.get_json(silent=True) or {}
+    antes = g.get("reserva_antes")
+    despues = _resumen_reserva(next((b for b in _state.get("bookings", []) if str(b.get("id", "")) == str(c.get("bookingId"))), None)) or {"cambios": {k: c.get(k) for k in ("arrival", "departure", "roomId", "name") if c.get(k)}}
+    _anotar_actividad(perfil, nombre, "reserva_modificada", f"Modificó una reserva: antes {_texto_reserva(antes)}; ahora {_texto_reserva(despues)}", {"antes": antes, "despues": despues})
+
+
+def _auditar_reserva_cancelada(perfil, nombre, respuesta):
+    antes = g.get("reserva_antes")
+    _anotar_actividad(perfil, nombre, "reserva_cancelada", f"Canceló una reserva: {_texto_reserva(antes)}", {"antes": antes})
+
+
+def _auditar_bloqueo(perfil, nombre, respuesta):
+    c = request.get_json(silent=True) or {}
+    _anotar_actividad(perfil, nombre, "bloqueo", f"Bloqueó {_nombre_habitacion(c.get('roomId'))} del {c.get('from')} al {c.get('to')}" + (f" ({c.get('reason')})" if c.get("reason") else ""),
+                      {"habitacion": _nombre_habitacion(c.get("roomId")), "desde": c.get("from"), "hasta": c.get("to"), "motivo": c.get("reason")})
+
+
+def _auditar_emergencia(accion):
+    def manejador(perfil, nombre, respuesta):
+        c = request.get_json(silent=True) or {}
+        _anotar_actividad(perfil, nombre, "emergencia", f"{accion} los códigos de la reserva {c.get('reserva')} para {_enmascarar(c.get('email'))}",
+                          {"reserva": c.get("reserva"), "destinatario": _enmascarar(c.get("email")), "idioma": c.get("idioma"), "accion": accion})
+    return manejador
+
+
+def _auditar_tarea(perfil, nombre, respuesta):
+    e = (respuesta.get_json(silent=True) or {}).get("entrada") or {}
+    _anotar_actividad(perfil, nombre, "tarea_consultada", f"Consultó «{e.get('titulo')}»", {"id": e.get("id"), "tipo": e.get("tipo"), "titulo": e.get("titulo")})
+
+
+_AUDITORIA = {
+    "mobile.all_data": lambda p, n, r: _anotar_actividad(p, n, "calendario", "Abrió el calendario"),
+    "mobile.reload_data": lambda p, n, r: _anotar_actividad(p, n, "calendario", "Recargó los datos del calendario"),
+    "mobile.mobile_assistant": _auditar_asistente,
+    "mobile.create_booking": _auditar_reserva_creada,
+    "mobile.edit_booking": _auditar_reserva_modificada,
+    "mobile.cancel_booking": _auditar_reserva_cancelada,
+    "mobile.block_dates": _auditar_bloqueo,
+    "mobile.mobile_assistant_preparar_codigos": _auditar_emergencia("Preparó"),
+    "mobile.mobile_assistant_enviar_codigos": _auditar_emergencia("Envió"),
+    "operativa.entrada": _auditar_tarea,
+}
+
+
+def auditar_actividad(respuesta):
+    """after_request: si quien hace la petición es un perfil auditado (el sustituto) y salió bien, lo anota en el historial. Lo escribe el servidor: no depende del navegador."""
+    try:
+        perfil = g.get("perfil_acceso")
+        if perfil is not None and perfil.auditado and respuesta.status_code < 400:
+            manejador = _AUDITORIA.get(request.endpoint or "")
+            if manejador:
+                manejador(perfil, g.get("nombre_acceso"), respuesta)
+    except Exception as e:
+        logger.error(f"[historial] Error al auditar {request.endpoint}: {e}")
+    return respuesta
+
+
 mobile_bp.before_request(exigir_permiso)
+mobile_bp.after_request(auditar_actividad)
 
 
 def is_valid_email(email):
@@ -1588,9 +1696,29 @@ def mobile_login():
     respuesta = {"ok": True, "admin": perfil.tiene(accesos.FINANZAS_HOSTAL), "perfil": perfil.id, "perfil_nombre": perfil.nombre,
                  "permisos": sorted(perfil.permisos), "nombre": nombre, "identidad": identidad, "auditado": perfil.auditado,
                  "token": accesos.crear_sesion(perfil.id, nombre), "sesion_horas": accesos.SESION_HORAS}
+    historial.registrar(perfil, nombre, "acceso", "Entró en la app", {"dispositivo": str(cuerpo.get("deviceId") or "")[:8]})
     if perfil.tiene(accesos.LIMPIEZA_CALENDARIO):
         respuesta["rol"] = "limpieza"   # compatibilidad con la app instalada: solo muestra la pantalla de la limpiadora
     return jsonify(respuesta)
+
+
+@mobile_bp.route("/registro/evento", methods=["POST"])
+def mobile_registro_evento():
+    """La app avisa de lo que no genera petición propia (botones pulsados, reservas que mira en pantalla). Solo cuenta para perfiles auditados; de mejor esfuerzo."""
+    from services.limites import ip_cliente, permitir
+    perfil = perfil_actual()
+    if not permitir([(f"registro-evento:{ip_cliente()}", 600, 3600)]):
+        return jsonify({"ok": False}), 429
+    c = request.get_json(silent=True) or {}
+    tipo = c.get("tipo")
+    if perfil.auditado and tipo in historial.TIPOS_DEL_CLIENTE:
+        datos = c.get("datos") if isinstance(c.get("datos"), dict) else {}
+        if tipo == "boton":
+            resumen = f"Pulsó «{str(datos.get('nombre') or '')[:80]}»"
+        else:
+            resumen = f"Miró la reserva de {str(datos.get('habitacion') or '')[:60]} ({str(datos.get('llegada') or '')[:10]} → {str(datos.get('salida') or '')[:10]})" + (f", {str(datos.get('huesped'))[:60]}" if datos.get("huesped") else "")
+        historial.registrar(perfil, nombre_actual(), tipo, resumen, datos)
+    return jsonify({"ok": True})
 
 
 @mobile_bp.route("/dispositivo", methods=["POST"])

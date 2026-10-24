@@ -14,13 +14,14 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
-from mobile_routes import exigir_permiso, nombre_actual, perfil_actual, tiene_permiso
+from mobile_routes import auditar_actividad, exigir_permiso, nombre_actual, perfil_actual, tiene_permiso
 from services import accesos
 from services import operativa_kb as kb
 
 logger = logging.getLogger(__name__)
 operativa_bp = Blueprint("operativa", __name__, url_prefix="/mobile/operativa")
 operativa_bp.before_request(exigir_permiso)
+operativa_bp.after_request(auditar_actividad)
 
 
 def _error(e):
