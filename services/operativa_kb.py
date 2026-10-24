@@ -9,6 +9,7 @@ Cada entrada es un documento de Firestore, colección `kb_operativa`:
               problema), «proceso» (otros procedimientos: llamadas, vending, plataformas…)
   titulo      nombre corto
   contenido   el texto completo (pasos, qué comprobar, a quién avisar, datos a dar…)
+  propiedad   «hostal», «primavera» o vacío (vale para todo). Lo de la Casa de la Primavera solo lo ven (y lo usa el asistente) quien tenga acceso a esa propiedad.
   etiquetas   palabras clave para buscar
   orden       para ordenar las tareas del día
   estado      «borrador» (recién aprendido, pendiente de revisar) o «aprobado» (el asistente SOLO usa las aprobadas)
@@ -18,6 +19,7 @@ Sin Firestore, o sin entradas aprobadas, la búsqueda devuelve vacío y el asist
 Nada de lo de aquí lanza excepción hacia arriba.
 """
 import logging
+import re
 import time
 import unicodedata
 import uuid
@@ -47,8 +49,11 @@ def _palabras(texto):
     return [p for p in limpio.split() if len(p) >= 3 and p not in ruido]
 
 
-def entradas(estado="aprobado", forzar=False):
-    """Las entradas con ese estado (None = todas), ordenadas por `orden` y título. [] si no hay Firestore."""
+PROPIEDADES = ("", "hostal", "primavera")
+
+
+def entradas(estado="aprobado", forzar=False, primavera=True):
+    """Las entradas con ese estado (None = todas), ordenadas por `orden` y título. [] si no hay Firestore. Sin `primavera`, sin las de La Casa de la Primavera."""
     if forzar or time.time() >= _cache["hasta"]:
         if config.db is None:
             return []
@@ -62,7 +67,7 @@ def entradas(estado="aprobado", forzar=False):
         except Exception as e:
             logger.error(f"[operativa_kb] No se pudo leer la base de conocimiento: {e}")
             return []
-    resultado = [d for d in _cache["entradas"] if estado is None or d.get("estado") == estado]
+    resultado = [d for d in _cache["entradas"] if (estado is None or d.get("estado") == estado) and (primavera or d.get("propiedad") != "primavera")]
     return sorted(resultado, key=lambda d: (d.get("orden") if isinstance(d.get("orden"), (int, float)) else 9999, _norm(d.get("titulo"))))
 
 
@@ -78,20 +83,20 @@ def _puntos(entrada, palabras):
     return puntos
 
 
-def buscar(consulta, tipo=None, limite=MAX_RESULTADOS):
+def buscar(consulta, tipo=None, limite=MAX_RESULTADOS, primavera=True):
     """Las entradas APROBADAS que mejor responden a la consulta: [{tipo, titulo, contenido}], de más a menos relevante. Vacío si nada coincide."""
     palabras = _palabras(consulta)
     if not palabras:
         return []
-    candidatas = [e for e in entradas("aprobado") if tipo is None or e.get("tipo") == tipo]
+    candidatas = [e for e in entradas("aprobado", primavera=primavera) if tipo is None or e.get("tipo") == tipo]
     puntuadas = sorted(((_puntos(e, palabras), e) for e in candidatas), key=lambda x: -x[0])
     return [{"tipo": e.get("tipo"), "titulo": e.get("titulo"), "contenido": str(e.get("contenido") or "")[:MAX_CHARS_ENTRADA]}
             for puntos, e in puntuadas[:limite] if puntos > 0]
 
 
-def temas():
+def temas(primavera=True):
     """Títulos de lo aprobado, para que el asistente sepa qué hay si la búsqueda no encuentra nada."""
-    return [{"tipo": e.get("tipo"), "titulo": e.get("titulo")} for e in entradas("aprobado")][:60]
+    return [{"tipo": e.get("tipo"), "titulo": e.get("titulo")} for e in entradas("aprobado", primavera=primavera)][:60]
 
 
 # ── Edición (solo el propietario, fase 5) ─────────────────────────────────────
@@ -127,12 +132,13 @@ def validar(datos):
         orden = int(datos.get("orden")) if datos.get("orden") not in (None, "") else 1000
     except (TypeError, ValueError):
         raise ErrorKB("El orden debe ser un número")
-    return {"tipo": tipo, "titulo": titulo, "contenido": contenido, "etiquetas": etiquetas, "estado": estado, "orden": orden}
+    propiedad = datos.get("propiedad") if datos.get("propiedad") in PROPIEDADES else ""
+    return {"tipo": tipo, "titulo": titulo, "contenido": contenido, "etiquetas": etiquetas, "estado": estado, "orden": orden, "propiedad": propiedad}
 
 
 def _doc_id(valor):
     valor = str(valor or "")
-    return valor if valor.isalnum() and 4 <= len(valor) <= 40 else ""
+    return valor if re.fullmatch(r"[A-Za-z0-9_-]{4,40}", valor) else ""
 
 
 def guardar(datos, usuario=""):
@@ -165,19 +171,47 @@ def borrar(doc_id):
     olvidar_cache()
 
 
-def una(doc_id, solo_aprobada=True):
+def una(doc_id, solo_aprobada=True, primavera=True):
     """La entrada completa (con su id) o None."""
     doc_id = _doc_id(doc_id)
-    for e in entradas(None, forzar=True):
+    for e in entradas(None, forzar=True, primavera=primavera):
         if e["id"] == doc_id and (not solo_aprobada or e.get("estado") == "aprobado"):
             return e
     return None
 
 
-def indice():
+def indice(primavera=True):
     """Lo aprobado, agrupado por tipo, solo con id y título: es lo que enseña la pestaña Operativa de Gestión."""
     grupos = {t: [] for t in TIPOS}
-    for e in entradas("aprobado"):
+    for e in entradas("aprobado", primavera=primavera):
         if e.get("tipo") in grupos:
             grupos[e["tipo"]].append({"id": e["id"], "titulo": e.get("titulo")})
     return grupos
+
+
+def importar_faq(usuario=""):
+    """Carga como BORRADORES las preguntas frecuentes que ya tiene la web de check-in (datos/faq_checkin.json, una entrada por sección de sus documentos de referencia)
+    para que se revisen y se aprueben. No pisa nada: una entrada que ya existe (aunque se haya editado) se deja como está. Devuelve {creadas, existentes}."""
+    import json
+    import os
+    if config.db is None:
+        raise ErrorKB("La base de conocimiento no está disponible ahora mismo", 503)
+    ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datos", "faq_checkin.json")
+    with open(ruta, encoding="utf-8") as f:
+        origen = json.load(f)
+    existentes = {e["id"] for e in entradas(None, forzar=True)}
+    creadas = 0
+    ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for item in origen:
+        if item["id"] in existentes:
+            continue
+        try:
+            config.db.collection(COLECCION).document(item["id"]).set({
+                "tipo": "faq", "titulo": item["titulo"], "contenido": item["contenido"], "etiquetas": item.get("etiquetas", []), "estado": "borrador",
+                "orden": 1000 + item.get("orden", 0), "propiedad": item["propiedad"], "actualizado": ahora, "editado_por": str(usuario or "")[:40], "origen": "web de check-in"})
+            creadas += 1
+        except Exception as e:
+            logger.error(f"[operativa_kb] No se pudo importar {item['id']}: {e}")
+            raise ErrorKB("No se han podido importar todas. Inténtalo de nuevo.", 502)
+    olvidar_cache()
+    return {"creadas": creadas, "existentes": len(origen) - creadas}

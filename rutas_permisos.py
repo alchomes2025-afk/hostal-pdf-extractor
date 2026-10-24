@@ -72,6 +72,7 @@ PERMISOS_RUTAS = {
     "operativa.kb_listar": (a.ENTRENAMIENTO,),
     "operativa.kb_guardar": (a.ENTRENAMIENTO,),
     "operativa.kb_borrar": (a.ENTRENAMIENTO,),
+    "operativa.kb_importar_faq": (a.ENTRENAMIENTO,),
     # Limpieza
     "limpieza.calendario": (a.LIMPIEZA_CALENDARIO,),
     "limpieza.incidencia": (a.LIMPIEZA_MARCAR,),

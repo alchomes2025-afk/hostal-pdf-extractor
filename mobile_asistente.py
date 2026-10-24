@@ -865,10 +865,10 @@ def _t_buscar_operativa(a, ctx):
     if len(consulta) < 3:
         raise ErrorHerramienta("Falta qué quieres buscar")
     tipo = a.get("tipo") if a.get("tipo") in operativa_kb.TIPOS else None
-    encontradas = operativa_kb.buscar(consulta, tipo)
+    encontradas = operativa_kb.buscar(consulta, tipo, primavera=bool(ctx.get("primavera", True)))
     if encontradas:
         return {"entradas": encontradas, "nota": "Responde SOLO con lo que dicen estas entradas: no añadas pasos, teléfonos ni horarios que no aparezcan en ellas."}
-    return {"entradas": [], "temas_disponibles": operativa_kb.temas(),
+    return {"entradas": [], "temas_disponibles": operativa_kb.temas(primavera=bool(ctx.get("primavera", True))),
             "nota": f"No hay nada aprobado sobre eso en la base de conocimiento. Dile al usuario: «Eso todavía no está recogido: consúltalo con {CONTACTO_OPERATIVA}.» y NO inventes el procedimiento."}
 
 

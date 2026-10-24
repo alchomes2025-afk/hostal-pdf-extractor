@@ -136,5 +136,53 @@ class Lectura(Base):
         self.assertEqual(kb.buscar("sin"), [])                    # «Sin revisar» es un borrador: el asistente no lo ve
 
 
+class ImportarFaq(Base):
+    def _importar(self, perfil="propietario"):
+        return self.c.post("/mobile/operativa/kb/importar-faq", headers=cab(perfil))
+
+    def test_carga_las_preguntas_de_la_web_como_borradores(self):
+        d = self._importar().get_json()
+        self.assertEqual((d["ok"], d["creadas"], d["existentes"]), (True, 24, 0))
+        self.assertEqual({e["estado"] for e in self.db.a.values()}, {"borrador"})
+        self.assertEqual({e["tipo"] for e in self.db.a.values()}, {"faq"})
+        self.assertEqual({e["propiedad"] for e in self.db.a.values()}, {"hostal", "primavera"})
+        self.assertEqual(self.c.get("/mobile/operativa/indice", headers=cab("sustituto")).get_json()["grupos"]["faq"], [])   # nada se enseña hasta aprobarlo
+
+    def test_se_puede_repetir_sin_pisar_lo_editado(self):
+        self._importar()
+        self.db.a["faq-hostal-3"]["contenido"] = "Contraseña corregida a mano"
+        d = self._importar().get_json()
+        self.assertEqual((d["creadas"], d["existentes"]), (0, 24))
+        self.assertEqual(self.db.a["faq-hostal-3"]["contenido"], "Contraseña corregida a mano")
+
+    def test_solo_el_propietario_importa(self):
+        for perfil in ("sustituto", "gestor", "gestor_primavera"):
+            self.assertEqual(self._importar(perfil).status_code, 403, perfil)
+        self.assertEqual(self.db.a, {})
+
+    def test_lo_de_la_primavera_no_lo_ve_el_sustituto_ni_el_asistente_sin_acceso(self):
+        self._importar()
+        for doc in self.db.a.values():
+            doc["estado"] = "aprobado"
+        kb.olvidar_cache()
+        sustituto = self.c.get("/mobile/operativa/indice", headers=cab("sustituto")).get_json()["grupos"]["faq"]
+        propietario = self.c.get("/mobile/operativa/indice", headers=cab("propietario")).get_json()["grupos"]["faq"]
+        self.assertEqual(len(sustituto), 12)
+        self.assertEqual(len(propietario), 24)
+        id_primavera = "faq-primavera-3"
+        self.assertEqual(self.c.get(f"/mobile/operativa/entrada?id={id_primavera}", headers=cab("sustituto")).status_code, 404)
+        self.assertEqual(self.c.get(f"/mobile/operativa/entrada?id={id_primavera}", headers=cab("propietario")).status_code, 200)
+        # el asistente: sin acceso a la Primavera no encuentra su wifi ni su código de acceso
+        self.assertEqual([e["titulo"] for e in kb.buscar("cajetín urbanización", primavera=False)], [])
+        self.assertTrue(kb.buscar("cajetín urbanización", primavera=True))
+        self.assertNotIn("2308", str(kb.buscar("acceso urbanización código", primavera=False)))
+
+    def test_la_propiedad_se_guarda_y_se_valida(self):
+        r = self.guardar({**TAREA, "propiedad": "primavera"}).get_json()
+        self.assertEqual(self.db.a[r["id"]]["propiedad"], "primavera")
+        r = self.guardar({**TAREA, "propiedad": "otra"}).get_json()
+        self.assertEqual(self.db.a[r["id"]]["propiedad"], "")
+
+
 if __name__ == "__main__":
     unittest.main()

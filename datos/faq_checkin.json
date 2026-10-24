@@ -1,0 +1,383 @@
+[
+ {
+  "id": "faq-hostal-0",
+  "propiedad": "hostal",
+  "titulo": "Datos generales del hostal",
+  "contenido": "Alc Homes SelfCheck-in es un establecimiento con Self Check-in ubicado en Alicante, Comunidad Valenciana, con 5 habitaciones totalmente equipadas. Es un alojamiento hipoalergénico.\nNúmero de licencia: 220002025149487\nIdioma de recepción: alemán, inglés y español.",
+  "etiquetas": [
+   "datos",
+   "licencia",
+   "capacidad",
+   "idiomas",
+   "ubicación"
+  ],
+  "orden": 0
+ },
+ {
+  "id": "faq-hostal-1",
+  "propiedad": "hostal",
+  "titulo": "Habitaciones",
+  "contenido": "Disponemos de 5 tipos de habitaciones, todas con cama doble:\n- Habitación Deluxe: 2 personas. Baño privado\n- Habitación Doble: 2 personas. Baño compartido \n- Habitación Estándar - 1 cama grande: 1 persona. Baño compartido\n- Habitación Superior - 1 cama grande: 1 persona. Baño compartido\n- Habitación con cama grande: 1 persona.Baño compartido\n\nTodas incluyen: TV pantalla plana, WiFi gratis, aire acondicionado, calefacción dentro de la habitación, opa de cama y toallas, enchufe junto a la cama, habitaciones hipoalergénic\nEn la zona común, disponen de_ tetera/cafetera, microondas, armario, 2 zonas de aseo y ducha compartidos,\nzona de estar,",
+  "etiquetas": [
+   "habitaciones",
+   "camas",
+   "baño",
+   "equipamiento",
+   "tipos",
+   "habitaciones"
+  ],
+  "orden": 1
+ },
+ {
+  "id": "faq-hostal-2",
+  "propiedad": "hostal",
+  "titulo": "Check-in y check-out",
+  "contenido": "Check-in: de 15:00 a 23:00 h\nCheck-out: 12:00 h como máximo\nEdad mínima para el check-in: 18 años.\nIMPORTANTE: Self Check-in. Debes cumplimentar el formulario de parte de viajeros\npara recibir el PIN de acceso a la habitación.",
+  "etiquetas": [
+   "check-in",
+   "check-out",
+   "hora",
+   "horario",
+   "entrada",
+   "salida",
+   "edad",
+   "check",
+   "check"
+  ],
+  "orden": 2
+ },
+ {
+  "id": "faq-hostal-3",
+  "propiedad": "hostal",
+  "titulo": "Wifi",
+  "contenido": "Red (SSID): ALCHOMES | Contraseña: Alchomes2025",
+  "etiquetas": [
+   "wifi",
+   "contraseña",
+   "internet",
+   "clave",
+   "wifi"
+  ],
+  "orden": 3
+ },
+ {
+  "id": "faq-hostal-4",
+  "propiedad": "hostal",
+  "titulo": "Desayuno / vending",
+  "contenido": "No se ofrece desayuno. Hay cafetera de cápsulas gratuita y máquinas expendedoras 24h.\nRestaurantes cercanos (100-150 m): El Pesebre, Da La Caña, Cafetería Lilly, El Passatge, La Viña.",
+  "etiquetas": [
+   "desayuno",
+   "vending",
+   "máquinas",
+   "café",
+   "restaurantes",
+   "desayuno",
+   "vending"
+  ],
+  "orden": 4
+ },
+ {
+  "id": "faq-hostal-5",
+  "propiedad": "hostal",
+  "titulo": "Cómo llegar",
+  "contenido": "Dirección: Calle Camino de Ronda, 1 (Alicante)\n- Estación de tren: 850 m (10 min a pie)\n- Aeropuerto Alicante-Elche: 12 km\n- Playa del Postiguet: 2,1 km\n- Castillo de Santa Bárbara: 2,3 km",
+  "etiquetas": [
+   "llegar",
+   "dirección",
+   "aeropuerto",
+   "tren",
+   "playa",
+   "parking",
+   "aparcamiento",
+   "cómo",
+   "llegar"
+  ],
+  "orden": 5
+ },
+ {
+  "id": "faq-hostal-6",
+  "propiedad": "hostal",
+  "titulo": "Normas",
+  "contenido": "- Prohibido fumar. Sin mascotas. Sin fiestas ni eventos.\n- Horario de silencio: 22:00 – 9:00 h.\n- Seguridad y cámaras 24 h en zonas comunes.\n- Toda la unidad en planta baja. Accesible para personas sordas.",
+  "etiquetas": [
+   "normas",
+   "fumar",
+   "mascotas",
+   "fiestas",
+   "ruido",
+   "silencio",
+   "cámaras",
+   "normas"
+  ],
+  "orden": 6
+ },
+ {
+  "id": "faq-hostal-7",
+  "propiedad": "hostal",
+  "titulo": "Acceso al edificio",
+  "contenido": "Introducir el Código de la puerta del portal (se suministra junto al código de la habitación) (seis dígitos + almohadilla → empujar la puerta).",
+  "etiquetas": [
+   "portal",
+   "puerta",
+   "código",
+   "acceso",
+   "acceso",
+   "edificio"
+  ],
+  "orden": 7
+ },
+ {
+  "id": "faq-hostal-8",
+  "propiedad": "hostal",
+  "titulo": "Cerrar la puerta de la habitación",
+  "contenido": "Para cerrar la puerta de su habitación desde fuera, pulse la tecla TRIÁNGULO",
+  "etiquetas": [
+   "cerrar",
+   "puerta",
+   "triángulo",
+   "cerrar",
+   "puerta",
+   "habitación"
+  ],
+  "orden": 8
+ },
+ {
+  "id": "faq-hostal-9",
+  "propiedad": "hostal",
+  "titulo": "Proceso de self check in y recepción de códigos",
+  "contenido": "La legislación española exige la cumplimentación y envío a las autoridades de un formulario con los datos de todas las personas que se alojan en el hostal. \nEste proceso constituye el check in del cliente. Cuando un cliente hace una reserva, el día antes de su check in recibe un mensaje via la web de booking.com o \ndirectamente en su correo o whatsapp si ha hecho la reserva directamente en nuestro hostal. En este mensaje aparece el enlace a nuestra web https://alc-homes-checkin.web.app\n(esta misma, en la que aparece este asistente). El primer paso será ingresar en nuestra web  y cumplimentar el formulario de registroparteviajeros.com, \ncuyo botón al enlace encontrará en la parte superior de esta web. Debe seguir el enlace y cumplimentarlo con los datos de todas las personas que se alojen\ncon usted. Una vez lo haya hecho, debe usted volver a esta misma página. Si ha hecho el proceso correctamente, en la parte superior de esta web verá un mensaje de \nconfirmación. A partir de las 15:00 del día del check in, en esta misma página en la parte superior, tendrá, además, el nombre de su habitación y los códigos \nde entrada.",
+  "etiquetas": [
+   "parte de viajeros",
+   "registro",
+   "códigos",
+   "self check-in",
+   "pin",
+   "proceso",
+   "self",
+   "check"
+  ],
+  "orden": 9
+ },
+ {
+  "id": "faq-hostal-10",
+  "propiedad": "hostal",
+  "titulo": "Check out",
+  "contenido": "Debes abandonar la habitación antes de las 12:00 del día de tu check out. Por favor, asegúrate de llevarte todas tus pertenencias y dejar cualquier resto,\nbasura o desperdicio en la papelera. Cierra la puerta desde fuera presionando el triángulo. No es necesario que hagas nada más. Hasta pronto!",
+  "etiquetas": [
+   "check-out",
+   "salida",
+   "llaves",
+   "check"
+  ],
+  "orden": 10
+ },
+ {
+  "id": "faq-hostal-11",
+  "propiedad": "hostal",
+  "titulo": "Contacto y emergencias",
+  "contenido": "Teléfono 24 h: +34 622 38 35 87 (ESTE ES EL ÚNICO NÚMERO DE ATENCIÓN AL CLIENTE, NO HAY NINGUNO MÁS)\nTambién puedes contactarnos por mensajes dentro de Booking.com.",
+  "etiquetas": [
+   "teléfono",
+   "contacto",
+   "emergencias",
+   "urgencias",
+   "hospital",
+   "policía",
+   "contacto",
+   "emergencias"
+  ],
+  "orden": 11
+ },
+ {
+  "id": "faq-primavera-0",
+  "propiedad": "primavera",
+  "titulo": "Datos generales de La Casa de la Primavera",
+  "contenido": "La Casa de la Primavera es una vivienda de uso turístico de alquiler completo, ubicada en Avenida Carabassí, 1, Bungalow 11, Urbanización Costa Hispania, Gran Alacant (Santa Pola), Alicante.\nNúmero de licencia VUT: CV-VUT0522344-A\nCapacidad máxima: 5 huéspedes.",
+  "etiquetas": [
+   "datos",
+   "licencia",
+   "capacidad",
+   "idiomas",
+   "ubicación"
+  ],
+  "orden": 0
+ },
+ {
+  "id": "faq-primavera-1",
+  "propiedad": "primavera",
+  "titulo": "La vivienda",
+  "contenido": "3 dormitorios: 2 con cama doble, 1 con cama individual.\n2 baños (uno por planta).\nTerraza superior con balcón; terraza-jardín en planta baja.\nFuera de la vivienda, dentro de la urbanización (uso compartido con el resto de residentes): jardines, piscinas y parque infantil.\nA menos de 100 m, fuera de la urbanización: bares, restaurantes y una tienda-supermercado.\nPlaya a menos de 10 minutos andando.\nEquipamiento: cocina completa (frigorífico combi, placa de inducción con campana extractora, lavavajillas, vajilla, cubertería, batería de cocina, trapos), aire acondicionado con bomba de calor (unidad fija en el salón-cocina, unidades portátiles en las habitaciones — IMPORTANTE: las ventanas de las habitaciones tienen velcro adaptado para la salida de aire caliente de los equipos portátiles; se ruega no abrir las ventanas, y si se abren, volver a colocar el velcro tal como estaba), lavadora, plancha eléctrica, TV en el salón.",
+  "etiquetas": [
+   "vivienda",
+   "dormitorios",
+   "baños",
+   "terraza",
+   "equipamiento",
+   "piscina",
+   "vivienda"
+  ],
+  "orden": 1
+ },
+ {
+  "id": "faq-primavera-2",
+  "propiedad": "primavera",
+  "titulo": "Check-in y check-out",
+  "contenido": "Check-in: a partir de las 15:00 h\nCheck-out: hasta las 12:00 h\nEdad mínima para el check-in: 18 años.\nSelf Check-in. Debes completar el formulario de parte de viajeros para recibir los códigos de acceso.",
+  "etiquetas": [
+   "check-in",
+   "check-out",
+   "hora",
+   "horario",
+   "entrada",
+   "salida",
+   "edad",
+   "check",
+   "check"
+  ],
+  "orden": 2
+ },
+ {
+  "id": "faq-primavera-3",
+  "propiedad": "primavera",
+  "titulo": "Wifi",
+  "contenido": "Red (SSID): Livebox6s-3D26\nContraseña: 1234carabasi",
+  "etiquetas": [
+   "wifi",
+   "contraseña",
+   "internet",
+   "clave",
+   "wifi"
+  ],
+  "orden": 3
+ },
+ {
+  "id": "faq-primavera-4",
+  "propiedad": "primavera",
+  "titulo": "Cocina y alrededores",
+  "contenido": "Al ser una vivienda completa con cocina propia, no hay servicio de desayuno ni vending — la cocina está totalmente equipada para cocinar. A menos de 100 m de la urbanización hay bares, restaurantes y una tienda-supermercado.",
+  "etiquetas": [
+   "cocina",
+   "desayuno",
+   "supermercado",
+   "restaurantes",
+   "cocina",
+   "alrededores"
+  ],
+  "orden": 4
+ },
+ {
+  "id": "faq-primavera-5",
+  "propiedad": "primavera",
+  "titulo": "Cómo llegar",
+  "contenido": "Dirección exacta: Urbanización Costa Hispania, Avenida Carabassí, 1, Bungalow 11, Gran Alacant, Santa Pola (Alicante)\nParking: la plaza de parking de la vivienda es la número 11.\nPara llegar, el huésped debe dirigirse a Avenida de Polonia 160, Gran Alacant, y situarse en la esquina de la Avenida de Polonia con Avenida de Noruega — desde ahí debe seguir las instrucciones del vídeo de bienvenida que aparece en esta misma página. Código de acceso a la urbanización: 2308.",
+  "etiquetas": [
+   "llegar",
+   "dirección",
+   "aeropuerto",
+   "tren",
+   "playa",
+   "parking",
+   "aparcamiento",
+   "cómo",
+   "llegar"
+  ],
+  "orden": 5
+ },
+ {
+  "id": "faq-primavera-6",
+  "propiedad": "primavera",
+  "titulo": "Normas",
+  "contenido": "- No se admiten mascotas\n- Prohibido fumar\n- Prohibidas las fiestas\n- Se debe respetar el horario de descanso de los vecinos; se ruega no hacer ruido en el jardín ni en la terraza a partir de las 23:00 h\n- No hay cámaras de seguridad ni caja fuerte en la vivienda\n- La vivienda NO tiene acceso adaptado para personas con movilidad reducida",
+  "etiquetas": [
+   "normas",
+   "fumar",
+   "mascotas",
+   "fiestas",
+   "ruido",
+   "silencio",
+   "cámaras",
+   "normas"
+  ],
+  "orden": 6
+ },
+ {
+  "id": "faq-primavera-7",
+  "propiedad": "primavera",
+  "titulo": "Acceso a la urbanización y a la vivienda",
+  "contenido": "1. Código de acceso a la urbanización Costa Hispania (entrada por calle Polonia): 2308\n2. Dirígete a Avenida de Polonia 160, Gran Alacant, y sitúate en la esquina de la Avenida de Polonia con Avenida de Noruega. Desde ahí, sigue las instrucciones del vídeo de bienvenida disponible en esta misma página para llegar a la vivienda.\n3. El cajetín de llaves está en la puerta exterior del bungalow, a la izquierda. Tira de la pestaña de la parte superior para abrir la tapa manualmente, e introduce el código del cajetín (es el mismo código que aparece arriba en esta página cuando ya está disponible).",
+  "etiquetas": [
+   "urbanización",
+   "cajetín",
+   "llaves",
+   "código",
+   "acceso",
+   "acceso",
+   "urbanización",
+   "vivienda"
+  ],
+  "orden": 7
+ },
+ {
+  "id": "faq-primavera-8",
+  "propiedad": "primavera",
+  "titulo": "Cerrar la puerta al salir",
+  "contenido": "La vivienda se cierra con llave (cerradura normal), tanto la puerta del jardín como la puerta de la casa. Al salir, cierra con llave ambas puertas.\nAl finalizar la estancia (check-out), deja las llaves dentro del cajetín de llaves de la entrada.",
+  "etiquetas": [
+   "cerrar",
+   "llaves",
+   "cajetín",
+   "salir",
+   "cerrar",
+   "puerta",
+   "salir"
+  ],
+  "orden": 8
+ },
+ {
+  "id": "faq-primavera-9",
+  "propiedad": "primavera",
+  "titulo": "Proceso de self check-in y recepción de códigos",
+  "contenido": "Igual que en el resto de propiedades de Alc Homes: recibirás un mensaje el día antes con el enlace a esta web, deberás cumplimentar el formulario de registroparteviajeros.com, y volver a esta página para ver la confirmación. A partir de las 15:00 del día de check-in, en la parte superior de esta página verás el código del cajetín de llaves.",
+  "etiquetas": [
+   "parte de viajeros",
+   "registro",
+   "códigos",
+   "self check-in",
+   "pin",
+   "proceso",
+   "self",
+   "check"
+  ],
+  "orden": 9
+ },
+ {
+  "id": "faq-primavera-10",
+  "propiedad": "primavera",
+  "titulo": "Check-out",
+  "contenido": "Debes abandonar la vivienda antes de las 12:00 del día de tu check-out. Por favor, asegúrate de llevarte todas tus pertenencias y dejar cualquier resto o basura en el lugar indicado. Cierra con llave tanto la puerta del jardín como la puerta de la casa, y deja las llaves dentro del cajetín de la entrada. No es necesario que hagas nada más. ¡Hasta pronto!",
+  "etiquetas": [
+   "check-out",
+   "salida",
+   "llaves",
+   "check"
+  ],
+  "orden": 10
+ },
+ {
+  "id": "faq-primavera-11",
+  "propiedad": "primavera",
+  "titulo": "Contacto y emergencias",
+  "contenido": "Teléfono 24h: +34 622 38 35 87 (ESTE ES EL ÚNICO NÚMERO DE ATENCIÓN AL CLIENTE, NO HAY NINGUNO MÁS)\nEmergencias generales: 112 (Policía, Ambulancia, Bomberos — atención multilingüe: español, inglés, francés, alemán)\nPolicía Local (Santa Pola): +34 966 69 15 16\nGuardia Civil (Santa Pola): +34 966 69 10 28\nInformación sanitaria:\n- Consultorio Médico de Gran Alacant: Av. D'Escandinàvia, 31, 03130 Gran Alacant — +34 966 91 73 70\n- Hospital General de Elche: Camí de l'Aljub, s/n, 03203 Elche — +34 966 67 90 00\n- Hospital Universitari de Sant Joan d'Alacant: Ctra. Nacional 332, s/n, 03030 San Juan de Alicante — +34 965 93 83 00\n- Farmacias de guardia: rotan diariamente en Santa Pola y Gran Alacant — consultar en www.colegiofarmaceuticosalicante.es o llamar al 112",
+  "etiquetas": [
+   "teléfono",
+   "contacto",
+   "emergencias",
+   "urgencias",
+   "hospital",
+   "policía",
+   "contacto",
+   "emergencias"
+  ],
+  "orden": 11
+ }
+]
