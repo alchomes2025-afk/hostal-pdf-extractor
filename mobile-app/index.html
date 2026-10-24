@@ -3970,17 +3970,6 @@ async function abrirEditorKb() {
   const nueva = emEl("button", "op-btn principal", "➕ Nueva entrada", cuerpo);
   nueva.type = "button";
   nueva.onclick = () => formularioKb(null, d.tipos);
-  const importar = emEl("button", "op-btn", "📥 Importar las preguntas frecuentes de la web de check-in", cuerpo);
-  importar.type = "button";
-  emEl("small", "", "Las carga como borradores para que las revises y las apruebes. No pisa lo que ya hayas editado.", importar);
-  importar.onclick = async () => {
-    importar.disabled = true;
-    const r = await opApi("/kb/importar-faq", {method: "POST", body: "{}"});
-    importar.disabled = false;
-    if (!r.ok) { window.alert(r.error || "No se ha podido importar."); return; }
-    window.alert(r.creadas ? `Importadas ${r.creadas} entradas como borrador.` : "Ya estaban todas importadas.");
-    abrirEditorKb();
-  };
   emEl("p", "op-vacio", "Solo lo APROBADO lo ven el sustituto y el asistente. Lo recién aprendido queda como borrador hasta que lo revises.", cuerpo);
   const nombres = Object.fromEntries(OP_GRUPOS.map(g => [g[0], g[1]]));
   d.entradas.sort((a, b) => (a.tipo || "").localeCompare(b.tipo || "") || (a.orden ?? 1000) - (b.orden ?? 1000)).forEach(e => {

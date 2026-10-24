@@ -74,7 +74,6 @@ PERMISOS_RUTAS = {
     "operativa.kb_listar": (a.ENTRENAMIENTO,),
     "operativa.kb_guardar": (a.ENTRENAMIENTO,),
     "operativa.kb_borrar": (a.ENTRENAMIENTO,),
-    "operativa.kb_importar_faq": (a.ENTRENAMIENTO,),
     # Entrenamiento: entrevista a Ione (solo el propietario)
     "entrenamiento.temas": (a.ENTRENAMIENTO,),
     "entrenamiento.sesion": (a.ENTRENAMIENTO,),

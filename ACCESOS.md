@@ -113,8 +113,8 @@ Solo el propietario (`operativa.entrenamiento`). Botón «🎙 Entrenamiento» e
 (`services/entrevista.py`, `mobile_entrenamiento.py`) manda a Groq (cuenta de gestión) el tema, lo que hay que cubrir, lo ya recogido y los últimos mensajes; el modelo devuelve la siguiente pregunta y,
 si procede, entradas nuevas. **Las entradas se guardan siempre como BORRADOR** (un tema ya aprobado no se pisa: se propone una «revisión» aparte) y se revisan en «📚 Base de conocimiento».
 La conversación queda en Firestore (`entrenamiento_sesiones`) para seguirla otro día. Las entradas de escalado llevan los apartados: ejemplos, lo que resuelve y no resuelve el sustituto, a quién avisar,
-medio, horario, datos a dar, qué hacer si no responde y cuándo es urgente. Además, «Importar las preguntas frecuentes de la web de check-in» carga 24 entradas (12 del hostal, 12 de la Primavera) como borradores
-(`datos/faq_checkin.json`); las de la Primavera solo las ven quienes tienen acceso a esa propiedad (campo `propiedad` de cada entrada).
+medio, horario, datos a dar, qué hacer si no responde y cuándo es urgente.
+Cada entrada tiene un campo `propiedad` (hostal, primavera o vacío): lo de la Casa de la Primavera solo lo ven (y lo usa el asistente) quienes tienen acceso a esa propiedad.
 
 ## Historial de sustitución (fase 7)
 Todo lo que hace el **2589** lo registra el **servidor** (no el navegador) en Firestore `historial_sustitucion`, con fecha y hora y con el nombre de su sesión firmada (el que escribió al entrar; no se puede

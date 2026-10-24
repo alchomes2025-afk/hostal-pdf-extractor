@@ -188,30 +188,3 @@ def indice(primavera=True):
             grupos[e["tipo"]].append({"id": e["id"], "titulo": e.get("titulo")})
     return grupos
 
-
-def importar_faq(usuario=""):
-    """Carga como BORRADORES las preguntas frecuentes que ya tiene la web de check-in (datos/faq_checkin.json, una entrada por sección de sus documentos de referencia)
-    para que se revisen y se aprueben. No pisa nada: una entrada que ya existe (aunque se haya editado) se deja como está. Devuelve {creadas, existentes}."""
-    import json
-    import os
-    if config.db is None:
-        raise ErrorKB("La base de conocimiento no está disponible ahora mismo", 503)
-    ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datos", "faq_checkin.json")
-    with open(ruta, encoding="utf-8") as f:
-        origen = json.load(f)
-    existentes = {e["id"] for e in entradas(None, forzar=True)}
-    creadas = 0
-    ahora = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    for item in origen:
-        if item["id"] in existentes:
-            continue
-        try:
-            config.db.collection(COLECCION).document(item["id"]).set({
-                "tipo": "faq", "titulo": item["titulo"], "contenido": item["contenido"], "etiquetas": item.get("etiquetas", []), "estado": "borrador",
-                "orden": 1000 + item.get("orden", 0), "propiedad": item["propiedad"], "actualizado": ahora, "editado_por": str(usuario or "")[:40], "origen": "web de check-in"})
-            creadas += 1
-        except Exception as e:
-            logger.error(f"[operativa_kb] No se pudo importar {item['id']}: {e}")
-            raise ErrorKB("No se han podido importar todas. Inténtalo de nuevo.", 502)
-    olvidar_cache()
-    return {"creadas": creadas, "existentes": len(origen) - creadas}

@@ -6,7 +6,6 @@ mobile_operativa.py — Pestaña «Operativa de Gestión» (la ven el propietari
   GET  /mobile/operativa/kb              (operativa.entrenamiento) → TODAS las entradas, con su estado (borrador/aprobado)
   POST /mobile/operativa/kb              (operativa.entrenamiento) {id?, tipo, titulo, contenido, etiquetas, orden, estado} → crea o actualiza
   POST /mobile/operativa/kb/borrar       (operativa.entrenamiento) {id}
-  POST /mobile/operativa/kb/importar-faq (operativa.entrenamiento) → carga como borradores las preguntas frecuentes de la web de check-in
 
 El asistente solo usa las entradas APROBADAS (services/operativa_kb.py). El permiso de cada ruta está en rutas_permisos.py.
 """
@@ -55,15 +54,6 @@ def kb_guardar():
         return _error(e)
     logger.info(f"[operativa] Entrada {doc_id} guardada por {nombre_actual() or perfil_actual().id}")
     return jsonify({"ok": True, "id": doc_id})
-
-
-@operativa_bp.route("/kb/importar-faq", methods=["POST"])
-def kb_importar_faq():
-    try:
-        resultado = kb.importar_faq(usuario=nombre_actual() or perfil_actual().nombre)
-    except kb.ErrorKB as e:
-        return _error(e)
-    return jsonify({"ok": True, **resultado})
 
 
 @operativa_bp.route("/kb/borrar", methods=["POST"])
