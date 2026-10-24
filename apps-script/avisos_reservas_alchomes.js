@@ -15,6 +15,7 @@
  */
 var AVISOS_URL = "https://hostal-pdf-extractor.onrender.com/reserva-correo";
 var AVISOS_REMITENTES = "booking.com OR airbnb.com OR hostelworld.com OR holidu.com OR expedia.com OR vrbo.com OR agoda.com";
+var AVISOS_RESERVAS = false;  // true: manda también los avisos de reserva de las plataformas (cotejo con Beds24, hoy desactivado en el backend)
 var AVISOS_DIAS = 3;          // ventana de búsqueda
 var AVISOS_LOTE = 20;         // mensajes por llamada
 var AVISOS_MAX_CUERPO = 12000;
@@ -31,7 +32,9 @@ function revisarAvisosReserva() {
     var conocidos = {};
     vistos.forEach(function (id) { conocidos[id] = true; });
 
-    var hilos = GmailApp.search("(from:(" + AVISOS_REMITENTES + ") OR from:(noreply_htl@trip.com) OR subject:\"returned an error message\") newer_than:" + AVISOS_DIAS + "d", 0, 50);
+    var consulta = 'subject:"returned an error message"';
+    if (AVISOS_RESERVAS) consulta = "(from:(" + AVISOS_REMITENTES + ") OR from:(noreply_htl@trip.com) OR " + consulta + ")";
+    var hilos = GmailApp.search(consulta + " newer_than:" + AVISOS_DIAS + "d", 0, 50);
     var nuevos = [];
     hilos.forEach(function (hilo) {
       hilo.getMessages().forEach(function (m) {

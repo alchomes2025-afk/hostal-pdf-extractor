@@ -152,6 +152,9 @@ class Flujo(unittest.TestCase):
     def setUp(self):
         self.col = Coleccion()
         self.envios = []
+        p = mock.patch.object(rc, "COTEJO_RESERVAS_ACTIVO", True)
+        p.start()
+        self.addCleanup(p.stop)
         for nombre, valor in (("_coleccion", mock.Mock(return_value=self.col)),
                               ("enviar_whatsapp_callmebot", mock.Mock(side_effect=self.envios.append))):
             p = mock.patch.object(rc, nombre, valor)
@@ -280,6 +283,20 @@ class ErroresDeCanal(Flujo):
     def test_otro_canal_se_avisa_por_separado(self):
         self.registrar(self.error("e1", 702398, "Expedia.com"), self.error("e2", 702399, "Expedia.com"))
         self.assertEqual(rc.avisar_errores_canal(AHORA), ["Expedia.com"])
+
+
+class CotejoDesactivado(unittest.TestCase):
+    def test_por_defecto_el_cotejo_esta_apagado_y_solo_se_guardan_los_errores_de_canal(self):
+        col = Coleccion()
+        with mock.patch.object(rc, "_coleccion", return_value=col):
+            self.assertFalse(rc.COTEJO_RESERVAS_ACTIVO)
+            r = rc.recibir_avisos([
+                {"id": "a", "asunto": "New booking! Ana (Confirmation number: 4521896307)", "de": "noreply@booking.com", "cuerpo": ""},
+                {"id": "b", "asunto": "Booking.com returned an error message for Alc Homes SelfCheck in - roomId 702395 - x", "de": "noreply", "cuerpo": ""}])
+            self.assertEqual((r["nuevos"], r["ignorados"], r["errores_canal"]), (0, 1, 1))
+            self.assertEqual(list(col.datos), ["b"])
+            self.assertEqual(rc.verificar_pendientes(leer_beds24=lambda d, h: self.fail("no debe consultar Beds24")),
+                             {"verificadas": 0, "avisadas": 0, "resueltas": 0, "esperando": 0})
 
 
 class Endpoint(unittest.TestCase):

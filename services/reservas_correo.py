@@ -35,6 +35,11 @@ from services.whatsapp import enviar_whatsapp_callmebot
 logger = logging.getLogger(__name__)
 
 COLECCION = "reservas_correo"
+# Cotejo de avisos de reserva del correo con Beds24: DESACTIVADO (2026-10-24). Los avisos de reserva que llegan al buzón son
+# casi todos del propio Beds24 (ya la tiene: nada que cotejar) y Booking.com/Expedia no mandan el suyo. Queda el código y las pruebas
+# para cuando haya una fuente independiente (p. ej. los correos de «nueva reserva» de Booking activados en su extranet) y se
+# conozca el campo de referencia de cada canal en Beds24. Lo que SÍ está activo: el aviso de errores de canal.
+COTEJO_RESERVAS_ACTIVO = False
 ESPERA_MINUTOS = 20          # Beds24 tarda unos minutos en recibir la reserva del canal (caso real: ~9 min)
 VIGILAR_HORAS = 36           # tras este tiempo sin cuadrar se deja de comprobar (ya se avisó una vez)
 MAX_MENSAJES = 40            # por llamada
@@ -223,6 +228,9 @@ def recibir_avisos(mensajes):
             repetidos += 1
             continue
         datos = analizar_aviso(m.get("asunto"), m.get("de"), m.get("cuerpo"))
+        if not datos.get("error_canal") and not COTEJO_RESERVAS_ACTIVO:
+            ignorados += 1
+            continue
         if datos.pop("error_canal", False):
             coleccion.document(mensaje_id).set({**datos, "estado": "error_canal", "asunto": str(m.get("asunto") or "")[:200],
                                                 "recibido": _ahora().isoformat(), "avisado": False})
@@ -315,7 +323,7 @@ def verificar_pendientes(ahora=None, leer_beds24=None):
     Si falla un envío no se anota, y se reintenta en la siguiente pasada."""
     coleccion = _coleccion()
     vacio = {"verificadas": 0, "avisadas": 0, "resueltas": 0, "esperando": 0}
-    if coleccion is None:
+    if coleccion is None or not COTEJO_RESERVAS_ACTIVO:
         return vacio
     ahora = ahora or _ahora()
     docs = [(d.id, d.to_dict() or {}) for d in coleccion.where("estado", "in", ["pendiente", "avisada"]).stream()]
