@@ -1686,10 +1686,10 @@ def mobile_login():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
     cuerpo = request.get_json(silent=True) or {}
     nombre, identidad = perfil.nombre_fijo or None, None
-    if perfil.pide_nombre:
+    if perfil.pide_nombre or perfil.pregunta_nombre:   # PIN compartido: cada persona dice quién es al entrar
         nombre = accesos.normalizar_nombre(cuerpo.get("nombre"))
         if not nombre:
-            return jsonify({"ok": True, "necesita_nombre": True, "perfil": perfil.id, "perfil_nombre": perfil.nombre})
+            return jsonify({"ok": True, "necesita_nombre": True, "perfil": perfil.id, "perfil_nombre": perfil.nombre, "auditado": perfil.auditado})
     elif perfil.identidad_por_dispositivo:   # 1379: Ione o Adrián, según el dispositivo (si es la primera vez, la app lo pregunta y llama a /dispositivo)
         nombre = dispositivos.buscar(cuerpo.get("deviceId"), perfil)
         identidad = {"necesita": nombre is None, "opciones": list(perfil.identidad_por_dispositivo)}

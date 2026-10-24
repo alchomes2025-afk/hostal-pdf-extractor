@@ -73,6 +73,9 @@ TEMAS = [
         "las categorías de problema técnico (la app, Beds24, RPV, cerraduras y códigos, wifi, cámaras, sincronización de canales, correos automáticos…)",
         "para CADA categoría: ejemplos reales, qué puede probar el sustituto antes de avisar y qué no debe tocar, a Adrián cómo y cuándo avisarle, qué datos darle, qué hacer si no responde, y qué es urgente"]},
 ]
+TEMAS.append({"id": "libre", "titulo": "Otras cosas que no hayamos previsto", "tipo": "proceso", "libre": True, "cubrir": [
+    "cualquier cosa que Ione o Adrián quieran dejar apuntada y que no encaje en los otros temas (un caso raro, una costumbre, un truco, un proveedor nuevo, algo que cambió…)",
+    "decidir de qué tipo es (tarea, pregunta frecuente, teléfono, escalado o proceso) y completarla con las preguntas necesarias: cuándo pasa, qué se hace, a quién se avisa, qué datos hay que dar"]})
 TEMAS_POR_ID = {t["id"]: t for t in TEMAS}
 
 ESTRUCTURA_ESCALADO = ("Para las entradas de ESCALADO, escribe el contenido con estos apartados (los que se hayan contado): Ejemplos · Lo resuelve el sustituto · Lo que NO resuelve el sustituto · "
@@ -93,12 +96,14 @@ def _prompt_sistema(tema, titulos_existentes):
     cubrir = "\n".join(f"- {c}" for c in tema["cubrir"])
     existentes = "\n".join(f"- {t}" for t in titulos_existentes[:40]) or "(todavía nada)"
     extra = ("\n" + ESTRUCTURA_ESCALADO) if tema["tipo"] == "escalado" else ""
+    libre = ("\nMODO LIBRE: aquí no hay lista de preguntas. Ione o Adrián te CUENTAN algo que no estaba previsto: primero ESCÚCHALO y apúntalo; elige tú el tipo de entrada que mejor le encaje; "
+             "haz las preguntas que hagan falta para dejarlo claro y completo (una cada vez) y, cuando puedas, guarda la entrada. Si lo que cuentan corrige o amplía algo que ya está recogido, reutiliza su título.\n") if tema.get("libre") else ""
     return f"""Eres el entrevistador del sistema de gestión de ALC Homes (un hostal en Alicante y una casa de alquiler turístico). Entrevistas a IONE, que lleva el puesto de gestora del hostal, para recoger lo que sabe y que
 una persona que la sustituya pueda hacer su trabajo con tus apuntes. Suele estar Adrián (el propietario) con ella. Hablas en español, cercano y claro, sin tecnicismos.
 
 TEMA DE HOY: {tema['titulo']}.
 Lo que hay que cubrir de este tema:
-{cubrir}
+{cubrir}{libre}
 
 Lo que ya está recogido (no lo repitas, a menos que haya algo nuevo que añadir):
 {existentes}
@@ -234,6 +239,12 @@ def turno(tema_id, texto, sesion_id=None, usuario=""):
         mensajes.append({"rol": "ione", "texto": texto, "ts": _ahora(), "por": str(usuario or "")[:40]})
     elif mensajes and mensajes[-1]["rol"] == "entrevistador":
         return {"sesion_id": sesion["id"], "pregunta": mensajes[-1]["texto"], "guardadas": [], "tema_cubierto": bool(sesion.get("cubierto")), "resumen": "", "mensajes": mensajes}
+    elif tema.get("libre"):   # en el tema libre habla primero quien quiere apuntar algo: no se gasta una llamada al modelo para saludar
+        saludo = "Cuéntame lo que quieras dejar apuntado y que no hayamos previsto: lo escucho, te hago las preguntas que haga falta y lo guardo como borrador."
+        mensajes.append({"rol": "entrevistador", "texto": saludo, "ts": _ahora()})
+        sesion.update(mensajes=mensajes, actualizado=_ahora())
+        _col().document(sesion["id"]).set({k: v for k, v in sesion.items() if k != "id"})
+        return {"sesion_id": sesion["id"], "pregunta": saludo, "guardadas": [], "tema_cubierto": False, "resumen": "", "mensajes": mensajes}
 
     titulos = [e.get("titulo") for e in kb.entradas(None, forzar=True) if e.get("tema") == tema_id or e.get("tipo") == tema["tipo"]]
     modelo_msgs = [{"role": "system", "content": _prompt_sistema(tema, [t for t in titulos if t])}]
