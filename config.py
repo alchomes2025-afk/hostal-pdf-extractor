@@ -131,6 +131,8 @@ CONECTOR_URL = os.environ.get("CONECTOR_URL", "")
 PIN_ENVIO_CODIGOS = os.environ.get("PIN_ENVIO_CODIGOS", "1432")
 # PIN del botón «Desglose» de Finanzas (reparto de la comisión de gestión de ALC Homes entre Ione, Adrián y Conchi).
 PIN_DESGLOSE_GESTION = os.environ.get("PIN_DESGLOSE_GESTION", "1379")
+# PIN de la limpiadora de La Casa de la Primavera: solo abre su calendario (ocupado/libre) para marcar incidencias de limpieza.
+PIN_LIMPIEZA = os.environ.get("PIN_LIMPIEZA", "4268")
 GROQ_API_URL    = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL_PRI  = "openai/gpt-oss-120b"
 GROQ_MODEL_FALL = "openai/gpt-oss-20b"

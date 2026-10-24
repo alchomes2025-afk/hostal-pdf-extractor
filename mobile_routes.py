@@ -1250,6 +1250,14 @@ def _es_pin_admin():
     return str(_pin_recibido()) == str(MOBILE_APP_PIN_ADMIN)
 
 
+def _es_pin_limpieza():
+    """PIN de la limpiadora (config.PIN_LIMPIEZA). check_pin NO lo acepta: solo vale para mobile_limpieza.py."""
+    import hmac
+    from config import PIN_LIMPIEZA
+    recibido = str(_pin_recibido() or "")
+    return bool(PIN_LIMPIEZA) and bool(recibido) and hmac.compare_digest(recibido.encode(), str(PIN_LIMPIEZA).encode())
+
+
 def is_valid_email(email):
     return re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email) is not None
 
@@ -1412,6 +1420,8 @@ def get_logs():
 def mobile_login():
     if check_pin():
         return jsonify({"ok": True, "admin": _es_pin_admin()})
+    if _es_pin_limpieza():   # la limpiadora: la app solo le abre el calendario de la casa (ver mobile_limpieza.py)
+        return jsonify({"ok": True, "admin": False, "rol": "limpieza"})
     return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
 
 
