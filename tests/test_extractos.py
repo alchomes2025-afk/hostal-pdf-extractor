@@ -158,7 +158,7 @@ class Col:
 
 
 class Endpoint(unittest.TestCase):
-    PIN, ADMIN = "1111", "9999"
+    PIN, ADMIN = "1111", "1379"
 
     def setUp(self):
         self.guardados = []
@@ -183,26 +183,23 @@ class Endpoint(unittest.TestCase):
         return self.cliente.post("/mobile/facturas/cotejar", json={"propiedad_id": "349341", "usuario": "M", "archivo": {"nombre": nombre, "mime": mime, "base64": base64.b64encode(contenido).decode()}},
                                  headers={"x-app-pin": pin} if pin else {})
 
-    def test_cotejo_con_pin_normal_solo_ve_las_facturas_de_su_propiedad(self):
-        r = self._post(self.PIN).get_json()
-        self.assertTrue(r["ok"])
-        self.assertEqual(r["resumen"]["movimientos"], 7)
-        self.assertEqual(r["resumen"]["conciliadas"], 1)
-        self.assertEqual(r["conciliadas"][0]["factura"]["propiedad"], "La Casa de la Primavera")
-        self.assertEqual(r["facturas_consideradas"], 1)                                   # la del hostal y la de otro cliente no cuentan
-        self.assertTrue(r["extracto_guardado"])
-        self.assertEqual(self.guardados[0][0][-1], "Extractos")
+    def test_el_pin_normal_ya_no_puede_cotejar(self):
+        self.assertEqual(self._post(self.PIN).status_code, 403)             # facturas solo para el propietario
+        self.assertEqual(self.guardados, [])
 
     def test_con_pin_de_admin_se_ven_las_dos_propiedades(self):
         r = self._post(self.ADMIN).get_json()
         self.assertEqual(r["facturas_consideradas"], 2)
         self.assertEqual(r["resumen"]["conciliadas"], 2)
+        self.assertEqual(r["resumen"]["movimientos"], 7)
+        self.assertTrue(r["extracto_guardado"])
+        self.assertEqual(self.guardados[0][0][-1], "Extractos")
 
     def test_sin_pin(self):
         self.assertEqual(self._post(None).status_code, 401)
 
     def test_formato_no_entendido_se_guarda_y_se_explica(self):
-        r = self._post(self.PIN, nombre="mov.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", contenido=b"PK\x03\x04")
+        r = self._post(self.ADMIN, nombre="mov.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", contenido=b"PK\x03\x04")
         self.assertEqual(r.status_code, 422)
         self.assertIn("quedado guardado", r.get_json()["error"])
 

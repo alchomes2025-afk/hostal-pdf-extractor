@@ -20,7 +20,7 @@ def b64(texto):
 
 
 class Extracto(unittest.TestCase):
-    PIN, PIN_ADMIN = "1111", "9999"
+    PIN, PIN_ADMIN = "1111", "1379"
 
     def setUp(self):
         self.guardados = []
@@ -43,7 +43,7 @@ class Extracto(unittest.TestCase):
         self.guardados.append({"raiz": raiz, "ruta": ruta, "nombre": nombre, "mime": mime, "n": len(contenido), "registro": registro})
         return {"file_id": "F1", "url": "https://drive/f1", "nombre": nombre, "hoja_url": None}
 
-    def _post(self, pin="1111", propiedad="349341", **archivo):
+    def _post(self, pin="1379", propiedad="349341", **archivo):
         cuerpo = {"propiedad_id": propiedad, "usuario": "Mónica",
                   "archivo": {"nombre": "movimientos octubre.csv", "mime": "text/csv", "base64": b64("fecha;concepto;importe\n01/10/2026;LUZ;-45,30\n"), **archivo}}
         return self.cliente.post("/mobile/facturas/extracto", json=cuerpo, headers={"x-app-pin": pin} if pin else {})

@@ -183,7 +183,7 @@ class LeerEscaneos(Base):
 
 class Diagnostico(Base):
     def test_diag_solo_admin(self):
-        for objeto, nombre, valor in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "9999"), (facturas, "_modelo_vision", lambda: "vis/m")):
+        for objeto, nombre, valor in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "1379"), (facturas, "_modelo_vision", lambda: "vis/m")):
             p = mock.patch.object(objeto, nombre, valor)
             p.start()
             self.addCleanup(p.stop)
@@ -191,7 +191,7 @@ class Diagnostico(Base):
         app.register_blueprint(mobile_facturas.facturas_bp)
         c = app.test_client()
         self.assertEqual(c.get("/mobile/facturas/diag-ia", headers={"x-app-pin": "1111"}).status_code, 403)
-        r = c.get("/mobile/facturas/diag-ia", headers={"x-app-pin": "9999"})
+        r = c.get("/mobile/facturas/diag-ia", headers={"x-app-pin": "1379"})
         self.assertEqual(r.get_json()["vision"], "vis/m")
         self.assertNotIn("k", r.get_data(as_text=True).replace("vis/m", "").replace("vision", "").replace("variable", "")[:0])   # sin claves en la respuesta
 

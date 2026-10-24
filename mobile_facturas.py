@@ -28,7 +28,7 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from config import CONECTOR_URL
-from mobile_routes import _es_pin_admin, check_pin
+from mobile_routes import _es_pin_admin, check_pin, exigir_permiso
 import re
 from datetime import datetime
 
@@ -36,6 +36,7 @@ from services import asesor, drive_cliente, facturas, gestor, puente_plataforma
 
 logger = logging.getLogger(__name__)
 facturas_bp = Blueprint("facturas", __name__, url_prefix="/mobile/facturas")
+facturas_bp.before_request(exigir_permiso)
 
 CLIENTE_APP = "alc-homes"
 

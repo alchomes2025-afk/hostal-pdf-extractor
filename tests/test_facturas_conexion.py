@@ -37,7 +37,7 @@ CARPETA = "1AbCdEfGhIjKlMnOpQrStUvWx"
 
 
 class Conexion(unittest.TestCase):
-    PIN, PIN_ADMIN = "1111", "9999"
+    PIN, PIN_ADMIN = "1111", "1379"
 
     def setUp(self):
         self.db = FakeDB()
@@ -92,8 +92,9 @@ class Conexion(unittest.TestCase):
 
     # ── iniciar la conexión ──
     def test_solo_el_admin_puede_pedir_el_enlace(self):
-        for pin in (None, self.PIN, "0000"):
-            self.assertEqual(self._conectar(pin).status_code, 403)
+        for pin in (None, "0000"):
+            self.assertEqual(self._conectar(pin).status_code, 401)
+        self.assertEqual(self._conectar(self.PIN).status_code, 403)       # el PIN antiguo «normal» (ahora gestor de la Primavera) no puede
         r = self._conectar(self.PIN_ADMIN)
         self.assertEqual(r.status_code, 200)
         self.assertTrue(r.get_json()["url"].startswith("https://script.google.com/macros/s/ABC/exec?t="))
@@ -106,10 +107,10 @@ class Conexion(unittest.TestCase):
     def test_config_antes_y_despues(self):
         c = self._config(self.PIN_ADMIN)
         self.assertEqual((c["habilitado"], c["conector"], c["puede_conectar"]), (False, True, True))
-        self.assertFalse(self._config(self.PIN)["puede_conectar"])         # el PIN normal no puede conectar
+        self.assertEqual(self.cliente.get("/mobile/facturas/config", headers={"x-app-pin": self.PIN}).status_code, 403)   # el PIN normal ya no entra en facturas
         self.assertEqual(self._avisar().status_code, 200)
-        c = self._config(self.PIN)
-        self.assertTrue(c["habilitado"])                                    # ya conectado: se ve también con el PIN normal
+        c = self._config(self.PIN_ADMIN)
+        self.assertTrue(c["habilitado"])                                    # ya conectado
 
     # ── aviso del conector ──
     def test_aviso_correcto_guarda_la_raiz_y_crea_las_subcarpetas(self):

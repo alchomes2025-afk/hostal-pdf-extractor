@@ -161,7 +161,7 @@ class Rentabilidad(unittest.TestCase):
 
 
 class Endpoints(unittest.TestCase):
-    PIN, ADMIN = "1111", "9999"
+    PIN, ADMIN = "1111", "1379"
 
     def setUp(self):
         self.db = FakeDB()
@@ -177,7 +177,7 @@ class Endpoints(unittest.TestCase):
         self.cliente = app.test_client()
 
     def test_estado_y_respuestas(self):
-        h = {"x-app-pin": self.PIN}
+        h = {"x-app-pin": self.ADMIN}
         r = self.cliente.get("/mobile/facturas/asesor/estado?propiedad_id=349341&mes=2026-08", headers=h).get_json()
         self.assertTrue(r["ok"])
         por_id = {c["id"]: c for c in r["conceptos"]}
@@ -191,11 +191,11 @@ class Endpoints(unittest.TestCase):
 
     def test_permisos_y_validaciones(self):
         self.assertEqual(self.cliente.get("/mobile/facturas/asesor/estado?propiedad_id=349341").status_code, 401)
-        h = {"x-app-pin": self.PIN}
-        self.assertEqual(self.cliente.get("/mobile/facturas/asesor/estado?propiedad_id=339751", headers=h).status_code, 403)       # el hostal solo con admin
+        self.assertEqual(self.cliente.get("/mobile/facturas/asesor/estado?propiedad_id=349341", headers={"x-app-pin": self.PIN}).status_code, 403)   # el PIN normal ya no entra
+        h = {"x-app-pin": self.ADMIN}
         self.assertEqual(self.cliente.get("/mobile/facturas/asesor/estado?propiedad_id=339751", headers={"x-app-pin": self.ADMIN}).status_code, 200)
         self.assertEqual(self.cliente.get("/mobile/facturas/asesor/estado?propiedad_id=349341&mes=2026-8", headers=h).status_code, 400)
-        r = self.cliente.post("/mobile/facturas/asesor/respuestas", headers=h, json={"propiedad_id": "339751", "conceptos": {"ibi": {"modo": "anual", "importe": 1}}})
+        r = self.cliente.post("/mobile/facturas/asesor/respuestas", headers={"x-app-pin": self.PIN}, json={"propiedad_id": "339751", "conceptos": {"ibi": {"modo": "anual", "importe": 1}}})
         self.assertEqual(r.status_code, 403)
         r = self.cliente.post("/mobile/facturas/asesor/respuestas", headers=h, json={"propiedad_id": "349341", "conceptos": {"ibi": {"modo": "anual", "importe": -1}}})
         self.assertEqual(r.status_code, 400)

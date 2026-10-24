@@ -14,7 +14,7 @@ from datetime import date
 
 from flask import Blueprint, jsonify, request
 
-from mobile_routes import _ensure_loaded, _es_pin_admin, _es_pin_limpieza, _state, anotar_fallo_si_pin_desconocido, check_pin, pin_bloqueado
+from mobile_routes import _ensure_loaded, _es_pin_limpieza, _state, check_pin, exigir_permiso
 from services import incidencias_limpieza as inc
 from services.fechas import hoy_madrid
 from services.limites import ip_cliente, permitir
@@ -22,15 +22,11 @@ from services.whatsapp import alerta
 
 logger = logging.getLogger(__name__)
 limpieza_bp = Blueprint("limpieza", __name__, url_prefix="/mobile/limpieza")
+limpieza_bp.before_request(exigir_permiso)
 
 
 def _autorizado():
-    if pin_bloqueado():
-        return False
-    ok = _es_pin_limpieza() or _es_pin_admin()
-    if not ok:
-        anotar_fallo_si_pin_desconocido()
-    return ok
+    return _es_pin_limpieza()
 
 
 def _error(e):

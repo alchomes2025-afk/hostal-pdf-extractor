@@ -63,7 +63,7 @@ class Endpoint(unittest.TestCase):
         self.llamadas_informe = []
         mobile_routes._COMISION_RECIENTE.clear()
         informe = {"ok": True, "resumen": Informe.RESUMEN, "rentabilidad": {"comisiones_activas": True, "comision_gestion": 100.0, "comision_gestion_pct": 15}}
-        for o, n, v in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "9999"),
+        for o, n, v in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "1379"),
                         (mobile_routes, "_informe_financiero", lambda *a, **k: self.llamadas_informe.append(a) or informe),
                         (mobile_routes, "COMISIONES_GESTION_ACTIVAS", True),
                         (sys.modules["services.limites"], "cantidad", lambda clave, seg: self.intentos["n"]),
@@ -72,7 +72,7 @@ class Endpoint(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def _post(self, pin_app="1111", pin_desglose="1379", prop="349341"):
+    def _post(self, pin_app="1379", pin_desglose="1379", prop="349341"):
         return self.c.post("/mobile/finance/desglose", json={"propertyId": prop, "month": "2026-09", "pin_desglose": pin_desglose}, headers={"x-app-pin": pin_app})
 
     def test_con_el_pin_correcto_da_el_reparto_de_primavera(self):
@@ -96,8 +96,8 @@ class Endpoint(unittest.TestCase):
         self.assertEqual(self._post(pin_app="0").status_code, 401)
 
     def test_el_hostal_solo_con_pin_de_administrador(self):
-        self.assertEqual(self._post(prop=mobile_routes.PROPERTY_ID).status_code, 403)
-        r = self._post(pin_app="9999", prop=mobile_routes.PROPERTY_ID)
+        self.assertEqual(self._post(pin_app="1111", prop=mobile_routes.PROPERTY_ID).status_code, 403)   # el PIN antiguo «normal» ni siquiera entra en el desglose
+        r = self._post(pin_app="1379", prop=mobile_routes.PROPERTY_ID)
         self.assertEqual(r.status_code, 200)
         self.assertEqual([x["importe"] for x in r.get_json()["partes"]], [30.0, 14.0, 39.2, 16.8])
 

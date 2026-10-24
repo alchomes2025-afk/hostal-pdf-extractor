@@ -176,18 +176,18 @@ class Endpoint(Base):
     PIN = "1111"
 
     def test_las_respuestas_aceptan_excluidas_y_completar(self):
-        with mock.patch.object(mr, "MOBILE_APP_PIN", self.PIN), mock.patch.object(mr, "MOBILE_APP_PIN_ADMIN", "9999"):
+        with mock.patch.object(mr, "MOBILE_APP_PIN", self.PIN), mock.patch.object(mr, "MOBILE_APP_PIN_ADMIN", "1379"):
             app = Flask(__name__)
             app.register_blueprint(mobile_facturas.facturas_bp)
             c = app.test_client()
             self._facturas(f("Mobiliario y equipamiento", 3200.0))
-            r = c.post("/mobile/facturas/asesor/respuestas", headers={"x-app-pin": self.PIN}, json={
+            r = c.post("/mobile/facturas/asesor/respuestas", headers={"x-app-pin": "1379"}, json={
                 "propiedad_id": PRIMAVERA, "mes": "2026-08", "conceptos": {}, "excluidas": ["Mobiliario y equipamiento"], "completar": True,
                 "limpieza": {"modo": "estancia", "importe": 75}}).get_json()
             self.assertTrue(r["ok"])
             self.assertEqual((r["compras"]["excluidas"], r["compras"]["decidido"], r["completar"]), (["Mobiliario y equipamiento"], True, True))
             self.assertEqual(r["limpieza"]["declarado"], {"modo": "estancia", "importe": 75.0})
-            malo = c.post("/mobile/facturas/asesor/respuestas", headers={"x-app-pin": self.PIN}, json={"propiedad_id": PRIMAVERA, "excluidas": ["Inventada"]})
+            malo = c.post("/mobile/facturas/asesor/respuestas", headers={"x-app-pin": "1379"}, json={"propiedad_id": PRIMAVERA, "excluidas": ["Inventada"]})
             self.assertEqual(malo.status_code, 400)
 
 

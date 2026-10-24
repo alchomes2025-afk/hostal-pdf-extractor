@@ -19,6 +19,7 @@ Variables de entorno en Render:
   MOBILE_APP_PIN       -> PIN numérico de 4 dígitos
 """
 
+import hashlib
 import logging
 import os
 import time
@@ -26,9 +27,11 @@ import json
 import requests
 from datetime import datetime, date, timedelta
 from services.fechas import hoy_madrid
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, g, request, jsonify, Response
 import re
 
+from rutas_permisos import PERMISOS_RUTAS, RUTAS_PUBLICAS
+from services import accesos
 from mobile_asistente import ErrorHerramienta, borrador_codigos, clave_groq, responder as asistente_responder
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
@@ -1235,6 +1238,22 @@ def _pin_recibido():
     )
 
 
+# ── Acceso por perfiles (services/accesos.py, rutas_permisos.py, ACCESOS.md) ──
+# Cada petición se identifica con un TOKEN DE SESIÓN firmado (`Authorization: Bearer …`, lo emite /login y lleva el perfil y el nombre) o, por
+# compatibilidad con la app instalada, con el PIN en la cabecera `x-app-pin`. Un hook `before_request` comprueba el permiso de cada ruta contra la
+# tabla de rutas_permisos.py (lo que no esté declarado se rechaza). El PIN del sustituto es compartido: solo vale con sesión, porque es la sesión
+# la que fija su nombre (el cliente no puede falsearlo).
+ACCESO_PINS_ANTIGUOS = os.environ.get("ACCESO_PINS_ANTIGUOS", "1") != "0"   # los dos PIN de siempre siguen valiendo hasta el día de corte
+
+
+def _pin_recibido():
+    return (
+        request.headers.get("x-app-pin")
+        or request.args.get("pin")
+        or (request.get_json(silent=True) or {}).get("pin")
+    )
+
+
 # Límite de intentos de PIN: un PIN de 4 dígitos tiene solo 10.000 combinaciones, así que sin freno se adivina en minutos. Tras MAX_FALLOS_PIN PIN
 # equivocados desde la misma IP en VENTANA_FALLOS_PIN segundos se rechaza TODO desde esa IP (incluso el PIN bueno) hasta que pase la ventana. Cuenta
 # cualquier endpoint de la app (no solo /login), porque el PIN viaja en cada petición. El contador está en memoria (services/limites.py).
@@ -1247,50 +1266,145 @@ def pin_bloqueado():
     return cantidad(f"pin-fallos:{ip_cliente()}", VENTANA_FALLOS_PIN) >= MAX_FALLOS_PIN
 
 
-def _pin_correcto_de_algun_perfil():
-    """¿El PIN recibido es válido para algún perfil de la app (normal, administrador o limpieza)? No cuenta intentos."""
-    pin = str(_pin_recibido() or "")
+def _anotar_fallo():
+    from services.limites import anotar, ip_cliente
+    anotar(f"pin-fallos:{ip_cliente()}")
+
+
+def _iguales(a, b):
+    import hmac
+    return hmac.compare_digest(str(a).encode(), str(b).encode())
+
+
+_PIN_ANTIGUOS_VERIFICADOS = set()   # sha256 de los PIN antiguos ya comprobados (como mucho dos)
+
+
+def _perfil_por_pin_recibido():
+    """Perfil del PIN recibido (o None). Anota un intento fallido si llegó un PIN que no es de ningún perfil."""
+    pin = str(_pin_recibido() or "").strip()
     if not pin:
-        return False
-    if MOBILE_APP_PIN and pin == str(MOBILE_APP_PIN):
-        return True
-    if MOBILE_APP_PIN_ADMIN and pin == str(MOBILE_APP_PIN_ADMIN):
-        return True
-    return _es_pin_limpieza()
+        return None
+    clave = hashlib.sha256(pin.encode()).hexdigest()
+    # Primero los PIN nuevos (si un PIN antiguo coincide con uno nuevo, manda el nuevo). Los PIN antiguos se recuerdan para no repetir el PBKDF2 en cada petición.
+    perfil = None if clave in _PIN_ANTIGUOS_VERIFICADOS else accesos.perfil_por_pin(pin)
+    if perfil is None and ACCESO_PINS_ANTIGUOS:   # PIN de antes de los perfiles: el normal pasa a «gestor de la Casa de la Primavera», el de administrador a «propietario»
+        if MOBILE_APP_PIN and _iguales(pin, MOBILE_APP_PIN):
+            perfil = accesos.PERFILES["gestor_primavera"]
+        elif MOBILE_APP_PIN_ADMIN and _iguales(pin, MOBILE_APP_PIN_ADMIN):
+            perfil = accesos.PERFILES["propietario"]
+        if perfil is not None:
+            _PIN_ANTIGUOS_VERIFICADOS.add(clave)
+    if perfil is None:
+        _anotar_fallo()
+    return perfil
 
 
-def anotar_fallo_si_pin_desconocido():
-    """Anota un intento fallido si llegó un PIN y no es de ningún perfil. Un PIN válido de otro perfil (p. ej. la limpiadora en una ruta que no
-    es suya) NO cuenta como intento de adivinar."""
-    if _pin_recibido() and not _pin_correcto_de_algun_perfil():
-        from services.limites import anotar, ip_cliente
-        anotar(f"pin-fallos:{ip_cliente()}")
+def perfil_actual():
+    """El Perfil de la petición (por sesión o por PIN) o None. Fija g.nombre_acceso (nombre de la sesión) y g.necesita_nombre."""
+    if "perfil_acceso" in g:
+        return g.perfil_acceso
+    perfil, nombre, necesita_nombre = None, None, False
+    if not pin_bloqueado():
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            sesion = accesos.verificar_sesion(auth[7:].strip())
+            if sesion:
+                perfil, nombre = sesion
+            else:
+                _anotar_fallo()
+        else:
+            perfil = _perfil_por_pin_recibido()
+            if perfil is not None and perfil.pide_nombre:
+                perfil, necesita_nombre = None, True    # PIN compartido: hay que entrar con nombre (sesión)
+    g.perfil_acceso, g.nombre_acceso, g.necesita_nombre = perfil, nombre, necesita_nombre
+    return perfil
+
+
+def nombre_actual():
+    perfil_actual()
+    return g.get("nombre_acceso")
+
+
+def tiene_permiso(permiso):
+    perfil = perfil_actual()
+    return bool(perfil and perfil.tiene(permiso))
 
 
 def check_pin():
-    if pin_bloqueado():
-        return False
-    pin = _pin_recibido()
-    ok = bool(MOBILE_APP_PIN) and (str(pin) == str(MOBILE_APP_PIN) or (
-        bool(MOBILE_APP_PIN_ADMIN) and str(pin) == str(MOBILE_APP_PIN_ADMIN)
-    ))
-    if not ok:
-        anotar_fallo_si_pin_desconocido()
-    return ok
+    """¿Hay un perfil con acceso al calendario? (Las rutas ya las protege exigir_permiso; esto lo usan algunas por dentro.)"""
+    return tiene_permiso(accesos.CALENDARIO)
 
 
 def _es_pin_admin():
-    if not MOBILE_APP_PIN_ADMIN:
-        return False
-    return str(_pin_recibido()) == str(MOBILE_APP_PIN_ADMIN)
+    return tiene_permiso(accesos.FINANZAS_HOSTAL)
 
 
 def _es_pin_limpieza():
-    """PIN de la limpiadora (config.PIN_LIMPIEZA). check_pin NO lo acepta: solo vale para mobile_limpieza.py."""
-    import hmac
-    from config import PIN_LIMPIEZA
-    recibido = str(_pin_recibido() or "")
-    return bool(PIN_LIMPIEZA) and bool(recibido) and hmac.compare_digest(recibido.encode(), str(PIN_LIMPIEZA).encode())
+    return tiene_permiso(accesos.LIMPIEZA_CALENDARIO)
+
+
+CASA_ROOM_ID = "720841"   # La Casa de la Primavera (la única «habitación» de su propiedad en Beds24)
+RUTAS_CON_HABITACION = {"mobile.create_booking", "mobile.block_dates", "mobile.mobile_update", "mobile.edit_booking", "mobile.cancel_booking"}
+
+
+def ocultar_primavera(d):
+    """Quita La Casa de la Primavera de una respuesta del calendario si el perfil no tiene permiso para verla (solo propietario y gestor de la Primavera)."""
+    if tiene_permiso(accesos.PRIMAVERA):
+        return d
+    d = dict(d)
+    for clave in ("rooms",):
+        if clave in d:
+            d[clave] = [r for r in d[clave] if str(r.get("id")) != CASA_ROOM_ID]
+    for clave in ("bookings", "new_bookings"):
+        if clave in d:
+            d[clave] = [b for b in d[clave] if str(b.get("roomId")) != CASA_ROOM_ID]
+    for clave in ("overrides", "prices"):
+        if clave in d:
+            d[clave] = {rid: v for rid, v in d[clave].items() if str(rid) != CASA_ROOM_ID}
+    if "booking_count" in d:
+        d["booking_count"] = len(d.get("bookings", []))
+    return d
+
+
+def _toca_primavera_sin_permiso(body):
+    """True si la operación (crear, editar, cancelar, bloquear, precios) es sobre La Casa de la Primavera y el perfil no puede verla."""
+    if tiene_permiso(accesos.PRIMAVERA):
+        return False
+    if str(body.get("roomId") or "") == CASA_ROOM_ID:
+        return True
+    bid = body.get("bookingId")
+    if bid is not None:
+        reserva = next((b for b in _state.get("bookings", []) if str(b.get("id", "")) == str(bid)), None)
+        return bool(reserva and str(reserva.get("roomId")) == CASA_ROOM_ID)
+    return False
+
+
+def exigir_permiso():
+    """before_request de las tres blueprints de la app: aplica la tabla de rutas_permisos.py."""
+    if request.method == "OPTIONS":
+        return None
+    endpoint = request.endpoint or ""
+    if endpoint in RUTAS_PUBLICAS:
+        return None
+    permisos = PERMISOS_RUTAS.get(endpoint)
+    if not permisos:
+        logger.error(f"[acceso] Ruta sin permiso declarado: {endpoint}")
+        return jsonify({"ok": False, "error": "Ruta sin permiso declarado"}), 403
+    if pin_bloqueado():
+        return jsonify({"ok": False, "error": "Demasiados intentos. Espera 15 minutos y vuelve a probar."}), 429
+    perfil = perfil_actual()
+    if perfil is None:
+        if g.get("necesita_nombre"):
+            return jsonify({"ok": False, "error": "Entra de nuevo e indica tu nombre", "necesita_nombre": True}), 401
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    if not any(perfil.tiene(permiso) for permiso in permisos):
+        return jsonify({"ok": False, "error": "No tienes permiso para esta función"}), 403
+    if endpoint in RUTAS_CON_HABITACION and _toca_primavera_sin_permiso(request.get_json(silent=True) or {}):
+        return jsonify({"ok": False, "error": "No tienes permiso para esta propiedad"}), 403
+    return None
+
+
+mobile_bp.before_request(exigir_permiso)
 
 
 def is_valid_email(email):
@@ -1453,22 +1567,33 @@ def get_logs():
 
 @mobile_bp.route("/login", methods=["POST", "GET"])
 def mobile_login():
+    """Entra con un PIN. Devuelve el perfil, sus permisos y un token de sesión firmado (`Authorization: Bearer <token>` en las siguientes peticiones).
+    El PIN compartido del sustituto pide además `nombre`: sin él responde {necesita_nombre: true} y no emite sesión."""
     if pin_bloqueado():
         return jsonify({"ok": False, "error": "Demasiados intentos. Espera 15 minutos y vuelve a probar."}), 429
-    if check_pin():
-        return jsonify({"ok": True, "admin": _es_pin_admin()})
-    if _es_pin_limpieza():   # la limpiadora: la app solo le abre el calendario de la casa (ver mobile_limpieza.py)
-        return jsonify({"ok": True, "admin": False, "rol": "limpieza"})
-    if pin_bloqueado():   # este intento fallido ha agotado el cupo
-        return jsonify({"ok": False, "error": "Demasiados intentos. Espera 15 minutos y vuelve a probar."}), 429
-    return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    perfil = _perfil_por_pin_recibido()
+    if perfil is None:
+        if pin_bloqueado():   # este intento fallido ha agotado el cupo
+            return jsonify({"ok": False, "error": "Demasiados intentos. Espera 15 minutos y vuelve a probar."}), 429
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    nombre = None
+    if perfil.pide_nombre:
+        nombre = accesos.normalizar_nombre((request.get_json(silent=True) or {}).get("nombre"))
+        if not nombre:
+            return jsonify({"ok": True, "necesita_nombre": True, "perfil": perfil.id, "perfil_nombre": perfil.nombre})
+    respuesta = {"ok": True, "admin": perfil.tiene(accesos.FINANZAS_HOSTAL), "perfil": perfil.id, "perfil_nombre": perfil.nombre,
+                 "permisos": sorted(perfil.permisos), "nombre": nombre, "auditado": perfil.auditado,
+                 "token": accesos.crear_sesion(perfil.id, nombre), "sesion_horas": accesos.SESION_HORAS}
+    if perfil.tiene(accesos.LIMPIEZA_CALENDARIO):
+        respuesta["rol"] = "limpieza"   # compatibilidad con la app instalada: solo muestra la pantalla de la limpiadora
+    return jsonify(respuesta)
 
 
 @mobile_bp.route("/rooms", methods=["GET"])
 def mobile_rooms():
     if not check_pin():
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
-    return jsonify({"ok": True, "rooms": ROOMS})
+    return jsonify(ocultar_primavera({"ok": True, "rooms": ROOMS}))
 
 
 # ── FINANZAS ─────────────────────────────────────────────────────────────
@@ -1962,6 +2087,8 @@ def mobile_finance():
 
     if property_id == PROPERTY_ID and not _es_pin_admin():
         return jsonify({"ok": False, "error": "No autorizado para ver Finanzas del Hostal con este PIN"}), 403
+    if property_id != PROPERTY_ID and not tiene_permiso(accesos.FINANZAS_PRIMAVERA):
+        return jsonify({"ok": False, "error": "No tienes permiso para ver estas Finanzas"}), 403
 
     costes = request.args.get("costes") if request.args.get("costes") in ("auto", "reales", "estimados") else "auto"
     try:
@@ -2049,25 +2176,30 @@ def mobile_assistant():
 
     data = request.get_json(force=True) or {}
     mensajes = data.get("mensajes")
-    finanzas = bool(data.get("finanzas"))
     if mensajes is None:
         mensajes = [{"role": "user", "content": str(data.get("pregunta") or "")}]
-        finanzas = True
-    resultado, status = asistente_responder(mensajes, {"es_admin": _es_pin_admin(), "finanzas": finanzas, "pantalla": str(data.get("pantalla") or "")[:1500]})
+    # Lo que puede ver y hacer sale del PERFIL de la sesión; el `finanzas` que mande el navegador se ignora.
+    ctx = {"es_admin": tiene_permiso(accesos.FINANZAS_HOSTAL), "finanzas": tiene_permiso(accesos.FINANZAS_PRIMAVERA),
+           "emergencia": tiene_permiso(accesos.EMERGENCIA), "sin_pin": tiene_permiso(accesos.EMERGENCIA_SIN_PIN),
+           "ver_pin": tiene_permiso(accesos.EMERGENCIA_VER_PIN), "primavera": tiene_permiso(accesos.PRIMAVERA), "pantalla": str(data.get("pantalla") or "")[:1500]}
+    resultado, status = asistente_responder(mensajes, ctx)
     return jsonify(resultado), status
 
 
 def _autorizar_codigos(data):
-    """Quién puede preparar y enviar el correo de códigos del asistente: el PIN de administrador, o el PIN normal de la app MÁS el PIN de
-    seguridad (config.PIN_ENVIO_CODIGOS, campo `pin_envio`). Tras 5 PIN de seguridad incorrectos se bloquea una hora (para todos los que
-    no son administrador). Devuelve None si puede, o (respuesta, status) si no."""
+    """Quién puede preparar y enviar el correo de códigos del asistente: quien tenga el permiso de emergencia (ver ACCESOS.md); y, salvo el propietario,
+    solo tecleando además el PIN de seguridad (config.PIN_ENVIO_CODIGOS, campo `pin_envio`). Tras 5 PIN de seguridad incorrectos se bloquea una hora.
+    Devuelve None si puede, o (respuesta, status) si no."""
     import hmac
     from config import PIN_ENVIO_CODIGOS
     from services.limites import anotar, cantidad
-    if _es_pin_admin():
-        return None
-    if not check_pin():
+    perfil = perfil_actual()
+    if perfil is None:
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+    if not perfil.tiene(accesos.EMERGENCIA):
+        return jsonify({"ok": False, "error": "No tienes permiso para esta función"}), 403
+    if perfil.tiene(accesos.EMERGENCIA_SIN_PIN):
+        return None
     if cantidad("asistente-pin-envio-fallos", 3600) >= 5:
         return jsonify({"ok": False, "error": "Demasiados intentos con el PIN de seguridad: espera una hora o pídeselo al administrador"}), 429
     recibido = str(data.get("pin_envio") or "")
@@ -2088,7 +2220,7 @@ def mobile_assistant_preparar_codigos():
     if fallo:
         return fallo
     try:
-        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"))
+        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"), primavera=tiene_permiso(accesos.PRIMAVERA))
     except ErrorHerramienta as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     return jsonify({"ok": True, "borrador": borrador})
@@ -2113,7 +2245,7 @@ def mobile_assistant_enviar_codigos():
     if not permitir([("asistente-codigos-dia", 10, 86400)]):
         return jsonify({"ok": False, "error": "Demasiados envíos hoy: espera o envíalo a mano"}), 429
     try:
-        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"))
+        borrador = borrador_codigos(data.get("reserva"), data.get("email"), data.get("idioma"), primavera=tiene_permiso(accesos.PRIMAVERA))
     except ErrorHerramienta as e:
         return jsonify({"ok": False, "error": str(e)}), 400
     try:
@@ -2179,7 +2311,7 @@ def all_data():
             day_entry.setdefault("numAvail", 0)
             room_overrides[ds] = day_entry
 
-    return jsonify({
+    return jsonify(ocultar_primavera({
         "ok":           True,
         "rooms":        ROOMS,
         "bookings":     _state["bookings"],
@@ -2188,7 +2320,7 @@ def all_data():
         "loaded_at":    _state["loaded_at"],
         "checked_at":   _state["checked_at"],
         "booking_count": len(_state["bookings"]),   # para diagnóstico
-    })
+    }))
 
 
 @mobile_bp.route("/reload", methods=["POST", "GET"])
@@ -2323,14 +2455,14 @@ def check_changes():
             if str(nb.get("status","")).lower() != "cancelled":
                 _state["bookings"].append(nb)
 
-        return jsonify({
+        return jsonify(ocultar_primavera({
             "ok":           True,
             "changed":      True,
             "new_bookings": new_bookings,
             "cancelled_count": len(cancelled_raw),
             "checked_at":   reloj,
             "incompleto":   fallo_parcial,
-        })
+        }))
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

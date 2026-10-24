@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from flask import Flask
 
 import mobile_asistente as asistente
+from services import accesos
 import mobile_routes
 import routes.acceso as acceso
 from services import groq_claves, limites
@@ -210,15 +211,22 @@ class ClaveGroq(unittest.TestCase):
         self.assertEqual(visto["Authorization"], "Bearer gestion")
 
 
+def _cab(pin):
+    """Cabecera de una petición: sesión firmada (token largo) o PIN."""
+    if not pin:
+        return {}
+    return {"Authorization": "Bearer " + pin} if len(pin) > 30 else {"x-app-pin": pin}
+
+
 class BotonEnviar(Base):
-    PIN, PIN_ADMIN = "1111", "9999"
+    PIN, PIN_ADMIN = accesos.crear_sesion("sustituto", "Ana"), "1379"      # el sustituto necesita el PIN de seguridad; el propietario no
 
     def setUp(self):
         super().setUp()
         app = Flask(__name__)
         app.register_blueprint(mobile_routes.mobile_bp, url_prefix="/mobile")
         self.cliente = app.test_client()
-        for objeto, nombre, valor in ((mobile_routes, "MOBILE_APP_PIN", self.PIN), (mobile_routes, "MOBILE_APP_PIN_ADMIN", self.PIN_ADMIN),
+        for objeto, nombre, valor in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", self.PIN_ADMIN),
                                       (mobile_routes, "log_action", mock.Mock())):
             p = mock.patch.object(objeto, nombre, valor)
             p.start()
@@ -229,7 +237,7 @@ class BotonEnviar(Base):
 
     def _post(self, pin, **extra):
         cuerpo = {"reserva": "5", "email": "huesped@gmail.com", "idioma": "es", **extra}
-        return self.cliente.post("/mobile/assistant/enviar-codigos", json=cuerpo, headers={"x-app-pin": pin} if pin else {})
+        return self.cliente.post("/mobile/assistant/enviar-codigos", json=cuerpo, headers=_cab(pin))
 
     def test_con_pin_admin_envia_lo_mismo_que_el_borrador(self):
         r = self._post(self.PIN_ADMIN)
@@ -258,7 +266,7 @@ class BotonEnviar(Base):
 
     def _preparar_codigos(self, pin, **extra):
         cuerpo = {"reserva": "5", "email": "huesped@gmail.com", "idioma": "es", **extra}
-        return self.cliente.post("/mobile/assistant/preparar-codigos", json=cuerpo, headers={"x-app-pin": pin} if pin else {})
+        return self.cliente.post("/mobile/assistant/preparar-codigos", json=cuerpo, headers=_cab(pin))
 
     def test_preparar_codigos_solo_devuelve_el_borrador_con_el_pin_de_seguridad(self):
         self.assertEqual(self._preparar_codigos(None, pin_envio="1432").status_code, 401)

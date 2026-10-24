@@ -37,7 +37,7 @@ FORM = {"tipo": "gasto", "fecha": "2026-08-23", "proveedor": "SHOPPING CHEN, S.L
 
 
 class Base(unittest.TestCase):
-    PIN, ADMIN = "1111", "9999"
+    PIN, ADMIN = "1111", "1379"
 
     def setUp(self):
         self.db = {FID: dict(BASE)}
@@ -76,7 +76,7 @@ class Base(unittest.TestCase):
 
 class Editar(Base):
     def test_corrige_los_datos_y_renombra_el_archivo(self):
-        r = self._post("editar", self.PIN, id=FID, propiedad_id="349341", datos=FORM, usuario="Mónica")
+        r = self._post("editar", self.ADMIN, id=FID, propiedad_id="349341", datos=FORM, usuario="Mónica")
         self.assertEqual(r.status_code, 200)
         _, raiz, file_id, ruta, nombre, viejo, nuevo = self.llamadas[0]
         self.assertEqual((raiz, file_id), ("RAIZ", "DRIVE1"))
@@ -90,7 +90,7 @@ class Editar(Base):
         self.assertEqual(guardada["editada_por"], "Mónica")
 
     def test_cambiar_la_fecha_mueve_de_trimestre_y_año(self):
-        self._post("editar", self.PIN, id=FID, propiedad_id="349341", datos={**FORM, "fecha": "2027-01-05"})
+        self._post("editar", self.ADMIN, id=FID, propiedad_id="349341", datos={**FORM, "fecha": "2027-01-05"})
         _, _, _, ruta, _, viejo, nuevo = self.llamadas[0]
         self.assertEqual(ruta[2:], ["2027", "1T", "Gastos"])
         self.assertEqual(viejo["titulo"], "Registro de facturas 2026")                  # se quita de la hoja del año viejo...
@@ -112,18 +112,18 @@ class Editar(Base):
 
     def test_validaciones_y_errores(self):
         self.assertEqual(self._post("editar", None, id=FID, datos=FORM).status_code, 401)
-        self.assertEqual(self._post("editar", self.PIN, id="alc-homes-inventada", datos=FORM).status_code, 404)
-        self.assertEqual(self._post("editar", self.PIN, id="otro-cliente-" + "a" * 32, datos=FORM).status_code, 404)
-        self.assertEqual(self._post("editar", self.PIN, id=FID, datos={**FORM, "total": "", "base_imponible": "", "cuota_iva": ""}).status_code, 400)       # sin total ni de dónde deducirlo
+        self.assertEqual(self._post("editar", self.ADMIN, id="alc-homes-inventada", datos=FORM).status_code, 404)
+        self.assertEqual(self._post("editar", self.ADMIN, id="otro-cliente-" + "a" * 32, datos=FORM).status_code, 404)
+        self.assertEqual(self._post("editar", self.ADMIN, id=FID, datos={**FORM, "total": "", "base_imponible": "", "cuota_iva": ""}).status_code, 400)       # sin total ni de dónde deducirlo
         self.falla = True
         antes = dict(self.db[FID])
-        self.assertEqual(self._post("editar", self.PIN, id=FID, datos=FORM).status_code, 502)
+        self.assertEqual(self._post("editar", self.ADMIN, id=FID, datos=FORM).status_code, 502)
         self.assertEqual(self.db[FID], antes)                                           # si el Drive falla, no se toca el índice
 
 
 class Eliminar(Base):
     def test_borra_archivo_fila_e_indice(self):
-        r = self._post("eliminar", self.PIN, id=FID, usuario="Mónica")
+        r = self._post("eliminar", self.ADMIN, id=FID, usuario="Mónica")
         self.assertEqual(r.status_code, 200)
         _, raiz, file_id, registro = self.llamadas[0]
         self.assertEqual((raiz, file_id, registro["id"]), ("RAIZ", "DRIVE1", FID))
@@ -157,7 +157,7 @@ if __name__ == "__main__":
 
 class Original(Base):
     def test_devuelve_el_documento(self):
-        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.PIN})
+        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.ADMIN})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.get_json()["mime"], "application/pdf")
 
@@ -173,5 +173,5 @@ class Original(Base):
 
     def test_drive_caido_da_502(self):
         self.falla = True
-        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.PIN})
+        r = self.cliente.get(f"/mobile/facturas/original?id={FID}", headers={"x-app-pin": self.ADMIN})
         self.assertEqual(r.status_code, 502)

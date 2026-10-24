@@ -54,7 +54,7 @@ class Base(unittest.TestCase):
         app.register_blueprint(mobile_limpieza.limpieza_bp)
         app.register_blueprint(mobile_routes.mobile_bp)
         self.c = app.test_client()
-        for o, n, v in ((inc.config, "db", self.db), (mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "9999"),
+        for o, n, v in ((inc.config, "db", self.db), (mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "1379"),
                         (mobile_limpieza, "hoy_madrid", lambda: HOY), (mobile_limpieza, "_reservas", lambda: RESERVAS),
                         (mobile_limpieza, "alerta", lambda t, d="", nivel="critico": self.avisos.append((t, d, nivel)))):
             p = mock.patch.object(o, n, v)
@@ -78,14 +78,14 @@ class Acceso(Base):
 
     def test_el_pin_de_limpieza_no_abre_nada_mas(self):
         for ruta in ("/mobile/all-data", "/mobile/rooms", "/mobile/finance?propertyId=349341&month=2026-10", "/mobile/check-changes", "/mobile/limpieza/incidencias"):
-            self.assertEqual(self.get(ruta, "4268").status_code, 401, ruta)
+            self.assertEqual(self.get(ruta, "4268").status_code, 403, ruta)     # la limpiadora es un perfil válido, pero sin permiso para nada más
 
     def test_pin_incorrecto(self):
         self.assertEqual(self.get("/mobile/limpieza/calendario", "0000").status_code, 401)
         self.assertEqual(self.post("2026-10-26", pin="0000").status_code, 401)
 
     def test_el_pin_normal_no_marca_incidencias(self):
-        self.assertEqual(self.post("2026-10-26", pin="1111").status_code, 401)
+        self.assertEqual(self.post("2026-10-26", pin="1111").status_code, 403)
 
 
 class Calendario(Base):

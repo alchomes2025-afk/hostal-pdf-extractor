@@ -66,7 +66,7 @@ class Conocidas(unittest.TestCase):
     def test_endpoint(self):
         a = sha(b"a")
         self.guardadas[facturas._doc_id("alc-homes", a)] = {"x": 1}
-        r = self.cliente.post("/mobile/facturas/conocidas", json={"huellas": [a, sha(b"b")]}, headers={"x-app-pin": "1111"})
+        r = self.cliente.post("/mobile/facturas/conocidas", json={"huellas": [a, sha(b"b")]}, headers={"x-app-pin": "1379"})
         self.assertEqual(r.get_json(), {"ok": True, "conocidas": [a]})
         self.assertEqual(self.cliente.post("/mobile/facturas/conocidas", json={"huellas": [a]}).status_code, 401)
 

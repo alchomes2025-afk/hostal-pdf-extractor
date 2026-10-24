@@ -20,7 +20,7 @@ class Base(unittest.TestCase):
         app.register_blueprint(mobile_routes.mobile_bp)
         app.register_blueprint(mobile_limpieza.limpieza_bp)
         self.c = app.test_client()
-        for o, n, v in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "9999")):
+        for o, n, v in ((mobile_routes, "MOBILE_APP_PIN", "1111"), (mobile_routes, "MOBILE_APP_PIN_ADMIN", "1379")):
             p = mock.patch.object(o, n, v)
             p.start()
             self.addCleanup(p.stop)
@@ -33,7 +33,7 @@ class Base(unittest.TestCase):
 
     def fallar(self, n, ip="1.1.1.1"):
         for i in range(n):
-            self.login(f"{i:04d}" if f"{i:04d}" not in ("1111", "9999", "4268") else "0001", ip)
+            self.login(f"{i:04d}" if f"{i:04d}" not in ("1111", "1379", "4268") else "0001", ip)
 
 
 class Limite(Base):
@@ -82,7 +82,7 @@ class Limite(Base):
     def test_limpieza_tambien_cuenta_y_se_bloquea(self):
         for _ in range(mobile_routes.MAX_FALLOS_PIN):
             self.c.get("/mobile/limpieza/calendario", headers={"x-app-pin": "0000", "CF-Connecting-IP": "1.1.1.1"})
-        self.assertEqual(self.c.get("/mobile/limpieza/calendario", headers={"x-app-pin": "4268", "CF-Connecting-IP": "1.1.1.1"}).status_code, 401)
+        self.assertEqual(self.c.get("/mobile/limpieza/calendario", headers={"x-app-pin": "4268", "CF-Connecting-IP": "1.1.1.1"}).status_code, 429)   # bloqueada la IP, aunque el PIN sea bueno
         self.assertEqual(self.login("1111").status_code, 429)
 
 

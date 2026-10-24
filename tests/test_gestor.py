@@ -116,7 +116,7 @@ class Hoja(unittest.TestCase):
 
 
 class Endpoints(unittest.TestCase):
-    PIN, ADMIN = "1111", "9999"
+    PIN, ADMIN = "1111", "1379"
 
     def setUp(self):
         for o, n, v in ((asesor, "facturas_de_propiedad", lambda c, p: [d for d in DOCS if d["propiedad_id"] == str(p)]), (facturas, "habilitado", lambda c: True),
@@ -131,18 +131,19 @@ class Endpoints(unittest.TestCase):
         self.cliente = app.test_client()
 
     def test_resumen(self):
-        r = self.cliente.get("/mobile/facturas/resumen-trimestral?propiedad_id=349341&anio=2026&trimestre=3&reservas=1", headers={"x-app-pin": self.PIN}).get_json()
+        r = self.cliente.get("/mobile/facturas/resumen-trimestral?propiedad_id=349341&anio=2026&trimestre=3&reservas=1", headers={"x-app-pin": self.ADMIN}).get_json()
         self.assertTrue(r["ok"])
         self.assertEqual(r["reservas"][0]["mes"], "2026-07")
-        sin = self.cliente.get("/mobile/facturas/resumen-trimestral?propiedad_id=349341&anio=2026&trimestre=3", headers={"x-app-pin": self.PIN}).get_json()
+        sin = self.cliente.get("/mobile/facturas/resumen-trimestral?propiedad_id=349341&anio=2026&trimestre=3", headers={"x-app-pin": self.ADMIN}).get_json()
         self.assertIsNone(sin["reservas"])
 
     def test_hoja_permisos_y_validaciones(self):
-        h = {"x-app-pin": self.PIN}
+        h = {"x-app-pin": self.ADMIN}
+        self.assertEqual(self.cliente.post("/mobile/facturas/resumen-trimestral/hoja", headers={"x-app-pin": self.PIN}, json={"propiedad_id": "349341", "anio": 2026, "trimestre": 3}).status_code, 403)
         ok = self.cliente.post("/mobile/facturas/resumen-trimestral/hoja", headers=h, json={"propiedad_id": "349341", "anio": 2026, "trimestre": 3})
         self.assertEqual(ok.get_json()["url"], "https://hoja")
         self.assertEqual(self.cliente.post("/mobile/facturas/resumen-trimestral/hoja", json={"propiedad_id": "349341", "anio": 2026, "trimestre": 3}).status_code, 401)
-        self.assertEqual(self.cliente.post("/mobile/facturas/resumen-trimestral/hoja", headers=h, json={"propiedad_id": "339751", "anio": 2026, "trimestre": 3}).status_code, 403)
+        self.assertEqual(self.cliente.post("/mobile/facturas/resumen-trimestral/hoja", headers=h, json={"propiedad_id": "339751", "anio": 2026, "trimestre": 3}).status_code, 200)
         self.assertEqual(self.cliente.post("/mobile/facturas/resumen-trimestral/hoja", headers=h, json={"propiedad_id": "349341", "anio": "x", "trimestre": 3}).status_code, 400)
         self.assertEqual(self.cliente.get("/mobile/facturas/resumen-trimestral?propiedad_id=349341&anio=2026&trimestre=9", headers=h).status_code, 400)
 

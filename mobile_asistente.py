@@ -30,6 +30,7 @@ la pestaña Finanzas). Sin permiso económico, ni siquiera se devuelven los prec
 
 Es solo lectura (no crea, modifica ni cancela nada), salvo el borrador de correo de códigos, que solo se envía con el botón.
 """
+import contextvars
 import json
 import logging
 import time
@@ -61,7 +62,23 @@ MAX_MENSAJES = 12         # mensajes de la conversación que se envían al model
 MAX_CHARS_MENSAJE = 1500
 MAX_GRAFICOS = 3
 MAX_BORRADORES = 2
-HERRAMIENTAS_SOLO_ADMIN = ('pin_envio_codigos',)
+HERRAMIENTAS_SOLO_ADMIN = ('pin_envio_codigos',)      # (compatibilidad: ahora las filtra herramientas_para según los permisos del perfil)
+HERRAMIENTAS_EMERGENCIA = ("preparar_correo_codigos", "enlace_parte_emergencia")
+
+
+def _emergencia(ctx):
+    """¿Puede usar las herramientas de envío de emergencia? Sin dato en el contexto (llamadas antiguas): sí."""
+    return bool(ctx.get("emergencia", True))
+
+
+def _sin_pin(ctx):
+    """¿Envía los códigos sin teclear el PIN de seguridad? Por defecto, solo quien es administrador."""
+    return bool(ctx.get("sin_pin", ctx.get("es_admin")))
+
+
+def _ver_pin(ctx):
+    """¿Puede el asistente decirle el PIN de seguridad? Por defecto, solo al administrador."""
+    return bool(ctx.get("ver_pin", ctx.get("es_admin")))
 MAX_LISTADO = 25
 
 DIAS_SEMANA = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
@@ -109,11 +126,16 @@ def _norm(texto):
     return sin_tildes.lower().strip()
 
 
+_PRIMAVERA_PERMITIDA = contextvars.ContextVar("primavera_permitida", default=True)   # lo fija ejecutar_herramienta según el perfil
+
+
 def _ids_propiedad(clave):
     mr = _mr()
     if clave == "hostal":
         return mr.PROPERTY_ID
     if clave == "primavera":
+        if not _PRIMAVERA_PERMITIDA.get():
+            raise ErrorHerramienta("No tienes acceso a La Casa de la Primavera: si necesitas algo de ella, díselo a tu superior")
         return mr.PROPERTY_ID_CASA_PRIMAVERA
     raise ErrorHerramienta('propiedad debe ser "hostal" o "primavera"')
 
@@ -528,7 +550,7 @@ def _parte(r, fecha, estados, sin_verificar, hoy):
 
 
 def _propiedades(a):
-    return [a["propiedad"]] if a.get("propiedad") else ["hostal", "primavera"]
+    return [a["propiedad"]] if a.get("propiedad") else (["hostal", "primavera"] if _PRIMAVERA_PERMITIDA.get() else ["hostal"])
 
 
 def _t_agenda(a, ctx):
@@ -745,13 +767,15 @@ def validar_destino(reserva, email, idioma):
     return reserva, email, idioma
 
 
-def borrador_codigos(reserva, email, idioma):
+def borrador_codigos(reserva, email, idioma, primavera=True):
     """Borrador del correo de emergencia con los códigos de una reserva: dict con asunto y cuerpo, o ErrorHerramienta.
     Lo usan la herramienta del asistente y el endpoint que lo envía al pulsar el botón (así lo enviado es siempre lo mostrado)."""
     reserva, email, idioma = validar_destino(reserva, email, idioma)
     booking = buscar_booking_por_id(reserva)
     if not booking:
         raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
+    if not primavera and str(booking.get("roomId")) == "720841":
+        raise ErrorHerramienta("No tienes acceso a La Casa de la Primavera: díselo a tu superior")
     todos = miembros_del_grupo(booking)
     separado = reparto_separado(booking, todos)
     miembros = [booking] if separado else todos   # con «códigos por habitación» cada habitación lleva su propio correo
@@ -771,8 +795,10 @@ def borrador_codigos(reserva, email, idioma):
 def _t_preparar_correo_codigos(a, ctx):
     if len(ctx["borradores"]) >= MAX_BORRADORES:
         raise ErrorHerramienta(f"Ya hay {MAX_BORRADORES} borradores en esta respuesta: que el usuario los envíe o los descarte antes de preparar más")
-    if ctx.get("es_admin"):
-        borrador = borrador_codigos(a.get("reserva"), a.get("email"), a.get("idioma"))
+    if not _emergencia(ctx):
+        raise ErrorHerramienta("Esta función no está disponible para tu perfil")
+    if _sin_pin(ctx):
+        borrador = borrador_codigos(a.get("reserva"), a.get("email"), a.get("idioma"), primavera=bool(ctx.get("primavera", True)))
         ctx["borradores"].append(borrador)
         return {"borrador_preparado": True, "para": borrador["email"], "huesped": borrador["huesped"], "habitacion": borrador["habitacion"],
                 "llegada": borrador["llegada"], "salida": borrador["salida"], "idioma": borrador["idioma"],
@@ -792,12 +818,16 @@ def _t_preparar_correo_codigos(a, ctx):
 
 def _t_enlace_parte_emergencia(a, ctx):
     """Mensaje para copiar con el enlace de RPV de la habitación de una reserva (emergencias). No envía nada ni lleva códigos."""
+    if not _emergencia(ctx):
+        raise ErrorHerramienta("Esta función no está disponible para tu perfil")
     reserva = str(a.get("reserva") or "").strip()
     if not reserva.isdigit():
         raise ErrorHerramienta("Falta el número de reserva de Beds24 (sale de listar_reservas o agenda)")
     booking = buscar_booking_por_id(reserva)
     if not booking:
         raise ErrorHerramienta("No existe esa reserva en Beds24 (o está cancelada)")
+    if not ctx.get("primavera", True) and str(booking.get("roomId")) == "720841":
+        raise ErrorHerramienta("No tienes acceso a La Casa de la Primavera: díselo a tu superior")
     todos = miembros_del_grupo(booking)
     if reparto_separado(booking, todos):
         # El titular eligió repartir por habitación: un mensaje por habitación, cada uno con SU enlace de RPV, fechas y referencia.
@@ -824,8 +854,8 @@ def _t_enlace_parte_emergencia(a, ctx):
 
 def _t_pin_envio_codigos(a, ctx):
     """El PIN con el que el personal sin PIN de administrador envía los correos de códigos. Solo se da al administrador."""
-    if not ctx.get("es_admin"):
-        raise ErrorHerramienta("Solo el administrador puede conocer el PIN de envío de códigos")
+    if not _ver_pin(ctx):
+        raise ErrorHerramienta("No puedes conocer el PIN de envío de códigos")
     return {"pin_envio_codigos": PIN_ENVIO_CODIGOS,
             "nota": "Díselo solo a este usuario administrador, porque lo ha pedido. Es el PIN de seguridad que introduce el resto del personal."}
 
@@ -931,7 +961,9 @@ TOOLS = [
 
 def herramientas_para(ctx):
     """Las herramientas que ve el modelo: las de solo administrador no existen para el resto de usuarios."""
-    return [t for t in TOOLS if ctx.get("es_admin") or t["function"]["name"] not in HERRAMIENTAS_SOLO_ADMIN]
+    return [t for t in TOOLS
+            if (_ver_pin(ctx) or t["function"]["name"] not in HERRAMIENTAS_SOLO_ADMIN)
+            and (_emergencia(ctx) or t["function"]["name"] not in HERRAMIENTAS_EMERGENCIA)]
 
 
 def ejecutar_herramienta(nombre, argumentos, ctx):
@@ -945,6 +977,7 @@ def ejecutar_herramienta(nombre, argumentos, ctx):
             raise ValueError("argumentos no es un objeto")
     except ValueError:
         return {"error": "Los argumentos no son un JSON válido"}
+    marca = _PRIMAVERA_PERMITIDA.set(bool(ctx.get("primavera", True)))
     try:
         return funcion(args, ctx)
     except ErrorHerramienta as e:
@@ -952,6 +985,8 @@ def ejecutar_herramienta(nombre, argumentos, ctx):
     except Exception as e:
         logger.error(f"[asistente] Error en la herramienta {nombre}: {e}")
         return {"error": "No se pudieron consultar los datos ahora mismo (Beds24 no ha respondido). Vuelve a intentarlo en un momento."}
+    finally:
+        _PRIMAVERA_PERMITIDA.reset(marca)
 
 
 # ── Modelo ──────────────────────────────────────────────────────────────────
@@ -967,21 +1002,29 @@ def _system(ctx):
     else:
         permisos = ("Este usuario NO tiene los datos económicos desbloqueados (precios, ingresos, comisiones, beneficio): no los menciones ni "
                     "los consultes; si los pide, di que primero debe desbloquear la pestaña Finanzas. Sí puedes dar reservas, ocupación y fechas.")
-    if ctx.get("es_admin"):
-        regla7 = ("7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app. "
-                  "ÚNICA excepción: preparar_correo_codigos, que NO envía nada: deja un borrador del correo de emergencia con los códigos de acceso y la app lo muestra con un botón «Enviar» que pulsa el usuario; "
-                  "tú nunca envías correos y nunca digas que lo has enviado. Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario "
-                  "y el idioma (es o en): si falta algo, haz UNA pregunta corta. Después dile en una frase que revise el borrador y pulse «Enviar». "
-                  "El resto del personal (sin PIN de administrador) también puede enviarlos, pero la app les pide antes un PIN de seguridad: si el usuario te pide ese PIN, dáselo con pin_envio_codigos; si no lo pide, no lo menciones.")
+    if not ctx.get("primavera", True):
+        permisos += (" Este usuario NO tiene acceso a La Casa de la Primavera: ni a sus reservas, precios, incidencias, partes ni códigos. Si pregunta por ella, "
+                     "di que se lo pregunte a su superior y no des ningún dato.")
+    base7 = ("7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app. ")
+    if not _emergencia(ctx):
+        regla7 = base7 + "No puedes preparar ni enviar correos con códigos de acceso ni mensajes de emergencia: si te lo piden, di que lo gestione tu superior."
     else:
-        regla7 = ("7. Solo lees datos: no puedes crear, modificar ni cancelar reservas, ni cambiar precios ni bloqueos; si te lo piden, indica que lo hagan desde las pantallas de la app. "
-                  "ÚNICA excepción: preparar_correo_codigos (correo de emergencia con los códigos de acceso), que NO envía nada: la app pide primero el PIN de seguridad al usuario en un cuadro propio y, "
-                  "si es correcto, le muestra el borrador con un botón «Enviar». Tú no conoces ese PIN, nunca lo pidas por el chat y, si te lo preguntan, di que se lo dé el administrador; tú nunca envías correos. "
-                  "Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario y el idioma (es o en): si falta algo, haz UNA pregunta corta. "
-                  "Después responde solo «Introduce el PIN de seguridad.»")
-    regla7 += (" EMERGENCIA SIN PARTE: si el huésped aún no ha hecho el parte de viajeros y nada funciona, primero usa enlace_parte_emergencia (mensaje para copiar con el enlace de RPV de su habitación); "
-               "los códigos solo se mandan cuando el parte conste como completado (herramienta partes). Si la reserva es de varias habitaciones y su titular eligió repartir los códigos por habitación, "
-               "cada habitación va con su propio mensaje y su propio correo: las herramientas te lo indican.")
+        if _sin_pin(ctx):
+            regla7 = (base7 + "ÚNICA excepción: preparar_correo_codigos, que NO envía nada: deja un borrador del correo de emergencia con los códigos de acceso y la app lo muestra con un botón «Enviar» que pulsa el usuario; "
+                      "tú nunca envías correos y nunca digas que lo has enviado. Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario "
+                      "y el idioma (es o en): si falta algo, haz UNA pregunta corta. Después dile en una frase que revise el borrador y pulse «Enviar». ")
+        else:
+            regla7 = (base7 + "ÚNICA excepción: preparar_correo_codigos (correo de emergencia con los códigos de acceso), que NO envía nada: la app pide primero el PIN de seguridad al usuario en un cuadro propio y, "
+                      "si es correcto, le muestra el borrador con un botón «Enviar». Tú nunca pides ese PIN por el chat y tú nunca envías correos. "
+                      "Úsala solo si el usuario lo pide; antes necesitas el número de reserva (de listar_reservas o agenda), el correo del destinatario y el idioma (es o en): si falta algo, haz UNA pregunta corta. "
+                      "Después responde solo «Introduce el PIN de seguridad.» ")
+        if _ver_pin(ctx):
+            regla7 += "Si el usuario te pide el PIN de seguridad del envío de códigos, dáselo con pin_envio_codigos; si no lo pide, no lo menciones."
+        else:
+            regla7 += "No conoces el PIN de seguridad: si te lo preguntan, di que se lo dé su superior."
+        regla7 += (" EMERGENCIA SIN PARTE: si el huésped aún no ha hecho el parte de viajeros y nada funciona, primero usa enlace_parte_emergencia (mensaje para copiar con el enlace de RPV de su habitación); "
+                   "los códigos solo se mandan cuando el parte conste como completado (herramienta partes). Si la reserva es de varias habitaciones y su titular eligió repartir los códigos por habitación, "
+                   "cada habitación va con su propio mensaje y su propio correo: las herramientas te lo indican.")
     hostal = ", ".join(h["nombre"] for h in _habitaciones(mr.PROPERTY_ID))
     return f"""Eres el asistente de la app de gestión de ALC Homes. Ayudas al personal y a la propiedad a entender sus reservas, ocupación y finanzas, y puedes dibujar gráficos. Hoy es {DIAS_SEMANA[hoy.weekday()]} {hoy.isoformat()}.
 
@@ -1066,7 +1109,9 @@ def responder(mensajes, ctx):
     historial = _limpiar_mensajes(mensajes)
     if not historial or historial[-1]["role"] != "user":
         return {"ok": False, "error": "Falta la pregunta"}, 400
-    ctx = {"es_admin": bool(ctx.get("es_admin")), "finanzas": bool(ctx.get("finanzas")), "pantalla": ctx.get("pantalla"), "graficos": [], "borradores": []}
+    ctx = {"es_admin": bool(ctx.get("es_admin")), "finanzas": bool(ctx.get("finanzas")), "pantalla": ctx.get("pantalla"), "graficos": [], "borradores": [],
+           "emergencia": _emergencia(ctx), "sin_pin": _sin_pin(ctx), "ver_pin": _ver_pin(ctx),
+           "primavera": bool(ctx.get("primavera", True))}
     messages = [{"role": "system", "content": _system(ctx)}] + historial
     deadline = time.time() + PRESUPUESTO_SEG
     try:
