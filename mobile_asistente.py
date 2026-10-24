@@ -66,7 +66,7 @@ MAX_BORRADORES = 2
 # A quién se remite cada tema (Adrián, 2026-10-24): reservas y operativa → Ione; lo técnico y los permisos de acceso → Adrián.
 CONTACTO_OPERATIVA = "Ione"
 CONTACTO_TECNICO = "Adrián"
-CONTACTO_DINERO = "Ione"      # pendiente de confirmar con Adrián a quién se remiten las preguntas de finanzas
+CONTACTO_DINERO = "Ione"      # confirmado por Adrián (2026-10-24): las preguntas de finanzas se remiten a Ione
 RESPUESTA_DINERO = f"Dirígete a {CONTACTO_DINERO}."
 MSG_SIN_PRIMAVERA = f"No tienes acceso a La Casa de la Primavera: si necesitas algo de ella, consúltalo con {CONTACTO_TECNICO}."
 HERRAMIENTAS_SOLO_ADMIN = ('pin_envio_codigos',)      # (compatibilidad: ahora las filtra herramientas_para según los permisos del perfil)

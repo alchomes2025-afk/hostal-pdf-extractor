@@ -93,7 +93,7 @@ servidor reinicia, la app avisa y pide volver a entrar.
 - **2589 (sustituto):** calendario y reservas, cómo funciona la app y el puesto de gestora del hostal (tareas, llamadas, plataformas, limpieza, incidencias, escalado, con la base de conocimiento).
 - **2486 y 9999:** solo calendario y reservas y cómo funciona la app. **Las tareas de gestión no son para ellos** (sin `buscar_operativa`): «Eso no está disponible para tu perfil: consúltalo con Ione».
   Fuera de eso declina con amabilidad (barrera blanda, por el prompt). **Finanzas es barrera dura:** sin acceso a datos económicos, una pregunta de dinero (ingresos, beneficio,
-  comisiones, costes, rentabilidad, impuestos…) ni llega al modelo: el servidor responde «Dirígete a Ione.» (pendiente de confirmar a quién remitir las finanzas); y la herramienta `finanzas_mes` ni existe para ellos.
+  comisiones, costes, rentabilidad, impuestos…) ni llega al modelo: el servidor responde «Dirígete a Ione.»; y la herramienta `finanzas_mes` ni existe para ellos.
   El 9999 ve la Primavera pero no el hostal: el modelo y las herramientas lo limitan, y se le remite a Ione.
 - **Base de conocimiento** (`services/operativa_kb.py`, colección `kb_operativa`): herramienta `buscar_operativa`, solo con entradas **aprobadas**. Si no hay nada, el asistente
   dice «Eso todavía no está recogido: consúltalo con Ione» y no inventa procedimientos. La edición, el alta y el Entrenamiento llegan en las fases 5 y 6.
