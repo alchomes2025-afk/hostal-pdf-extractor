@@ -79,3 +79,11 @@ Antes casi todas aceptaban cualquier PIN válido (`check_pin`), incluidas las de
 
 Las rutas nuevas de las fases 5-7 (Operativa, Entrenamiento, Historial) usarán `operativa.ver`, `operativa.entrenamiento` y `operativa.historial`; hay que
 declararlas en `rutas_permisos.py`. `tests/test_acceso_fase2.py` recorre todas las rutas con los cinco perfiles.
+
+## La app (fase 3)
+`mobile-app/index.html` entra con el PIN, guarda la sesión firmada solo en memoria y la manda en `Authorization` en cada petición a la API. Según los permisos del
+perfil oculta lo que no le toca: pestaña Finanzas (y la barra Hostal solo para el propietario), asistente flotante, 🚨 emergencia, botones de Facturas y Asesor,
+«Editar precio» y el historial de cambios 📋 (rutas de diagnóstico: solo propietario). **Esto es comodidad: el servidor rechaza igualmente lo que no corresponda.**
+El candado de Finanzas del navegador (con el PIN 9999 escrito en el código) ya no existe. Al entrar: el 1379 pregunta «¿Ione o Adrián?» si el dispositivo es nuevo; el 2589
+pide el nombre y avisa de que su actividad queda registrada; el 9999 entra como Hermann; el 2486 y el 4268 siguen como antes. Si la sesión caduca (12 h) o el
+servidor reinicia, la app avisa y pide volver a entrar.
