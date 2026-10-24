@@ -428,6 +428,13 @@ body.sin-gestion-kb .solo-kb{display:none!important}
 .op-etq.borrador{background:#fff3cd;color:#7a5b00}
 .op-etq.aprobado{background:#d9f2e3;color:#1f5c3a}
 .op-msg{font-size:13px;margin:10px 0;min-height:16px}
+#en-chat{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.en-msg{max-width:88%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;white-space:pre-wrap}
+.en-bot{background:#f3eef6;align-self:flex-start;border-bottom-left-radius:4px}
+.en-ione{background:#fdf1f8;border:1px solid #f0c9dd;align-self:flex-end;border-bottom-right-radius:4px}
+.en-guardado{align-self:flex-start;font-size:12px;background:#d9f2e3;color:#1f5c3a;border-radius:10px;padding:5px 9px}
+.en-pensando{align-self:flex-start;font-size:13px;color:var(--muted)}
+#en-texto{min-height:90px}
 body.sin-asistente #as-fab,body.sin-asistente #as-panel{display:none!important}
 body.sin-emergencia #btn-emergencia{display:none!important}
 body.sin-facturas #fx-bar{display:none!important}
@@ -3746,6 +3753,10 @@ async function cargarOperativa() {
   asistente.type = "button";
   emEl("small", "", "Te responde con lo recogido sobre las tareas y los procedimientos de gestión.", asistente);
   asistente.onclick = opPreguntar;
+  const entreno = emEl("button", "op-btn solo-kb", "🎙 Entrenamiento", cuerpo);
+  entreno.type = "button";
+  emEl("small", "", "Entrevista a Ione, una pregunta cada vez: lo que cuente queda como borrador para revisar.", entreno);
+  entreno.onclick = abrirEntrenamiento;
   const editor = emEl("button", "op-btn solo-kb", "📚 Base de conocimiento", cuerpo);
   editor.type = "button";
   emEl("small", "", "Revisar, editar y aprobar lo que sabe el asistente.", editor);
@@ -3785,6 +3796,81 @@ async function verEntradaOp(id) {
   emEl("div", "op-texto", d.entrada.contenido, cuerpo);
 }
 
+// Entrenamiento (solo el propietario): entrevista a Ione sobre su puesto. Una pregunta cada vez; lo que cuenta se guarda como BORRADOR (services/entrevista.py).
+async function enApi(ruta, opciones) {
+  const r = await fetch(`${API}/entrenamiento${ruta}`, {headers: {"x-app-pin": PIN, "content-type": "application/json"}, ...opciones});
+  let d; try { d = await r.json(); } catch (_) { d = {ok: false, error: "Respuesta no válida del servidor"}; }
+  return d;
+}
+
+async function abrirEntrenamiento() {
+  const cuerpo = abrirOpPanel("🎙 Entrenamiento");
+  emEl("p", "op-vacio", "Elige un tema. Te hago preguntas de una en una, tal y como se las haría a Ione; lo que contéis queda como BORRADOR hasta que lo apruebes en «Base de conocimiento».", cuerpo);
+  const revisar = emEl("button", "op-btn", "📚 Revisar lo aprendido", cuerpo);
+  revisar.type = "button";
+  revisar.onclick = abrirEditorKb;
+  const carga = emEl("div", "op-vacio", "Cargando…", cuerpo);
+  const d = await enApi("/temas");
+  carga.remove();
+  if (!d.ok) { emEl("div", "op-vacio", d.error || "No se ha podido cargar.", cuerpo); return; }
+  d.temas.forEach(t => {
+    const b = emEl("button", "op-btn", t.titulo, cuerpo);
+    b.type = "button";
+    emEl("small", "", `${t.borradores} por revisar · ${t.aprobadas} aprobadas`, b);
+    b.onclick = () => entrenarTema(t);
+  });
+}
+
+async function entrenarTema(tema) {
+  const cuerpo = abrirOpPanel(tema.titulo);
+  const chat = emEl("div", "", null, cuerpo);
+  chat.id = "en-chat";
+  const texto = emEl("textarea", "", null, cuerpo);
+  texto.id = "en-texto";
+  texto.placeholder = "Escribe aquí la respuesta de Ione…";
+  const msg = emEl("div", "op-msg", "", cuerpo);
+  const enviar = emEl("button", "op-btn principal", "Enviar respuesta", cuerpo);
+  enviar.type = "button";
+  const atras = emEl("button", "op-btn", "← Elegir otro tema", cuerpo);
+  atras.type = "button";
+  atras.onclick = abrirEntrenamiento;
+  let sesion = null;
+  const burbuja = (rol, t) => emEl("div", "en-msg " + (rol === "entrevistador" ? "en-bot" : "en-ione"), t, chat);
+  const mostrar = r => {
+    burbuja("entrevistador", r.pregunta);
+    (r.guardadas || []).forEach(g => emEl("div", "en-guardado", `📝 ${g.accion === "actualizado" ? "Actualizado" : g.accion === "revisión" ? "Propuesta de revisión" : "Guardado"} como borrador: «${g.titulo}»`, chat));
+    if (r.tema_cubierto) emEl("div", "en-guardado", "✔ Tema cubierto. Puedes elegir otro o seguir añadiendo cosas.", chat);
+    chat.lastChild.scrollIntoView({block: "end"});
+  };
+  const turno = async (t) => {
+    enviar.disabled = true; msg.textContent = "";
+    const pensando = emEl("div", "en-pensando", "Pensando…", chat);
+    const r = await enApi("/mensaje", {method: "POST", body: JSON.stringify({tema: tema.id, texto: t, sesion_id: sesion})});
+    pensando.remove();
+    enviar.disabled = false;
+    if (!r.ok) { msg.textContent = r.error || "No se ha podido continuar."; if (t) texto.value = t; return false; }
+    sesion = r.sesion_id;
+    mostrar(r);
+    return true;
+  };
+  enviar.onclick = async () => {
+    const t = texto.value.trim();
+    if (!t) { msg.textContent = "Escribe la respuesta."; return; }
+    burbuja("ione", t);
+    texto.value = "";
+    await turno(t);
+  };
+  // retomar la conversación de otro día o empezar
+  const previa = await enApi(`/sesion?tema=${encodeURIComponent(tema.id)}`);
+  if (previa.ok && previa.sesion && previa.sesion.mensajes.length) {
+    sesion = previa.sesion.id;
+    previa.sesion.mensajes.forEach(m => burbuja(m.rol, m.texto));
+    chat.lastChild.scrollIntoView({block: "end"});
+  } else {
+    await turno("");
+  }
+}
+
 // Editor de la base de conocimiento (solo el propietario)
 async function abrirEditorKb() {
   const cuerpo = abrirOpPanel("📚 Base de conocimiento");
@@ -3795,6 +3881,17 @@ async function abrirEditorKb() {
   const nueva = emEl("button", "op-btn principal", "➕ Nueva entrada", cuerpo);
   nueva.type = "button";
   nueva.onclick = () => formularioKb(null, d.tipos);
+  const importar = emEl("button", "op-btn", "📥 Importar las preguntas frecuentes de la web de check-in", cuerpo);
+  importar.type = "button";
+  emEl("small", "", "Las carga como borradores para que las revises y las apruebes. No pisa lo que ya hayas editado.", importar);
+  importar.onclick = async () => {
+    importar.disabled = true;
+    const r = await opApi("/kb/importar-faq", {method: "POST", body: "{}"});
+    importar.disabled = false;
+    if (!r.ok) { window.alert(r.error || "No se ha podido importar."); return; }
+    window.alert(r.creadas ? `Importadas ${r.creadas} entradas como borrador.` : "Ya estaban todas importadas.");
+    abrirEditorKb();
+  };
   emEl("p", "op-vacio", "Solo lo APROBADO lo ven el sustituto y el asistente. Lo recién aprendido queda como borrador hasta que lo revises.", cuerpo);
   const nombres = Object.fromEntries(OP_GRUPOS.map(g => [g[0], g[1]]));
   d.entradas.sort((a, b) => (a.tipo || "").localeCompare(b.tipo || "") || (a.orden ?? 1000) - (b.orden ?? 1000)).forEach(e => {
@@ -3815,18 +3912,20 @@ function formularioKb(e, tipos) {
   tipos.forEach(t => { const o = emEl("option", "", nombres[t] || t, tipo); o.value = t; });
   const titulo = campo("Título", document.createElement("input"));
   const contenido = campo("Contenido (pasos, qué comprobar, a quién avisar, qué datos dar…)", document.createElement("textarea"));
+  const propiedad = campo("Propiedad", document.createElement("select"));
+  [["", "Todas"], ["hostal", "Hostal"], ["primavera", "La Casa de la Primavera (solo la ven quienes tienen acceso a ella)"]].forEach(([v, t]) => { const o = emEl("option", "", t, propiedad); o.value = v; });
   const etiquetas = campo("Palabras clave (separadas por comas, para que el asistente lo encuentre)", document.createElement("input"));
   const orden = campo("Orden (las tareas del día salen de menor a mayor)", document.createElement("input"));
   orden.type = "number";
   const estado = campo("Estado", document.createElement("select"));
   [["borrador", "Borrador (aún no lo ve nadie más)"], ["aprobado", "Aprobado (lo ven el sustituto y el asistente)"]].forEach(([v, t]) => { const o = emEl("option", "", t, estado); o.value = v; });
-  if (e) { tipo.value = e.tipo; titulo.value = e.titulo; contenido.value = e.contenido; etiquetas.value = (e.etiquetas || []).join(", "); orden.value = e.orden ?? ""; estado.value = e.estado; }
+  if (e) { tipo.value = e.tipo; titulo.value = e.titulo; contenido.value = e.contenido; propiedad.value = e.propiedad || ""; etiquetas.value = (e.etiquetas || []).join(", "); orden.value = e.orden ?? ""; estado.value = e.estado; }
   const msg = emEl("div", "op-msg", "", cuerpo);
   const guardar = emEl("button", "op-btn principal", "Guardar", cuerpo);
   guardar.type = "button";
   guardar.onclick = async () => {
     guardar.disabled = true; msg.textContent = "";
-    const r = await opApi("/kb", {method: "POST", body: JSON.stringify({id: e && e.id, tipo: tipo.value, titulo: titulo.value, contenido: contenido.value, etiquetas: etiquetas.value, orden: orden.value, estado: estado.value})});
+    const r = await opApi("/kb", {method: "POST", body: JSON.stringify({id: e && e.id, tipo: tipo.value, titulo: titulo.value, contenido: contenido.value, propiedad: propiedad.value, etiquetas: etiquetas.value, orden: orden.value, estado: estado.value})});
     guardar.disabled = false;
     if (!r.ok) { msg.textContent = r.error || "No se ha podido guardar."; return; }
     abrirEditorKb();

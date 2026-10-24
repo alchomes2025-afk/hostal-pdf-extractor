@@ -73,6 +73,10 @@ PERMISOS_RUTAS = {
     "operativa.kb_guardar": (a.ENTRENAMIENTO,),
     "operativa.kb_borrar": (a.ENTRENAMIENTO,),
     "operativa.kb_importar_faq": (a.ENTRENAMIENTO,),
+    # Entrenamiento: entrevista a Ione (solo el propietario)
+    "entrenamiento.temas": (a.ENTRENAMIENTO,),
+    "entrenamiento.sesion": (a.ENTRENAMIENTO,),
+    "entrenamiento.mensaje": (a.ENTRENAMIENTO,),
     # Limpieza
     "limpieza.calendario": (a.LIMPIEZA_CALENDARIO,),
     "limpieza.incidencia": (a.LIMPIEZA_MARCAR,),

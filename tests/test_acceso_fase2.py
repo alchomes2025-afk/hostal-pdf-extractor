@@ -14,12 +14,13 @@ from flask import Flask
 import mobile_asistente
 import mobile_facturas
 import mobile_limpieza
+import mobile_entrenamiento
 import mobile_operativa
 import mobile_routes
 from rutas_permisos import PERMISOS_RUTAS, RUTAS_PUBLICAS
 from services import accesos, limites
 
-PREFIJOS = ("mobile.", "facturas.", "limpieza.", "operativa.")
+PREFIJOS = ("mobile.", "facturas.", "limpieza.", "operativa.", "entrenamiento.")
 CASA = 720841
 
 
@@ -29,6 +30,7 @@ def crear_app():
     app.register_blueprint(mobile_facturas.facturas_bp)
     app.register_blueprint(mobile_limpieza.limpieza_bp)
     app.register_blueprint(mobile_operativa.operativa_bp)
+    app.register_blueprint(mobile_entrenamiento.entrenamiento_bp)
     return app
 
 

@@ -106,3 +106,12 @@ Pestaña «📋 Operativa» (permiso `operativa.ver`: el sustituto 2589 y el pro
 las secciones de escalado de problemas, teléfonos, preguntas frecuentes y otros procedimientos. Todo sale de la base de conocimiento (`services/operativa_kb.py`, Firestore `kb_operativa`), **solo lo
 aprobado**. El propietario (`operativa.entrenamiento`) tiene además «📚 Base de conocimiento»: lista con borradores y aprobadas, alta, edición, aprobación y borrado
 (`mobile_operativa.py`). Rutas: `/mobile/operativa/indice`, `/entrada`, `/kb` (GET y POST) y `/kb/borrar`. Las fases 6 y 7 añaden «Entrenamiento» e «Historial de sustitución» (solo 1379).
+
+## Entrenamiento (fase 6)
+Solo el propietario (`operativa.entrenamiento`). Botón «🎙 Entrenamiento» en la pestaña Operativa: entrevista guiada a Ione (con Adrián al lado), **una pregunta cada vez**, sobre los 10 temas del encargo
+(tareas del día a día, limpieza, reservas, llamadas, vending, plataformas, preguntas frecuentes, teléfonos, escalado administrativo y escalado técnico). Cada turno
+(`services/entrevista.py`, `mobile_entrenamiento.py`) manda a Groq (cuenta de gestión) el tema, lo que hay que cubrir, lo ya recogido y los últimos mensajes; el modelo devuelve la siguiente pregunta y,
+si procede, entradas nuevas. **Las entradas se guardan siempre como BORRADOR** (un tema ya aprobado no se pisa: se propone una «revisión» aparte) y se revisan en «📚 Base de conocimiento».
+La conversación queda en Firestore (`entrenamiento_sesiones`) para seguirla otro día. Las entradas de escalado llevan los apartados: ejemplos, lo que resuelve y no resuelve el sustituto, a quién avisar,
+medio, horario, datos a dar, qué hacer si no responde y cuándo es urgente. Además, «Importar las preguntas frecuentes de la web de check-in» carga 24 entradas (12 del hostal, 12 de la Primavera) como borradores
+(`datos/faq_checkin.json`); las de la Primavera solo las ven quienes tienen acceso a esa propiedad (campo `propiedad` de cada entrada).
