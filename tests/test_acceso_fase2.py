@@ -117,6 +117,8 @@ class Matriz(Base):
 
 class Sesiones(Base):
     def _login(self, pin, **extra):
+        if pin == "2486" and "nombre" not in extra:
+            extra["nombre"] = "Marta Gil"      # el 2486 lo usan varias personas: cada una dice quién es al entrar
         return self.c.post("/mobile/login", json={"pin": pin, **extra})
 
     def test_login_de_cada_perfil(self):
@@ -417,11 +419,23 @@ class Identidad(Base):
         self.assertEqual((d["nombre"], d["identidad"]), ("Hermann", None))
         self.assertEqual(accesos.verificar_sesion(d["token"])[1], "Hermann")
 
+    def test_el_2486_pregunta_el_nombre_en_cada_entrada(self):
+        d = self.c.post("/mobile/login", json={"pin": "2486"}).get_json()
+        self.assertEqual((d["ok"], d["necesita_nombre"], d["auditado"], d.get("token")), (True, True, False, None))
+        d = self.c.post("/mobile/login", json={"pin": "2486", "nombre": "  marta gil "}).get_json()
+        self.assertEqual((d["nombre"], d["perfil"], d["auditado"]), ("Marta Gil", "gestor", False))
+        self.assertEqual(accesos.verificar_sesion(d["token"])[1], "Marta Gil")
+        self.assertIsNone(self.c.post("/mobile/login", json={"pin": "2486", "nombre": "<b>"}).get_json().get("token"))
+
+    def test_el_pin_del_2486_solo_sigue_valiendo_sin_sesion_pero_no_el_del_sustituto(self):
+        self.app.view_functions["mobile.mobile_rooms"] = lambda: ("ok", 200)
+        self.assertEqual(self.c.get("/mobile/rooms", headers={"x-app-pin": "2486"}).status_code, 200)    # no se le obliga: una copia antigua de la app no se queda sin acceso
+        self.assertEqual(self.c.get("/mobile/rooms", headers={"x-app-pin": "2589"}).status_code, 401)
+
     def test_el_resto_sigue_como_hasta_ahora(self):
-        for pin in ("2486", "4268"):
-            d = self._login(pin)
-            self.assertIsNone(d["nombre"], pin)               # la app sigue preguntando el nombre por su cuenta
-            self.assertIsNone(d["identidad"], pin)
+        d = self._login("4268")
+        self.assertIsNone(d["nombre"])                        # la limpiadora: la app sigue preguntando el nombre por su cuenta
+        self.assertIsNone(d["identidad"])
         self.assertTrue(self._login("2589")["necesita_nombre"])
 
     def test_sin_firestore_nadie_queda_identificado_pero_entra(self):

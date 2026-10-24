@@ -59,7 +59,8 @@ class Perfil:
     nombre: str
     permisos: frozenset
     auditado: bool = False       # toda su actividad se registra en el historial de sustitución (no se puede desactivar desde el perfil)
-    pide_nombre: bool = False    # el PIN es compartido: al entrar se pide el nombre de quien lo usa
+    pide_nombre: bool = False    # el PIN es compartido: al entrar se pide el nombre de quien lo usa y SIN sesión con nombre no vale
+    pregunta_nombre: bool = False   # el PIN lo usan varias personas: al entrar la app pregunta el nombre (que va en la sesión), pero el PIN solo sigue valiendo
     nombre_fijo: str = ""        # el PIN es de una sola persona: la sesión lleva siempre su nombre
     identidad_por_dispositivo: tuple = ()   # el PIN es de varias personas conocidas: cada dispositivo se asocia a una de ellas (services/dispositivos.py)
 
@@ -74,7 +75,7 @@ PERFILES = {
                           identidad_por_dispositivo=("Ione", "Adrián")),
     "gestor_primavera": Perfil("gestor_primavera", "Gestor de la Casa de la Primavera", _GESTOR | {PRECIOS, FINANZAS_PRIMAVERA, PRIMAVERA, INCIDENCIAS_VER},
                                nombre_fijo="Hermann"),
-    "gestor": Perfil("gestor", "Gestor", _GESTOR),
+    "gestor": Perfil("gestor", "Gestor", _GESTOR, pregunta_nombre=True),
     "sustituto": Perfil("sustituto", "Sustituto de Ione", _GESTOR | {EMERGENCIA, EMERGENCIA_VER_PIN, OPERATIVA}, auditado=True, pide_nombre=True),
     "limpieza": Perfil("limpieza", "Limpieza", frozenset({LIMPIEZA_CALENDARIO, LIMPIEZA_MARCAR})),
 }

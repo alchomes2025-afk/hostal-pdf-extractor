@@ -1174,10 +1174,10 @@ function aplicarSesion(d) {
   USER_NAME = d.nombre || localStorage.getItem(USER_NAME_KEY) || "";
 }
 
-async function pedirNombreSustituto(error) {
+async function pedirNombreSustituto(error, auditado) {
   return accModal((caja, cerrar) => {
     accEl("h3", "¿Quién eres?", caja);
-    accEl("p", "Escribe tu nombre. Todo lo que hagas en la app queda registrado con él.", caja);
+    accEl("p", auditado ? "Escribe tu nombre. Todo lo que hagas en la app queda registrado con él." : "Escribe tu nombre: es el que se anota en los cambios que hagas en la app.", caja);
     const input = accEl("input", null, caja);
     input.placeholder = "Tu nombre"; input.autocomplete = "off"; input.maxLength = 40;
     const err = accEl("div", error || "", caja, "acc-err");
@@ -1234,7 +1234,7 @@ async function doLogin(nombre) {
     });
     const d = await r.json();
     if (d.ok && d.necesita_nombre) {   // PIN compartido (sustituto): pide el nombre y vuelve a entrar con él
-      const escrito = await pedirNombreSustituto(nombre ? "Escribe un nombre válido (solo letras)." : "");
+      const escrito = await pedirNombreSustituto(nombre ? "Escribe un nombre válido (solo letras)." : "", d.auditado);
       return doLogin(escrito);
     }
     if (d.ok) {
@@ -3916,7 +3916,7 @@ async function entrenarTema(tema) {
   chat.id = "en-chat";
   const texto = emEl("textarea", "", null, cuerpo);
   texto.id = "en-texto";
-  texto.placeholder = "Escribe aquí la respuesta de Ione…";
+  texto.placeholder = tema.id === "libre" ? "Cuéntame lo que quieras apuntar…" : "Escribe aquí la respuesta de Ione… (también puedes contar cosas que no te haya preguntado)";
   const msg = emEl("div", "op-msg", "", cuerpo);
   const enviar = emEl("button", "op-btn principal", "Enviar respuesta", cuerpo);
   enviar.type = "button";

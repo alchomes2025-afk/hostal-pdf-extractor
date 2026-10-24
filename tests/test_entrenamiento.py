@@ -176,8 +176,24 @@ class Permisos(Base):
         self.respuestas = [{"pregunta": "a", "entradas": [ENTRADA]}]
         self.mensaje("hola")
         d = self.c.get("/mobile/entrenamiento/temas", headers=cab("propietario")).get_json()["temas"]
-        self.assertEqual([t["id"] for t in d], ["dia_a_dia", "limpieza", "reservas", "llamadas", "vending", "plataformas", "faq", "telefonos", "escalado_admin", "escalado_tecnico"])
+        self.assertEqual([t["id"] for t in d], ["dia_a_dia", "limpieza", "reservas", "llamadas", "vending", "plataformas", "faq", "telefonos", "escalado_admin", "escalado_tecnico", "libre"])
         self.assertEqual({t["id"]: (t["borradores"], t["aprobadas"]) for t in d}["dia_a_dia"], (1, 0))
+
+    def test_el_tema_libre_espera_a_que_hable_quien_quiere_apuntar_algo(self):
+        d = self.mensaje("", tema="libre").get_json()
+        self.assertIn("Cuéntame lo que quieras", d["pregunta"])
+        self.assertEqual(self.enviados, [])                                      # el saludo no gasta una llamada al modelo
+        self.respuestas = [{"pregunta": "¿Y a quién se avisa en ese caso?", "entradas": [{**ENTRADA, "titulo": "Caso raro del ascensor", "tipo": "proceso"}], "tema_cubierto": False, "resumen": "Nuevo caso."}]
+        d2 = self.mensaje("Si el ascensor se para, llamamos a Otis.", tema="libre", sesion=d["sesion_id"]).get_json()
+        self.assertEqual(d2["guardadas"][0]["tipo"], "proceso")
+        self.assertIn("MODO LIBRE", self.enviados[0][0]["content"])
+        self.assertEqual(self.db.c["kb_operativa"][d2["guardadas"][0]["id"]]["estado"], "borrador")
+        self.assertEqual(self.db.c["kb_operativa"][d2["guardadas"][0]["id"]]["tema"], "libre")
+
+    def test_en_los_temas_normales_no_hay_modo_libre(self):
+        self.respuestas = [{"pregunta": "a", "entradas": []}]
+        self.mensaje(tema="limpieza")
+        self.assertNotIn("MODO LIBRE", self.enviados[0][0]["content"])
 
     def test_cada_tema_dice_que_cubrir(self):
         for t in entrevista.TEMAS:
