@@ -20,6 +20,8 @@ Nada de lo de aquí lanza excepción hacia arriba.
 import logging
 import time
 import unicodedata
+import uuid
+from datetime import datetime, timezone
 
 import config
 
@@ -90,3 +92,92 @@ def buscar(consulta, tipo=None, limite=MAX_RESULTADOS):
 def temas():
     """Títulos de lo aprobado, para que el asistente sepa qué hay si la búsqueda no encuentra nada."""
     return [{"tipo": e.get("tipo"), "titulo": e.get("titulo")} for e in entradas("aprobado")][:60]
+
+
+# ── Edición (solo el propietario, fase 5) ─────────────────────────────────────
+
+class ErrorKB(Exception):
+    def __init__(self, mensaje, status=400):
+        super().__init__(mensaje)
+        self.status = status
+
+
+ESTADOS = ("borrador", "aprobado")
+
+
+def validar(datos):
+    """Limpia y valida una entrada que llega del editor. Lanza ErrorKB con un mensaje legible."""
+    tipo = str(datos.get("tipo") or "")
+    if tipo not in TIPOS:
+        raise ErrorKB("Elige el tipo de entrada")
+    titulo = " ".join(str(datos.get("titulo") or "").split())
+    if not 2 <= len(titulo) <= 120:
+        raise ErrorKB("El título debe tener entre 2 y 120 caracteres")
+    contenido = str(datos.get("contenido") or "").strip()
+    if not contenido:
+        raise ErrorKB("Escribe el contenido")
+    if len(contenido) > 8000:
+        raise ErrorKB("El contenido es demasiado largo (máximo 8000 caracteres)")
+    etiquetas = datos.get("etiquetas") or []
+    if isinstance(etiquetas, str):
+        etiquetas = [x.strip() for x in etiquetas.replace(";", ",").split(",")]
+    etiquetas = [" ".join(str(x).split())[:40] for x in etiquetas if str(x).strip()][:15]
+    estado = datos.get("estado") if datos.get("estado") in ESTADOS else "borrador"
+    try:
+        orden = int(datos.get("orden")) if datos.get("orden") not in (None, "") else 1000
+    except (TypeError, ValueError):
+        raise ErrorKB("El orden debe ser un número")
+    return {"tipo": tipo, "titulo": titulo, "contenido": contenido, "etiquetas": etiquetas, "estado": estado, "orden": orden}
+
+
+def _doc_id(valor):
+    valor = str(valor or "")
+    return valor if valor.isalnum() and 4 <= len(valor) <= 40 else ""
+
+
+def guardar(datos, usuario=""):
+    """Crea o actualiza una entrada. Devuelve su id. Un borrador pasa a aprobado solo si quien lo guarda lo marca (el propietario)."""
+    if config.db is None:
+        raise ErrorKB("La base de conocimiento no está disponible ahora mismo", 503)
+    limpio = validar(datos)
+    doc_id = _doc_id(datos.get("id")) or uuid.uuid4().hex[:12]
+    limpio.update(actualizado=datetime.now(timezone.utc).isoformat(timespec="seconds"), editado_por=str(usuario or "")[:40])
+    try:
+        config.db.collection(COLECCION).document(doc_id).set(limpio)
+    except Exception as e:
+        logger.error(f"[operativa_kb] No se pudo guardar la entrada {doc_id}: {e}")
+        raise ErrorKB("No se ha podido guardar. Inténtalo de nuevo.", 502)
+    olvidar_cache()
+    return doc_id
+
+
+def borrar(doc_id):
+    if config.db is None:
+        raise ErrorKB("La base de conocimiento no está disponible ahora mismo", 503)
+    doc_id = _doc_id(doc_id)
+    if not doc_id:
+        raise ErrorKB("Entrada desconocida", 404)
+    try:
+        config.db.collection(COLECCION).document(doc_id).delete()
+    except Exception as e:
+        logger.error(f"[operativa_kb] No se pudo borrar la entrada {doc_id}: {e}")
+        raise ErrorKB("No se ha podido borrar. Inténtalo de nuevo.", 502)
+    olvidar_cache()
+
+
+def una(doc_id, solo_aprobada=True):
+    """La entrada completa (con su id) o None."""
+    doc_id = _doc_id(doc_id)
+    for e in entradas(None, forzar=True):
+        if e["id"] == doc_id and (not solo_aprobada or e.get("estado") == "aprobado"):
+            return e
+    return None
+
+
+def indice():
+    """Lo aprobado, agrupado por tipo, solo con id y título: es lo que enseña la pestaña Operativa de Gestión."""
+    grupos = {t: [] for t in TIPOS}
+    for e in entradas("aprobado"):
+        if e.get("tipo") in grupos:
+            grupos[e["tipo"]].append({"id": e["id"], "titulo": e.get("titulo")})
+    return grupos

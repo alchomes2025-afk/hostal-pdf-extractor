@@ -66,6 +66,12 @@ PERMISOS_RUTAS = {
     "facturas.asesor_respuestas": (a.FACTURAS,),
     "facturas.resumen_trimestral": (a.FACTURAS,),
     "facturas.resumen_trimestral_hoja": (a.FACTURAS,),
+    # Operativa de Gestión (el sustituto y el propietario) y edición de la base de conocimiento (solo el propietario)
+    "operativa.indice": (a.OPERATIVA,),
+    "operativa.entrada": (a.OPERATIVA,),
+    "operativa.kb_listar": (a.ENTRENAMIENTO,),
+    "operativa.kb_guardar": (a.ENTRENAMIENTO,),
+    "operativa.kb_borrar": (a.ENTRENAMIENTO,),
     # Limpieza
     "limpieza.calendario": (a.LIMPIEZA_CALENDARIO,),
     "limpieza.incidencia": (a.LIMPIEZA_MARCAR,),

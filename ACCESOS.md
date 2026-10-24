@@ -100,3 +100,9 @@ servidor reinicia, la app avisa y pide volver a entrar.
 
 **A quién remite el asistente** (constantes `CONTACTO_*` en `mobile_asistente.py`): reservas y operativa → **Ione**; fallos técnicos de la app y permisos o accesos (PIN, qué ve cada perfil,
 «no tienes acceso a la Casa de la Primavera») → **Adrián**.
+
+## Operativa de Gestión (fase 5)
+Pestaña «📋 Operativa» (permiso `operativa.ver`: el sustituto 2589 y el propietario 1379): botón del asistente de operativa (con sugerencias propias), tareas diarias en botones que abren su detalle, y
+las secciones de escalado de problemas, teléfonos, preguntas frecuentes y otros procedimientos. Todo sale de la base de conocimiento (`services/operativa_kb.py`, Firestore `kb_operativa`), **solo lo
+aprobado**. El propietario (`operativa.entrenamiento`) tiene además «📚 Base de conocimiento»: lista con borradores y aprobadas, alta, edición, aprobación y borrado
+(`mobile_operativa.py`). Rutas: `/mobile/operativa/indice`, `/entrada`, `/kb` (GET y POST) y `/kb/borrar`. Las fases 6 y 7 añaden «Entrenamiento» e «Historial de sustitución» (solo 1379).
