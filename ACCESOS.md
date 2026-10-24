@@ -122,3 +122,10 @@ cambiar ni desactivar desde ese perfil): entradas, calendario abierto, **cada pr
 bloqueos, envíos de emergencia (correo del huésped enmascarado) y los **escalados** (cuando el asistente le remite a Ione o a Adrián). Sin teléfono ni correo de los huéspedes. La app avisa además, de mejor esfuerzo, de los
 botones que pulsa y las reservas que mira en pantalla (no generan petición). Se conserva 12 meses. Lo lee solo el propietario: «🕵 Historial de sustitución» en la pestaña Operativa, con filtros por sustituto, día y tipo, y un
 asistente («¿qué hizo ayer?»: traduce la pregunta a filtros y responde solo con los registros). Rutas: `/mobile/historial-sustitucion` y `/preguntar`; el registro del cliente, `/mobile/registro/evento`.
+
+## Despliegue (fase 8)
+- **Verificación en producción:** `python scripts/verificar_perfiles.py` entra con cada PIN y comprueba perfil × ruta (solo lecturas baratas) y que La Casa de la Primavera solo la ven el 1379 y el 9999. Se ejecutó el
+  2026-10-24 tras desplegar la fase 7: todo ✔.
+- **Variables de Render recomendadas:** `ACCESO_SESION_SECRETO` (cadena aleatoria larga; sin ella las sesiones se pierden en cada reinicio o despliegue y todos tienen que volver a poner el PIN; generar con
+  `python -c "import secrets; print(secrets.token_urlsafe(48))"`). Opcional: `ACCESO_PEPPER`.
+- **Día de corte:** mientras no se ponga `ACCESO_PINS_ANTIGUOS=0` en Render, los dos PIN de siempre (`MOBILE_APP_PIN` → gestor de la Primavera, `MOBILE_APP_PIN_ADMIN` → propietario) siguen valiendo.
