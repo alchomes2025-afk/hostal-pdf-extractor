@@ -38,6 +38,15 @@ estos valores por defecto. En memoria solo se conserva su hash (PBKDF2-SHA256, s
 | `limpieza.calendario` / `limpieza.marcar` | | | | | ✔ |
 | `sistema.diagnostico` | ✔ | | | | |
 
+## Quién es cada persona
+- **1379 = Ione o Adrián, según el dispositivo.** La primera vez que un dispositivo entra con ese PIN, la app pregunta «¿Eres Ione o Adrián?» (solo esas dos
+  opciones) y llama a `POST /mobile/dispositivo {deviceId, nombre}`; el servidor lo recuerda en Firestore (`dispositivos_acceso`, `services/dispositivos.py`) y a partir
+  de entonces ese dispositivo entra ya identificado: `/login` (con `deviceId` en el cuerpo) devuelve `nombre` y `identidad: {necesita: false}`. Si el dispositivo no está
+  registrado devuelve `identidad: {necesita: true, opciones: ["Ione", "Adrián"]}` y entra igualmente (la app antigua no se rompe).
+- **9999 = Hermann.** La sesión lleva siempre ese nombre.
+- **2589 = sustituto:** pide el nombre al entrar, y es auditado.
+- **2486 y 4268:** como hasta ahora (la app pregunta el nombre por su cuenta).
+
 ## La Casa de la Primavera
 Solo la ven el 1379 y el 9999 (permiso `propiedad.primavera`). Para el resto de perfiles el servidor: quita su habitación, reservas, precios y
 disponibilidad de `/all-data`, `/rooms` y `/check-changes`; rechaza (403) crear, editar, cancelar o bloquear reservas suyas (por habitación o por el id

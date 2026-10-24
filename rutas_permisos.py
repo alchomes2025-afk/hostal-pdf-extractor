@@ -22,6 +22,8 @@ PERMISOS_RUTAS = {
     "mobile.all_data": (a.CALENDARIO,),
     "mobile.reload_data": (a.CALENDARIO,),
     "mobile.check_changes": (a.CALENDARIO,),
+    # Identidad del propietario por dispositivo (Ione o Adrián)
+    "mobile.mobile_dispositivo": (a.IDENTIFICAR,),
     # Reservas y precios
     "mobile.create_booking": (a.RESERVAS,),
     "mobile.block_dates": (a.RESERVAS,),

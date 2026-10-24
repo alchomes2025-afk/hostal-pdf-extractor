@@ -31,7 +31,7 @@ from flask import Blueprint, g, request, jsonify, Response
 import re
 
 from rutas_permisos import PERMISOS_RUTAS, RUTAS_PUBLICAS
-from services import accesos
+from services import accesos, dispositivos
 from mobile_asistente import ErrorHerramienta, borrador_codigos, clave_groq, responder as asistente_responder
 
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/mobile")
@@ -1576,17 +1576,33 @@ def mobile_login():
         if pin_bloqueado():   # este intento fallido ha agotado el cupo
             return jsonify({"ok": False, "error": "Demasiados intentos. Espera 15 minutos y vuelve a probar."}), 429
         return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
-    nombre = None
+    cuerpo = request.get_json(silent=True) or {}
+    nombre, identidad = perfil.nombre_fijo or None, None
     if perfil.pide_nombre:
-        nombre = accesos.normalizar_nombre((request.get_json(silent=True) or {}).get("nombre"))
+        nombre = accesos.normalizar_nombre(cuerpo.get("nombre"))
         if not nombre:
             return jsonify({"ok": True, "necesita_nombre": True, "perfil": perfil.id, "perfil_nombre": perfil.nombre})
+    elif perfil.identidad_por_dispositivo:   # 1379: Ione o Adrián, según el dispositivo (si es la primera vez, la app lo pregunta y llama a /dispositivo)
+        nombre = dispositivos.buscar(cuerpo.get("deviceId"), perfil)
+        identidad = {"necesita": nombre is None, "opciones": list(perfil.identidad_por_dispositivo)}
     respuesta = {"ok": True, "admin": perfil.tiene(accesos.FINANZAS_HOSTAL), "perfil": perfil.id, "perfil_nombre": perfil.nombre,
-                 "permisos": sorted(perfil.permisos), "nombre": nombre, "auditado": perfil.auditado,
+                 "permisos": sorted(perfil.permisos), "nombre": nombre, "identidad": identidad, "auditado": perfil.auditado,
                  "token": accesos.crear_sesion(perfil.id, nombre), "sesion_horas": accesos.SESION_HORAS}
     if perfil.tiene(accesos.LIMPIEZA_CALENDARIO):
         respuesta["rol"] = "limpieza"   # compatibilidad con la app instalada: solo muestra la pantalla de la limpiadora
     return jsonify(respuesta)
+
+
+@mobile_bp.route("/dispositivo", methods=["POST"])
+def mobile_dispositivo():
+    """El propietario dice quién es (Ione o Adrián) en este dispositivo: se recuerda y las siguientes sesiones desde él ya llevan su nombre.
+    Cuerpo: {"deviceId": "<uuid de la app>", "nombre": "Ione" | "Adrián"}. Devuelve una sesión nueva con el nombre."""
+    perfil = perfil_actual()
+    cuerpo = request.get_json(silent=True) or {}
+    nombre = dispositivos.registrar(cuerpo.get("deviceId"), cuerpo.get("nombre"), perfil)
+    if not nombre:
+        return jsonify({"ok": False, "error": "Elige Ione o Adrián"}), 400
+    return jsonify({"ok": True, "nombre": nombre, "token": accesos.crear_sesion(perfil.id, nombre), "sesion_horas": accesos.SESION_HORAS})
 
 
 @mobile_bp.route("/rooms", methods=["GET"])

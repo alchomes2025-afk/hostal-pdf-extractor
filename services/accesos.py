@@ -45,11 +45,12 @@ HISTORIAL = "operativa.historial"
 INCIDENCIAS_VER = "limpieza.ver_incidencias"   # ver las incidencias de limpieza en el calendario de gestión
 LIMPIEZA_CALENDARIO = "limpieza.calendario"    # el calendario ocupado/libre de la limpiadora
 LIMPIEZA_MARCAR = "limpieza.marcar"
+IDENTIFICAR = "acceso.identificar_dispositivo"  # decir si un dispositivo es de Ione o de Adrián (solo el propietario)
 PRIMAVERA = "propiedad.primavera"              # ver cualquier cosa de La Casa de la Primavera: calendario, reservas, asistente, incidencias, emergencias
 SISTEMA = "sistema.diagnostico"                # rutas de diagnóstico y mantenimiento (/logs, /test-*, /debug-*, /fix-zero-prices…)
 
 TODOS = (CALENDARIO, RESERVAS, PRECIOS, ASISTENTE, ASISTENTE_COMPLETO, FINANZAS_PRIMAVERA, FINANZAS_HOSTAL, FACTURAS, EMERGENCIA, EMERGENCIA_SIN_PIN,
-         EMERGENCIA_VER_PIN, OPERATIVA, ENTRENAMIENTO, HISTORIAL, INCIDENCIAS_VER, LIMPIEZA_CALENDARIO, LIMPIEZA_MARCAR, SISTEMA, PRIMAVERA)
+         EMERGENCIA_VER_PIN, OPERATIVA, ENTRENAMIENTO, HISTORIAL, INCIDENCIAS_VER, LIMPIEZA_CALENDARIO, LIMPIEZA_MARCAR, SISTEMA, PRIMAVERA, IDENTIFICAR)
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ class Perfil:
     permisos: frozenset
     auditado: bool = False       # toda su actividad se registra en el historial de sustitución (no se puede desactivar desde el perfil)
     pide_nombre: bool = False    # el PIN es compartido: al entrar se pide el nombre de quien lo usa
+    nombre_fijo: str = ""        # el PIN es de una sola persona: la sesión lleva siempre su nombre
+    identidad_por_dispositivo: tuple = ()   # el PIN es de varias personas conocidas: cada dispositivo se asocia a una de ellas (services/dispositivos.py)
 
     def tiene(self, permiso):
         return permiso in self.permisos
@@ -67,8 +70,10 @@ class Perfil:
 _GESTOR = frozenset({CALENDARIO, RESERVAS, ASISTENTE})
 
 PERFILES = {
-    "propietario": Perfil("propietario", "Propietario (Ione y Adrián)", frozenset(p for p in TODOS if p not in (LIMPIEZA_CALENDARIO, LIMPIEZA_MARCAR))),
-    "gestor_primavera": Perfil("gestor_primavera", "Gestor de la Casa de la Primavera", _GESTOR | {PRECIOS, FINANZAS_PRIMAVERA, PRIMAVERA, INCIDENCIAS_VER}),
+    "propietario": Perfil("propietario", "Propietario (Ione y Adrián)", frozenset(p for p in TODOS if p not in (LIMPIEZA_CALENDARIO, LIMPIEZA_MARCAR)),
+                          identidad_por_dispositivo=("Ione", "Adrián")),
+    "gestor_primavera": Perfil("gestor_primavera", "Gestor de la Casa de la Primavera", _GESTOR | {PRECIOS, FINANZAS_PRIMAVERA, PRIMAVERA, INCIDENCIAS_VER},
+                               nombre_fijo="Hermann"),
     "gestor": Perfil("gestor", "Gestor", _GESTOR),
     "sustituto": Perfil("sustituto", "Sustituto de Ione", _GESTOR | {EMERGENCIA, EMERGENCIA_VER_PIN, OPERATIVA}, auditado=True, pide_nombre=True),
     "limpieza": Perfil("limpieza", "Limpieza", frozenset({LIMPIEZA_CALENDARIO, LIMPIEZA_MARCAR})),

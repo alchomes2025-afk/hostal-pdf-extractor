@@ -333,5 +333,94 @@ class Asistente(Base):
             self.assertIn("No tienes acceso a La Casa de la Primavera", res["error"])
 
 
+class Doc:
+    def __init__(self, a, k): self.a, self.k = a, k
+    def get(self):
+        d = self.a.get(self.k)
+        return type("S", (), {"exists": d is not None, "to_dict": lambda s: dict(d) if d else {}})()
+    def set(self, datos): self.a[self.k] = dict(datos)
+
+
+class Col:
+    def __init__(self, a): self.a = a
+    def document(self, k): return Doc(self.a, k)
+
+
+class Db:
+    def __init__(self): self.a = {}
+    def collection(self, n): return Col(self.a)
+
+
+class Identidad(Base):
+    """1379 = Ione o Adrián (según el dispositivo); 9999 = Hermann; el resto, como hasta ahora."""
+    DISP_IONE, DISP_ADRIAN = "dispositivo-de-ione-0001", "dispositivo-de-adrian-0002"
+
+    def setUp(self):
+        super().setUp()
+        self.db = Db()
+        from services import dispositivos
+        p = mock.patch.object(dispositivos.config, "db", self.db)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _login(self, pin, **extra):
+        return self.c.post("/mobile/login", json={"pin": pin, **extra}).get_json()
+
+    def _registrar(self, token, dispositivo, nombre):
+        return self.c.post("/mobile/dispositivo", json={"deviceId": dispositivo, "nombre": nombre}, headers={"Authorization": "Bearer " + token})
+
+    def test_primera_vez_desde_un_dispositivo_la_app_tiene_que_preguntar(self):
+        d = self._login("1379", deviceId=self.DISP_IONE)
+        self.assertIsNone(d["nombre"])
+        self.assertEqual(d["identidad"], {"necesita": True, "opciones": ["Ione", "Adrián"]})
+        self.assertTrue(d["ok"] and d["token"])            # la app antigua sigue entrando sin más
+
+    def test_se_recuerda_a_quien_pertenece_cada_dispositivo(self):
+        token = self._login("1379", deviceId=self.DISP_IONE)["token"]
+        r = self._registrar(token, self.DISP_IONE, "Ione").get_json()
+        self.assertEqual(r["nombre"], "Ione")
+        self.assertEqual(accesos.verificar_sesion(r["token"])[1], "Ione")
+        self._registrar(self._login("1379", deviceId=self.DISP_ADRIAN)["token"], self.DISP_ADRIAN, "Adrián")
+        ione, adrian = self._login("1379", deviceId=self.DISP_IONE), self._login("1379", deviceId=self.DISP_ADRIAN)
+        self.assertEqual((ione["nombre"], ione["identidad"]["necesita"]), ("Ione", False))
+        self.assertEqual((adrian["nombre"], adrian["identidad"]["necesita"]), ("Adrián", False))
+        self.assertEqual(accesos.verificar_sesion(ione["token"])[1], "Ione")
+        self.assertIsNone(self._login("1379", deviceId="otro-dispositivo-0003")["nombre"])
+
+    def test_solo_se_puede_elegir_ione_o_adrian(self):
+        token = self._login("1379")["token"]
+        for malo in ("Hermann", "", "Ione ", "Pepe", None):
+            self.assertEqual(self._registrar(token, self.DISP_IONE, malo).status_code, 400, repr(malo))
+        for dispositivo in ("", "x", "../../etc", None):
+            self.assertEqual(self._registrar(token, dispositivo, "Ione").status_code, 400, repr(dispositivo))
+
+    def test_solo_el_propietario_registra_dispositivos(self):
+        for perfil in ("gestor_primavera", "gestor", "sustituto", "limpieza"):
+            self.assertEqual(self._registrar(cab(perfil).get("Authorization", "").replace("Bearer ", "") or accesos.crear_sesion(perfil), self.DISP_IONE, "Ione").status_code, 403, perfil)
+
+    def test_un_dispositivo_de_otro_perfil_no_vale_como_propietario(self):
+        self.db.a[self.DISP_IONE] = {"nombre": "Ione", "perfil": "gestor", "creado": "x", "ultimo_uso": "x"}
+        self.assertIsNone(self._login("1379", deviceId=self.DISP_IONE)["nombre"])
+
+    def test_el_9999_es_siempre_hermann(self):
+        d = self._login("9999")
+        self.assertEqual((d["nombre"], d["identidad"]), ("Hermann", None))
+        self.assertEqual(accesos.verificar_sesion(d["token"])[1], "Hermann")
+
+    def test_el_resto_sigue_como_hasta_ahora(self):
+        for pin in ("2486", "4268"):
+            d = self._login(pin)
+            self.assertIsNone(d["nombre"], pin)               # la app sigue preguntando el nombre por su cuenta
+            self.assertIsNone(d["identidad"], pin)
+        self.assertTrue(self._login("2589")["necesita_nombre"])
+
+    def test_sin_firestore_nadie_queda_identificado_pero_entra(self):
+        from services import dispositivos
+        with mock.patch.object(dispositivos.config, "db", None):
+            d = self._login("1379", deviceId=self.DISP_IONE)
+            self.assertTrue(d["ok"])
+            self.assertEqual(self._registrar(d["token"], self.DISP_IONE, "Ione").status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

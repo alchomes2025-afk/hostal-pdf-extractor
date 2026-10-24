@@ -27,6 +27,7 @@ TABLA = {
     a.HISTORIAL: {"propietario"},
     a.INCIDENCIAS_VER: {"propietario", "gestor_primavera"},
     a.PRIMAVERA: {"propietario", "gestor_primavera"},
+    a.IDENTIFICAR: {"propietario"},
     a.LIMPIEZA_CALENDARIO: {"limpieza"},
     a.LIMPIEZA_MARCAR: {"limpieza"},
     a.SISTEMA: {"propietario"},
