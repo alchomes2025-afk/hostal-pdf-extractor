@@ -59,7 +59,7 @@ TEMAS = [
         "cuáles son las incidencias habituales (huésped que no aparece, cancelaciones, cobros, quejas, reseñas, cambios de fechas…) y qué hacer en cada una, paso a paso",
         "las particularidades de cada plataforma que conviene saber (plazos, políticas, cómo se comunica con el huésped, qué no se debe hacer)"]},
     {"id": "faq", "titulo": "Preguntas frecuentes de huéspedes", "tipo": "faq", "cubrir": [
-        "qué preguntan los huéspedes con más frecuencia (parking, cuna, horarios, equipaje, wifi, ruido, taxis, dónde comer, cómo llegar…) y qué se les responde exactamente",
+        "cuando la llaman, qué le suelen pedir o preguntar los huéspedes (parking, cuna, horarios, equipaje, wifi, ruido, taxis, dónde comer, cómo llegar…) y qué les responde exactamente",
         "las respuestas que NO están en la web de check-in o que cambian según el caso",
         "qué se les dice cuando la respuesta es «no» (p. ej. mascotas, fumar, early check-in) para que quede bien dicho"]},
     {"id": "telefonos", "titulo": "Teléfonos de interés", "tipo": "telefono", "cubrir": [
