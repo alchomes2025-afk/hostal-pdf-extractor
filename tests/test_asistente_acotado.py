@@ -10,10 +10,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import mobile_asistente as asistente
 from services import operativa_kb
 
-PROPIETARIO = {"es_admin": True, "finanzas": True, "alcance_completo": True, "emergencia": True, "sin_pin": True, "ver_pin": True, "primavera": True}
-GESTOR = {"es_admin": False, "finanzas": False, "alcance_completo": False, "emergencia": False, "sin_pin": False, "ver_pin": False, "primavera": False}
+PROPIETARIO = {"es_admin": True, "finanzas": True, "alcance_completo": True, "emergencia": True, "sin_pin": True, "ver_pin": True, "primavera": True, "operativa": True}
+GESTOR = {"es_admin": False, "finanzas": False, "alcance_completo": False, "emergencia": False, "sin_pin": False, "ver_pin": False, "primavera": False, "operativa": False}
 HERMANN = {**GESTOR, "finanzas": True, "primavera": True}
-SUSTITUTO = {**GESTOR, "emergencia": True, "ver_pin": True}
+SUSTITUTO = {**GESTOR, "emergencia": True, "ver_pin": True, "operativa": True}
 
 
 class Doc:
@@ -71,14 +71,22 @@ class BaseConocimiento(unittest.TestCase):
     def test_la_herramienta_no_inventa_si_no_hay_nada(self):
         res = asistente.ejecutar_herramienta("buscar_operativa", json.dumps({"consulta": "máquina de vending averiada"}), GESTOR)
         self.assertEqual(res["entradas"], [])
-        self.assertIn("todavía no está recogido", res["nota"])
+        self.assertIn("todavía no está recogido: consúltalo con Ione", res["nota"])
         self.assertIn("NO inventes", res["nota"])
         self.assertIn("Parking", json.dumps(res["temas_disponibles"]))
         self.assertIn("error", asistente.ejecutar_herramienta("buscar_operativa", json.dumps({"consulta": ""}), GESTOR))
 
     def test_todos_los_perfiles_con_asistente_la_tienen(self):
-        for ctx in (PROPIETARIO, GESTOR, HERMANN, SUSTITUTO):
+        for ctx in (PROPIETARIO, SUSTITUTO):
             self.assertIn("buscar_operativa", {t["function"]["name"] for t in asistente.herramientas_para(ctx)})
+
+    def test_las_tareas_de_gestion_solo_para_el_sustituto_y_el_propietario(self):
+        for ctx in (GESTOR, HERMANN):
+            self.assertNotIn("buscar_operativa", {t["function"]["name"] for t in asistente.herramientas_para(ctx)})
+            texto = asistente._system(ctx)
+            self.assertIn("NO están disponibles para este usuario", texto)
+            self.assertIn("Eso no está disponible para tu perfil: consúltalo con Ione", texto)
+            self.assertNotIn("el puesto de gestora del hostal (el que ocupa normalmente Ione)", texto)
 
 
 class Ambito(unittest.TestCase):
@@ -86,8 +94,10 @@ class Ambito(unittest.TestCase):
         for ctx in (GESTOR, HERMANN, SUSTITUTO):
             texto = asistente._system(ctx)
             self.assertIn("ÁMBITO RESTRINGIDO", texto)
-            self.assertIn("el puesto de gestora del hostal", texto)
             self.assertIn("Perdona, solo puedo ayudarte con el calendario", texto)
+        for ctx in (SUSTITUTO,):
+            texto = asistente._system(ctx)
+            self.assertIn("el puesto de gestora del hostal", texto)
             self.assertIn("buscar_operativa", texto)
 
     def test_el_propietario_tiene_alcance_completo(self):
@@ -96,9 +106,10 @@ class Ambito(unittest.TestCase):
         self.assertIn("OPERATIVA:", texto)
 
     def test_sin_finanzas_el_prompt_manda_dirigirse_al_superior(self):
-        self.assertIn("Dirígete a tu superior", asistente._system(GESTOR))
-        self.assertIn("Dirígete a tu superior", asistente._system(SUSTITUTO))
-        self.assertIn("Dirígete a tu superior", asistente._system(HERMANN))      # Hermann ve la Primavera, no el hostal
+        self.assertIn("Dirígete a Ione.", asistente._system(GESTOR))
+        self.assertIn("Dirígete a Ione.", asistente._system(SUSTITUTO))
+        self.assertIn("Dirígete a Ione.", asistente._system(HERMANN))      # Hermann ve la Primavera, no el hostal
+        self.assertNotIn("superior", asistente._system(GESTOR))
         self.assertNotIn("PIN de administrador", asistente._system(GESTOR))
 
     def test_sin_dinero_no_hay_herramienta_de_finanzas(self):
@@ -125,7 +136,7 @@ class FiltroDeDinero(unittest.TestCase):
                          "¿cuál es la rentabilidad?", "gastos de limpieza", "cuánto pagamos de impuestos", "FINANZAS"):
             for ctx in (GESTOR, SUSTITUTO):
                 res, status = self._responder(ctx, pregunta)
-                self.assertEqual((status, res["respuesta"]), (200, "Dirígete a tu superior."), (pregunta, ctx is SUSTITUTO))
+                self.assertEqual((status, res["respuesta"]), (200, "Dirígete a Ione."), (pregunta, ctx is SUSTITUTO))
 
     def test_las_preguntas_normales_si_llegan_al_modelo(self):
         llamadas = []

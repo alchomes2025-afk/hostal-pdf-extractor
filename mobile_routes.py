@@ -2197,7 +2197,7 @@ def mobile_assistant():
     # Lo que puede ver y hacer sale del PERFIL de la sesión; el `finanzas` que mande el navegador se ignora.
     ctx = {"es_admin": tiene_permiso(accesos.FINANZAS_HOSTAL), "finanzas": tiene_permiso(accesos.FINANZAS_PRIMAVERA),
            "emergencia": tiene_permiso(accesos.EMERGENCIA), "sin_pin": tiene_permiso(accesos.EMERGENCIA_SIN_PIN),
-           "ver_pin": tiene_permiso(accesos.EMERGENCIA_VER_PIN), "primavera": tiene_permiso(accesos.PRIMAVERA), "alcance_completo": tiene_permiso(accesos.ASISTENTE_COMPLETO), "pantalla": str(data.get("pantalla") or "")[:1500]}
+           "ver_pin": tiene_permiso(accesos.EMERGENCIA_VER_PIN), "primavera": tiene_permiso(accesos.PRIMAVERA), "alcance_completo": tiene_permiso(accesos.ASISTENTE_COMPLETO), "operativa": tiene_permiso(accesos.OPERATIVA), "pantalla": str(data.get("pantalla") or "")[:1500]}
     resultado, status = asistente_responder(mensajes, ctx)
     return jsonify(resultado), status
 
@@ -2217,7 +2217,7 @@ def _autorizar_codigos(data):
     if perfil.tiene(accesos.EMERGENCIA_SIN_PIN):
         return None
     if cantidad("asistente-pin-envio-fallos", 3600) >= 5:
-        return jsonify({"ok": False, "error": "Demasiados intentos con el PIN de seguridad: espera una hora o pídeselo al administrador"}), 429
+        return jsonify({"ok": False, "error": "Demasiados intentos con el PIN de seguridad: espera una hora o pídeselo a Ione"}), 429
     recibido = str(data.get("pin_envio") or "")
     if not PIN_ENVIO_CODIGOS or not hmac.compare_digest(recibido.encode(), PIN_ENVIO_CODIGOS.encode()):
         anotar("asistente-pin-envio-fallos")

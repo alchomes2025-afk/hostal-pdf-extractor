@@ -285,6 +285,10 @@ class Asistente(Base):
             self.assertEqual((ctx["es_admin"], ctx["finanzas"], ctx["emergencia"], ctx["sin_pin"], ctx["ver_pin"], ctx["primavera"]),
                              (es_admin, finanzas, emergencia, sin_pin, ver_pin, primavera), perfil)
 
+    def test_las_tareas_de_gestion_solo_para_el_propietario_y_el_sustituto(self):
+        for perfil, esperado in (("propietario", True), ("sustituto", True), ("gestor_primavera", False), ("gestor", False)):
+            self.assertEqual(self._preguntar(perfil)["operativa"], esperado, perfil)
+
     def test_el_navegador_no_puede_darse_finanzas(self):
         for perfil in ("gestor", "sustituto"):
             self.assertFalse(self._preguntar(perfil, finanzas=True)["finanzas"], perfil)
