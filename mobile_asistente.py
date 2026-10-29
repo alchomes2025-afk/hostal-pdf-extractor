@@ -49,7 +49,7 @@ from services.email_send import es_email_relay_ota
 from services.fechas import hoy_madrid
 from services import operativa_kb, rpv_latencia
 from services.resumen import texto_estado_parte
-from services.rpv import VENTANA_DIAS as VENTANA_RPV_DIAS, obtener_estado_partes
+from services.rpv import PASADO_DIAS_MAX as PASADO_RPV_DIAS, VENTANA_DIAS as VENTANA_RPV_DIAS, obtener_estado_partes, obtener_estado_partes_pasados
 
 logger = logging.getLogger(__name__)
 
@@ -535,19 +535,29 @@ def _t_cancelaciones(a, ctx):
 
 # ── Partes de viajeros (RPV) y agenda ────────────────────────────────────────
 
-def _estados_rpv():
-    """(estados, sin_verificar) de RPV; si RPV falla, sin_verificar es None (= todo sin verificar)."""
+def _estados_rpv(desde_pasado=None):
+    """(estados, sin_verificar) de RPV; si RPV falla, sin_verificar es None (= todo sin verificar).
+    Con `desde_pasado` (date anterior a hoy) añade los partes de las entradas pasadas desde esa fecha hasta ayer."""
     try:
-        return obtener_estado_partes(max_age=60)
+        estados, sin_verificar = obtener_estado_partes(max_age=60)
     except Exception as e:
         logger.error(f"[asistente] No se pudo consultar RPV: {e}")
         return {}, None
+    if desde_pasado is not None and desde_pasado < hoy_madrid():
+        try:
+            pasados, sin_pasados = obtener_estado_partes_pasados(desde_pasado)
+        except Exception as e:
+            logger.error(f"[asistente] No se pudo consultar RPV (partes pasados): {e}")
+            return estados, None
+        estados = {**estados, **pasados}
+        sin_verificar = set(sin_verificar) | set(sin_pasados)
+    return estados, sin_verificar
 
 
 def _parte(r, fecha, estados, sin_verificar, hoy):
     """Texto del estado del parte de una reserva con entrada en `fecha` (mismas reglas que los resúmenes de WhatsApp)."""
-    if fecha < hoy:
-        return "sin dato (RPV solo informa de las entradas de hoy en adelante)"
+    if fecha < hoy - timedelta(days=PASADO_RPV_DIAS):
+        return f"fuera de lo que puedo consultar en RPV (últimos {PASADO_RPV_DIAS} días)"
     if fecha > hoy + timedelta(days=VENTANA_RPV_DIAS - 1):
         return f"fuera de la ventana de consulta de RPV ({VENTANA_RPV_DIAS} días)"
     if sin_verificar is None:
@@ -563,12 +573,14 @@ def _propiedades(a):
 def _t_agenda(a, ctx):
     hoy = hoy_madrid()
     fecha = _fecha(a["fecha"], "fecha") if a.get("fecha") else hoy
-    estados, sin_verificar = _estados_rpv()
     resultado = {"fecha": fecha.isoformat()}
     avisos = []
-    for clave in _propiedades(a):
-        property_id = _ids_propiedad(clave)
-        reservas, incompleto = _reservas(property_id)
+    cargadas = [(clave, _ids_propiedad(clave)) for clave in _propiedades(a)]
+    cargadas = [(clave, property_id, *_reservas(property_id)) for clave, property_id in cargadas]
+    # los partes de las estancias ya empezadas (también de los que se quedan) salen de las entradas pasadas de RPV
+    entradas = [fecha] + [r["checkin"] for _c, _p, reservas, _i in cargadas for r in reservas if r["checkin"] <= fecha < r["checkout"]]
+    estados, sin_verificar = _estados_rpv(min(entradas))
+    for clave, property_id, reservas, incompleto in cargadas:
         if incompleto:
             avisos.append("Beds24 no respondió para algún tramo de fechas: la lista puede estar incompleta")
         llegadas = sorted((r for r in reservas if r["checkin"] == fecha), key=lambda r: r["habitacion"])
@@ -580,6 +592,7 @@ def _t_agenda(a, ctx):
                           "numero_reserva": r["id"]} for r in llegadas[:MAX_AGENDA]],
             "salidas": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "canal": r["canal"]} for r in salidas[:MAX_AGENDA]],
             "se_quedan": [{"habitacion": r["habitacion"], "huesped": r["huesped"], "sale": r["checkout"].isoformat(),
+                           "parte": _parte(r, r["checkin"], estados, sin_verificar, hoy),
                            "numero_reserva": r["id"]} for r in se_quedan[:MAX_AGENDA]],
             "habitaciones_ocupadas_esa_noche": len(llegadas) + len(se_quedan),
             "habitaciones_en_total": len(_habitaciones(property_id)),
@@ -592,25 +605,32 @@ def _t_agenda(a, ctx):
 def _t_partes(a, ctx):
     hoy = hoy_madrid()
     ultimo = hoy + timedelta(days=VENTANA_RPV_DIAS - 1)
-    desde = max(_fecha(a["desde"], "desde") if a.get("desde") else hoy, hoy)
+    primero = hoy - timedelta(days=PASADO_RPV_DIAS)
+    en_vigor = bool(a.get("en_vigor"))
+    desde = max(_fecha(a["desde"], "desde") if a.get("desde") else hoy, primero)
     hasta = min(_fecha(a["hasta"], "hasta") if a.get("hasta") else ultimo, ultimo)
-    if hasta < desde:
-        raise ErrorHerramienta(f"RPV solo informa de las entradas de hoy a dentro de {VENTANA_RPV_DIAS} días")
-    estados, sin_verificar = _estados_rpv()
-    filas, recuento, avisos = [], {}, []
+    if hasta < desde and not en_vigor:
+        raise ErrorHerramienta(f"RPV solo informa de las entradas de los últimos {PASADO_RPV_DIAS} días a dentro de {VENTANA_RPV_DIAS} días")
+    seleccion, avisos = [], []
     for clave in _propiedades(a):
         reservas, incompleto = _reservas(_ids_propiedad(clave))
         if incompleto:
             avisos.append("Beds24 no respondió para algún tramo de fechas: la lista puede estar incompleta")
         for r in reservas:
-            if desde <= r["checkin"] <= hasta:
-                parte = _parte(r, r["checkin"], estados, sin_verificar, hoy)
-                recuento[parte] = recuento.get(parte, 0) + 1
-                if not (a.get("solo_pendientes") and parte.startswith("parte recibido")):
-                    filas.append({"propiedad": clave, "llegada": r["checkin"].isoformat(), "habitacion": r["habitacion"],
-                                  "huesped": r["huesped"], "canal": r["canal"], "parte": parte})
+            # en_vigor: estancias en curso hoy (entraron antes o hoy y aún no han salido), con el parte de su entrada
+            if (r["checkin"] <= hoy < r["checkout"]) if en_vigor else (desde <= r["checkin"] <= hasta):
+                seleccion.append((clave, r))
+    antiguas = [r["checkin"] for _c, r in seleccion if r["checkin"] < hoy]
+    estados, sin_verificar = _estados_rpv(min(antiguas) if antiguas else None)
+    filas, recuento = [], {}
+    for clave, r in seleccion:
+        parte = _parte(r, r["checkin"], estados, sin_verificar, hoy)
+        recuento[parte] = recuento.get(parte, 0) + 1
+        if not (a.get("solo_pendientes") and parte.startswith("parte recibido")):
+            filas.append({"propiedad": clave, "llegada": r["checkin"].isoformat(), "habitacion": r["habitacion"],
+                          "huesped": r["huesped"], "canal": r["canal"], "parte": parte})
     filas.sort(key=lambda f: (f["llegada"], f["habitacion"]))
-    resultado = {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "recuento": recuento, "total_llegadas": sum(recuento.values()),
+    resultado = {"desde": desde.isoformat(), "hasta": hasta.isoformat(), "solo_estancias_en_vigor": en_vigor, "recuento": recuento, "total_llegadas": sum(recuento.values()),
                  "mostrando": min(len(filas), MAX_PARTES), "llegadas": filas[:MAX_PARTES]}
     if avisos:
         resultado["avisos"] = sorted(set(avisos))
@@ -621,8 +641,15 @@ def _consejo_parte(r, hoy, estados, sin_verificar, edad, stats):
     """Qué decirle al huésped de la reserva `r` sobre su parte de viajeros: (texto, anomalía)."""
     llegada = r["checkin"]
     est = estados.get((r["room_id"], llegada.isoformat()))
-    if llegada < hoy:
-        return "RPV solo informa de las entradas de hoy en adelante: para una estancia ya empezada hay que mirarlo directamente en RPV.", False
+    if llegada < hoy:   # estancia ya empezada: RPV informa de las entradas pasadas
+        if est and est["completado"]:
+            return "El parte de esta estancia ya está completado.", False
+        if sin_verificar is None or r["room_id"] in sin_verificar:
+            return "Ahora mismo no puedo comprobarlo en RPV (no responde). Pídale que lo intente de nuevo dentro de unos 10 minutos.", False
+        if est:
+            return ("El huésped ya está alojado y su parte consta SIN completar en RPV (" + ("incompleto, faltan huéspedes" if est["estado"] == "parcial" else "pendiente")
+                    + "): que lo complete cuanto antes; si no puede, enlace_parte_emergencia."), True
+        return "La estancia ya ha empezado y no consta en RPV: hay que revisarlo directamente en RPV.", True
     if est and est["completado"]:
         return "El parte ya está completado: el huésped no tiene que hacer nada más. Puede entrar ya en la web de check-in a por sus códigos.", False
     if sin_verificar is None or r["room_id"] in sin_verificar:
@@ -642,7 +669,6 @@ def _t_parte_huesped(a, ctx):
         raise ErrorHerramienta("Falta el nombre del huésped")
     hoy = hoy_madrid()
     ahora = datetime.now(timezone.utc)
-    estados, sin_verificar = _estados_rpv()
     stats = rpv_latencia.estadisticas()
     coincidencias = []
     for clave in _propiedades(a):
@@ -651,6 +677,8 @@ def _t_parte_huesped(a, ctx):
     if not coincidencias:
         raise ErrorHerramienta("No hay ninguna reserva vigente o futura con ese nombre")
     coincidencias.sort(key=lambda x: (x[1]["checkin"], x[1]["habitacion"]))
+    antiguas = [r["checkin"] for _c, r in coincidencias[:5] if r["checkin"] < hoy]
+    estados, sin_verificar = _estados_rpv(min(antiguas) if antiguas else None)
     filas = []
     for clave, r in coincidencias[:5]:
         edad = rpv_latencia.edad_min(r["creada"], ahora)
@@ -938,8 +966,10 @@ TOOLS = [
         {"propiedad": _PROP_OPC, "fecha": {"type": "string", "description": "YYYY-MM-DD; por defecto hoy"}}, []),
     _herramienta(
         "partes",
-        "Estado del parte de viajeros (registro oficial en RPV) de las llegadas de hoy a dentro de 30 días: recibido, incompleto, pendiente, etc. RPV no informa de fechas pasadas.",
-        {"propiedad": _PROP_OPC, "desde": _FECHA, "hasta": _FECHA, "solo_pendientes": {"type": "boolean", "description": "Solo las llegadas cuyo parte aún no está recibido"}}, []),
+        "Estado del parte de viajeros (registro oficial en RPV) de las llegadas desde hace 62 días hasta dentro de 30 días: recibido, incompleto, pendiente, etc. "
+        "Sirve también para el día anterior (desde=ayer, hasta=ayer) y para las estancias en vigor (en_vigor=true: huéspedes alojados hoy, con el parte de su entrada).",
+        {"propiedad": _PROP_OPC, "desde": _FECHA, "hasta": _FECHA, "solo_pendientes": {"type": "boolean", "description": "Solo las llegadas cuyo parte aún no está recibido"},
+         "en_vigor": {"type": "boolean", "description": "Solo las estancias en curso hoy (ya han entrado y aún no han salido); ignora desde y hasta"}}, []),
     _herramienta(
         "parte_huesped",
         "Un huésped no puede hacer el parte de viajeros: busca su reserva por nombre, mira si ya está en RPV y da qué decirle (`que_decir_al_huesped`, lista para repetir por teléfono).",
@@ -1065,7 +1095,7 @@ Reglas:
 2. Si la pregunta es ambigua en algo que cambia el resultado (propiedad, periodo, bruto o neto, qué quiere ver exactamente), haz UNA pregunta corta con 2-4 opciones antes de consultar. Si hay una suposición razonable (p. ej. el mes en curso), úsala y dila en una frase. No preguntes por cosas que ya sabes.
 3. Para gráficos usa la herramienta grafico: tarta para proporciones, barras para comparar, linea para evolución por mes. Después añade 1-2 frases con lo más llamativo (no repitas todos los números). Máximo 2 gráficos por respuesta.
 4. Ingresos brutos = precio de las reservas; netos = brutos menos la comisión del canal. Las noches y los ingresos de una estancia que cruza varios meses se reparten por noches. La rentabilidad de finanzas_mes usa costes estimados: avísalo. Para comparar periodos usa comparar (no restes tú) y avisa si tienen distinta duración.
-5. El «parte de viajeros» es el registro oficial de huéspedes en RPV. Que una reserva de menos de 24 h aún no conste en RPV es normal; si lleva más, avísalo como algo a revisar. Los precios de disponibilidad son los del calendario de venta, no lo que pagó cada huésped. Si preguntan qué decirle a un huésped que no puede hacer el parte, usa parte_huesped y da la recomendación que devuelve, sin cambiar los tiempos que indica.
+5. El «parte de viajeros» es el registro oficial de huéspedes en RPV. Puedes consultar partes pasados (hasta 62 días atrás): para «el parte de ayer» usa partes con desde=ayer y hasta=ayer, y para los huéspedes alojados ahora partes con en_vigor=true (o agenda, que da el parte de los que se quedan). Un parte pasado «pendiente» o «incompleto» con el huésped ya alojado es algo a resolver cuanto antes. Que una reserva de menos de 24 h aún no conste en RPV es normal; si lleva más, avísalo como algo a revisar. Los precios de disponibilidad son los del calendario de venta, no lo que pagó cada huésped. Si preguntan qué decirle a un huésped que no puede hacer el parte, usa parte_huesped y da la recomendación que devuelve, sin cambiar los tiempos que indica.
 6. Responde en español, breve y directo, en texto plano (sin markdown ni tablas; para listas usa «•»). Importes en euros, con separador de miles y sin decimales salvo que importen.
 {regla7}
 8. No tienes teléfonos ni correos de huéspedes (el correo de destino de un borrador te lo da el usuario).
