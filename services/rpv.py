@@ -39,7 +39,9 @@ logger = logging.getLogger(__name__)
 TTL_SEGUNDO_PLANO = 10 * 60
 TTL_CHECKIN = 60
 VENTANA_DIAS = 30            # hoy .. hoy+29 (RPV admite 31 días por petición)
-PAUSA_TRAS_429 = 2 * 60      # si el 429 no trae Retry-After
+PASADO_DIAS_MAX = 62         # hasta cuántos días atrás consulta el asistente (2 peticiones por cuenta como mucho)
+TTL_PASADO = 5 * 60
+PAUSA_TRAS_429 = 2 * 60     # si el 429 no trae Retry-After
 LLAMADAS_POR_MINUTO = 16     # por cuenta; el límite real de RPV es 20
 
 _copias = {}         # api_key -> {"t": epoch de la última llamada buena, "partes": [...]}
@@ -194,6 +196,50 @@ def obtener_estado_partes(max_age=TTL_SEGUNDO_PLANO, rooms=None):
         if error is not None:
             sin_verificar.update(cuarto)
         estados.update(_normalizar(partes))
+    return estados, sin_verificar
+
+
+_copias_pasados = {}   # (api_key, desde, hasta) -> {"t": epoch, "partes": [...]}
+
+
+def obtener_estado_partes_pasados(desde, hasta=None, rooms=None, max_age=TTL_PASADO):
+    """
+    Como obtener_estado_partes pero para entradas YA PASADAS (fecha de entrada entre `desde` y `hasta`, objetos date;
+    `hasta` por defecto ayer). Es lo que usa el asistente para contestar por partes de ayer o de estancias en vigor.
+    Se recorta a los últimos PASADO_DIAS_MAX días y se pide en trozos de ≤31 días (límite de RPV por petición).
+    Devuelve (estados, sin_verificar) con el mismo formato; una cuenta que falla (429, caída…) queda en sin_verificar
+    y, si hay copia vieja de un trozo, se usa.
+    """
+    hoy = hoy_madrid()
+    hasta = min(hasta or hoy - timedelta(days=1), hoy - timedelta(days=1))
+    desde = max(desde, hoy - timedelta(days=PASADO_DIAS_MAX))
+    estados, sin_verificar = {}, set()
+    cuentas = _cuentas()
+    sin_verificar.update(r for r in RPV_PROPERTY_MAP if r not in {r for rs in cuentas.values() for r in rs})
+    if desde > hasta:
+        return estados, sin_verificar
+    trozos, ini = [], desde
+    while ini <= hasta:
+        fin = min(ini + timedelta(days=30), hasta)
+        trozos.append((ini.isoformat(), fin.isoformat()))
+        ini = fin + timedelta(days=1)
+    for key, cuarto in cuentas.items():
+        if rooms is not None and not (set(rooms) & set(cuarto)):
+            continue
+        for d, h in trozos:
+            copia = _copias_pasados.get((key, d, h))
+            if copia and time.time() - copia["t"] < max_age:
+                partes = copia["partes"]
+            else:
+                try:
+                    partes = _pedir_partes(key, desde=d, hasta=h)
+                except Exception as e:
+                    logger.error(f"[RPV] No se pudieron consultar los partes pasados ({d}..{h}) de {_etiqueta(cuarto)}: {e}")
+                    sin_verificar.update(cuarto)
+                    partes = copia["partes"] if copia else []
+                else:
+                    _copias_pasados[(key, d, h)] = {"t": time.time(), "partes": partes}
+            estados.update(_normalizar(partes))
     return estados, sin_verificar
 
 
