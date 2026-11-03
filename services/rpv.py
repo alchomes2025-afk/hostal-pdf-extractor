@@ -320,6 +320,17 @@ def _resultado_parte(parte):
     return None if parte is None else ("completado" if parte["completado"] else "pendiente")
 
 
+def refrescar_cuenta(room_id):
+    """Descarta las copias de la cuenta de esa habitación y vuelve a consultar /partes (lo usa el webhook de
+    «parte completado»). Si RPV no responde o hay límite de peticiones, la copia vieja se conserva."""
+    key = RPV_API_KEY_MAP.get(room_id) or RPV_API_KEY
+    if not key:
+        return
+    _partes_cuenta(key, 0, _etiqueta(_cuentas().get(key, [room_id])))   # max_age=0: ignora la copia; si falla conserva la vieja
+    for clave in [k for k in _copias_pasados if k[0] == key]:
+        del _copias_pasados[clave]
+
+
 def comprobar_cuentas(max_age=TTL_SEGUNDO_PLANO):
     """[(etiqueta, error|None)] — una entrada por cuenta de RPV, para el chequeo de
     salud del watchdog. Usa la misma copia que el resto, así que no añade llamadas."""

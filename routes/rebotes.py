@@ -8,6 +8,7 @@ import logging
 from flask import Blueprint, jsonify, request
 
 from config import API_TOKEN, APPS_SCRIPT_EMAIL_SECRET, TEST_TOKEN
+from services import rpv_webhook
 from services.rebotes import procesar_rebotes, ultimos_rebotes
 from services.reservas_correo import recibir_avisos, ultimos_avisos
 
@@ -96,3 +97,34 @@ def listar_avisos_reserva():
     except Exception as e:
         logger.error(f"[reservas_correo] Error leyendo los avisos: {e}")
         return jsonify({"ok": False, "error": "No se pudieron leer los avisos"}), 500
+
+
+@rebotes_bp.route("/webhook-rpv", methods=["POST"])
+def webhook_rpv():
+    """
+    Aviso de RPV (vía Svix) de que el parte de una reserva está completo: guest_registration.completed. Va firmado
+    (cabeceras svix-*); sin firma válida, 401. El aviso solo provoca una consulta fresca a RPV (services/rpv_webhook.py).
+    """
+    cuerpo = request.get_data()
+    try:
+        rpv_webhook.verificar_firma(cuerpo, request.headers)
+    except rpv_webhook.FirmaInvalida as e:
+        logger.warning(f"[webhook-rpv] Aviso rechazado: {e}")
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    evento = request.get_json(silent=True)
+    if not isinstance(evento, dict):
+        return jsonify({"ok": False, "error": "Cuerpo no válido"}), 400
+    try:
+        return jsonify({"ok": True, **rpv_webhook.procesar(evento)})
+    except Exception as e:
+        logger.error(f"[webhook-rpv] Error procesando el aviso: {e}")
+        return jsonify({"ok": False, "error": "Error interno"}), 500
+
+
+@rebotes_bp.route("/webhook-rpv/ultimos", methods=["GET"])
+def webhook_rpv_ultimos():
+    """Constancia de los últimos avisos de RPV (en memoria, sin datos personales). GET /webhook-rpv/ultimos?token=<TOKEN>"""
+    token = request.args.get("token", "")
+    if not any(_iguales(token, t) for t in (API_TOKEN, TEST_TOKEN)):
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    return jsonify({"ok": True, "secretos_configurados": sorted(rpv_webhook._secretos()), "avisos": rpv_webhook.ultimos()})
