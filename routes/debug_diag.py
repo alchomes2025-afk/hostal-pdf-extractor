@@ -611,8 +611,11 @@ def diag_calendario():
     desde = request.args.get("desde") or hoy.isoformat()
     hasta = request.args.get("hasta") or (hoy + timedelta(days=240)).isoformat()
     try:
-        resp = b24_get(get_access_token(), "/inventory/rooms/calendar", params={
-            "roomId": habitacion, "startDate": desde, "endDate": hasta, "includePrices": "true", "includeNumAvail": "true"})
+        parametros = {"roomId": habitacion, "startDate": desde, "endDate": hasta, "includePrices": "true", "includeNumAvail": "true"}
+        for extra in request.args.get("incluir", "").split(","):   # p. ej. incluir=includeMinStay,includeMaxStay,includeMultiplier,includeOverride
+            if extra.strip().startswith("include"):
+                parametros[extra.strip()] = "true"
+        resp = b24_get(get_access_token(), "/inventory/rooms/calendar", params=parametros)
     except Exception as e:
         return jsonify({"ok": False, "error": f"Beds24: {e}"}), 502
     if not resp.ok:
