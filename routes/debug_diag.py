@@ -595,3 +595,31 @@ def diag_solapes():
     except Exception as e:
         return jsonify({"ok": False, "error": f"Beds24: {e}"}), 502
     return jsonify({"ok": True, "total": len(solapes), "solapes": solapes}), 200
+
+
+@debug_bp.route("/diag-calendario", methods=["GET"])
+def diag_calendario():
+    """Diagnóstico de solo lectura: disponibilidad (numAvail) y precio (price1) que Beds24 tiene en el CALENDARIO de una habitación,
+    en rangos compactos. Es lo que pinta de rojo la app de gestión (numAvail 0 sin reserva = bloqueo de calendario).
+    Usa el token de la app de gestión, que sí tiene permiso sobre el inventario.
+    Uso: /diag-calendario?token=<TOKEN>[&habitacion=720841][&desde=2026-11-01][&hasta=2027-06-30]"""
+    if request.args.get("token", "") not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    from mobile_routes import b24_get, get_access_token
+    habitacion = request.args.get("habitacion", "720841").strip()
+    hoy = hoy_madrid()
+    desde = request.args.get("desde") or hoy.isoformat()
+    hasta = request.args.get("hasta") or (hoy + timedelta(days=240)).isoformat()
+    try:
+        resp = b24_get(get_access_token(), "/inventory/rooms/calendar", params={
+            "roomId": habitacion, "startDate": desde, "endDate": hasta, "includePrices": "true", "includeNumAvail": "true"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Beds24: {e}"}), 502
+    if not resp.ok:
+        return jsonify({"ok": False, "error": f"Beds24 {resp.status_code}: {resp.text[:300]}"}), 502
+    rangos = []
+    for entrada in resp.json().get("data") or []:
+        for dia in (entrada.get("calendar") if isinstance(entrada, dict) else None) or []:
+            rangos.append({"desde": dia.get("from"), "hasta": dia.get("to") or dia.get("from"),
+                           "numAvail": dia.get("numAvail"), "price1": dia.get("price1")})
+    return jsonify({"ok": True, "habitacion": habitacion, "consultado": f"{desde} → {hasta}", "rangos": rangos}), 200
