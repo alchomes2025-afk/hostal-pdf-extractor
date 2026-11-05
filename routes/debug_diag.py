@@ -602,7 +602,7 @@ def diag_calendario():
     """Diagnóstico de solo lectura: disponibilidad (numAvail) y precio (price1) que Beds24 tiene en el CALENDARIO de una habitación,
     en rangos compactos. Es lo que pinta de rojo la app de gestión (numAvail 0 sin reserva = bloqueo de calendario).
     Usa el token de la app de gestión, que sí tiene permiso sobre el inventario.
-    Uso: /diag-calendario?token=<TOKEN>[&habitacion=720841][&desde=2026-11-01][&hasta=2027-06-30]"""
+    Uso: /diag-calendario?token=<TOKEN>[&habitacion=720841][&desde=2026-11-01][&hasta=2027-06-30][&crudo=1]"""
     if request.args.get("token", "") not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
         return jsonify({"ok": False, "error": "No autorizado"}), 401
     from mobile_routes import b24_get, get_access_token
@@ -620,6 +620,6 @@ def diag_calendario():
     rangos = []
     for entrada in resp.json().get("data") or []:
         for dia in (entrada.get("calendar") if isinstance(entrada, dict) else None) or []:
-            rangos.append({"desde": dia.get("from"), "hasta": dia.get("to") or dia.get("from"),
-                           "numAvail": dia.get("numAvail"), "price1": dia.get("price1")})
+            rangos.append(dia if request.args.get("crudo") else {"desde": dia.get("from"), "hasta": dia.get("to") or dia.get("from"),
+                                                                  "numAvail": dia.get("numAvail"), "price1": dia.get("price1")})
     return jsonify({"ok": True, "habitacion": habitacion, "consultado": f"{desde} → {hasta}", "rangos": rangos}), 200
