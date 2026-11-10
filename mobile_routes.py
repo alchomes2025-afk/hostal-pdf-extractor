@@ -1344,7 +1344,7 @@ def _es_pin_limpieza():
 
 
 CASA_ROOM_ID = "720841"   # La Casa de la Primavera (la única «habitación» de su propiedad en Beds24)
-RUTAS_CON_HABITACION = {"mobile.create_booking", "mobile.block_dates", "mobile.mobile_update", "mobile.edit_booking", "mobile.cancel_booking"}
+RUTAS_CON_HABITACION = {"mobile.create_booking", "mobile.block_dates", "mobile.unblock_dates", "mobile.mobile_update", "mobile.edit_booking", "mobile.cancel_booking"}
 
 
 def ocultar_primavera(d):
@@ -1471,6 +1471,13 @@ def _auditar_bloqueo(perfil, nombre, respuesta):
                       {"habitacion": _nombre_habitacion(c.get("roomId")), "desde": c.get("from"), "hasta": c.get("to"), "motivo": c.get("reason")})
 
 
+def _auditar_desbloqueo(perfil, nombre, respuesta):
+    c = request.get_json(silent=True) or {}
+    liberadas = (respuesta.get_json(silent=True) or {}).get("liberadas") or {}
+    desde, hasta = liberadas.get("from") or c.get("from"), liberadas.get("to") or c.get("to")
+    _anotar_actividad(perfil, nombre, "desbloqueo", f"Desbloqueó fechas del {desde} al {hasta}", {"desde": desde, "hasta": hasta, "bloqueo": c.get("bookingId")})
+
+
 def _auditar_emergencia(accion):
     def manejador(perfil, nombre, respuesta):
         c = request.get_json(silent=True) or {}
@@ -1492,6 +1499,7 @@ _AUDITORIA = {
     "mobile.edit_booking": _auditar_reserva_modificada,
     "mobile.cancel_booking": _auditar_reserva_cancelada,
     "mobile.block_dates": _auditar_bloqueo,
+    "mobile.unblock_dates": _auditar_desbloqueo,
     "mobile.mobile_assistant_preparar_codigos": _auditar_emergencia("Preparó"),
     "mobile.mobile_assistant_enviar_codigos": _auditar_emergencia("Envió"),
     "operativa.entrada": _auditar_tarea,
@@ -3248,6 +3256,151 @@ def cancel_booking():
         })
 
         return jsonify({"ok": True})
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+def _dia_siguiente(ds):
+    return (date.fromisoformat(ds) + timedelta(days=1)).isoformat()
+
+
+def planificar_desbloqueo(llegada, salida, desde, hasta):
+    """
+    Qué hacer con un bloqueo que ocupa las noches llegada .. salida-1 para liberar SOLO las noches desde .. hasta (ambas incluidas).
+    Devuelve un dict, o lanza ValueError si el rango no tiene sentido:
+      "cancelar"        se libera todo el bloqueo.
+      "acortar_inicio"  el bloqueo pasa a empezar el día después de `hasta`.
+      "acortar_final"   el bloqueo pasa a terminar (salida) en `desde`.
+      "partir"          el bloqueo queda hasta `desde` y se crea otro (`resto`) desde el día después de `hasta` hasta la salida original.
+    `liberadas` son las noches que quedan libres, ya recortadas al bloqueo.
+    """
+    ultima = (date.fromisoformat(salida) - timedelta(days=1)).isoformat()
+    if desde > hasta:
+        raise ValueError("La fecha final no puede ser anterior a la inicial")
+    if hasta < llegada or desde > ultima:
+        raise ValueError("Las fechas elegidas no están dentro del bloqueo")
+    desde, hasta = max(desde, llegada), min(hasta, ultima)
+    liberadas = (desde, hasta)
+    if desde == llegada and hasta == ultima:
+        return {"accion": "cancelar", "liberadas": liberadas}
+    if desde == llegada:
+        return {"accion": "acortar_inicio", "llegada": _dia_siguiente(hasta), "salida": salida, "liberadas": liberadas}
+    if hasta == ultima:
+        return {"accion": "acortar_final", "llegada": llegada, "salida": desde, "liberadas": liberadas}
+    return {"accion": "partir", "llegada": llegada, "salida": desde, "resto": (_dia_siguiente(hasta), salida), "liberadas": liberadas}
+
+
+def _es_reserva_de_bloqueo(bk):
+    """True si la «reserva» es un bloqueo (el de la app, 'Fecha bloqueada', o uno importado 'BLOCKED by …'), nunca un huésped."""
+    nombre = (bk.get("guestName") or "").strip().lower()
+    return (bk.get("email") or "").strip().lower() == BLOCK_EMAIL.lower() or nombre.startswith(("fecha bloqueada", "blocked"))
+
+
+def _canal_de_bloqueo_importado(bk):
+    """Canal del que viene un bloqueo importado por iCal («BLOCKED by Holidu» → «Holidu»), o None si no es importado."""
+    m = re.match(r"^blocked(?:\s+by)?\s*(.*)$", (bk.get("guestName") or "").strip(), flags=re.I)
+    return ((m.group(1).strip() or "otro calendario") if m else None)
+
+
+@mobile_bp.route("/unblock-dates", methods=["POST"])
+def unblock_dates():
+    """
+    Desbloquea solo un RANGO de noches de un bloqueo (reserva ficticia), en vez de cancelarlo entero.
+    Body: { bookingId, from, to, userName?, deviceId? } — `from` y `to` son noches y ambas se liberan (`to` = última noche).
+    Si el rango cubre todo el bloqueo se cancela; si cubre un extremo se acorta; si queda en medio se parte en dos.
+    Solo vale para bloqueos: una reserva de un huésped no se toca (para eso está /cancel-booking).
+    """
+    if not check_pin():
+        return jsonify({"ok": False, "error": "PIN incorrecto"}), 401
+
+    body = request.get_json(force=True, silent=True) or {}
+    booking_id, desde, hasta = body.get("bookingId"), body.get("from"), body.get("to")
+    if not (booking_id and desde and hasta):
+        return jsonify({"ok": False, "error": "Faltan bookingId, from o to"}), 400
+    try:
+        datetime.strptime(desde, "%Y-%m-%d")
+        datetime.strptime(hasta, "%Y-%m-%d")
+    except Exception:
+        return jsonify({"ok": False, "error": "Formato de fecha inválido (YYYY-MM-DD)"}), 400
+
+    try:
+        token = get_access_token()
+        bk = next((b for b in _state["bookings"] if str(b.get("id", "")) == str(booking_id)), None)
+        if bk is None:   # la app puede no tenerla en memoria (p. ej. tras un reinicio): se pide a Beds24
+            consulta = b24_get(token, "/bookings", params={"id": int(booking_id)})
+            fila = next((b for b in (consulta.json().get("data") or []) if str(b.get("id")) == str(booking_id)), None) if consulta.ok else None
+            if fila is not None:
+                invitado = fila.get("guest") or {}
+                bk = {"id": fila.get("id"), "roomId": fila.get("roomId"), "arrival": fila.get("arrival"), "departure": fila.get("departure"),
+                      "guestName": f"{invitado.get('firstName') or fila.get('firstName') or ''} {invitado.get('lastName') or fila.get('lastName') or ''}".strip(),
+                      "email": invitado.get("email") or fila.get("email") or "", "phone": invitado.get("phone") or fila.get("phone") or ""}
+        if bk is None:
+            return jsonify({"ok": False, "error": "No encuentro ese bloqueo en Beds24."}), 404
+        if not _es_reserva_de_bloqueo(bk):
+            return jsonify({"ok": False, "error": "Eso no es un bloqueo, es la reserva de un huésped. Para quitarla usa Cancelar reserva."}), 400
+        canal = _canal_de_bloqueo_importado(bk)
+        if canal:   # el canal lo vuelve a crear en la siguiente sincronización: se quita allí (Holidu, además, no se puede bloquear desde Beds24)
+            return jsonify({"ok": False, "canal": canal, "error": f"Ese bloqueo viene de {canal}: hay que desbloquearlo en {canal}. Si se quita solo aquí, volverá en la siguiente sincronización."}), 409
+        try:
+            plan = planificar_desbloqueo(bk["arrival"], bk["departure"], desde, hasta)
+        except ValueError as e:
+            return jsonify({"ok": False, "error": str(e)}), 400
+
+        id_nuevo = None
+        accion = plan["accion"]
+        if accion == "cancelar":
+            resp = b24_post(token, "/bookings", json_body=[{"id": int(booking_id), "status": "cancelled"}])
+        else:
+            if accion == "partir":
+                # primero se crea el trozo que sigue bloqueado: si algo falla después, nunca queda una noche sin proteger
+                motivo = re.sub(r"^(fecha bloqueada|blocked by)\s*-?\s*", "", (bk.get("guestName") or ""), flags=re.I).strip()
+                alta = b24_post(token, "/bookings", json_body=[{
+                    "roomId": int(bk["roomId"]), "arrival": plan["resto"][0], "departure": plan["resto"][1], "numAdult": 1,
+                    "status": "confirmed", "firstName": "Fecha", "lastName": "bloqueada" + (f" - {motivo}" if motivo else ""),
+                    "email": BLOCK_EMAIL, "phone": BLOCK_PHONE}])
+                datos_alta = alta.json()
+                if not alta.ok:
+                    return jsonify({"ok": False, "error": datos_alta}), alta.status_code
+                id_nuevo = _extract_new_booking_id(datos_alta) or _lookup_booking_id(token, bk["roomId"], plan["resto"][0], email=BLOCK_EMAIL)
+            resp = b24_post(token, "/bookings", json_body=[{"id": int(booking_id), "arrival": plan["llegada"], "departure": plan["salida"]}])
+            if not resp.ok and id_nuevo:   # no se pudo acortar: se deshace el trozo nuevo para no dejar bloqueos duplicados
+                try:
+                    b24_post(token, "/bookings", json_body=[{"id": int(id_nuevo), "status": "cancelled"}])
+                except Exception:
+                    pass
+        datos = resp.json()
+        if not resp.ok:
+            return jsonify({"ok": False, "error": datos}), resp.status_code
+
+        # Cancelar o acortar una reserva NO devuelve la disponibilidad del calendario (ver cancel_booking): se restaura a mano.
+        libre_desde, libre_hasta = plan["liberadas"]
+        try:
+            b24_post(token, "/inventory/rooms/calendar", json_body=[{
+                "roomId": int(bk["roomId"]), "calendar": [{"from": libre_desde, "to": libre_hasta, "numAvail": 1}]}])
+            _set_override(bk["roomId"], libre_desde, libre_hasta, num_avail=1)
+        except Exception as e:
+            print(f"[unblock_dates] No se pudo restaurar la disponibilidad de {libre_desde}→{libre_hasta}: {e}")
+
+        # Estado local
+        nuevo = None
+        if accion == "cancelar":
+            _state["bookings"] = [b for b in _state["bookings"] if str(b.get("id", "")) != str(booking_id)]
+            actualizado = None
+        else:
+            for b in _state["bookings"]:
+                if str(b.get("id", "")) == str(booking_id):
+                    b["arrival"], b["departure"] = plan["llegada"], plan["salida"]
+            actualizado = {"id": bk.get("id"), "arrival": plan["llegada"], "departure": plan["salida"]}
+            if accion == "partir":
+                nuevo = {"id": id_nuevo, "roomId": int(bk["roomId"]), "arrival": plan["resto"][0], "departure": plan["resto"][1],
+                         "guestName": "Fecha bloqueada" + (f" - {motivo}" if motivo else ""), "phone": BLOCK_PHONE, "email": BLOCK_EMAIL, "status": "confirmed"}
+                _state["bookings"].append(nuevo)
+
+        log_action(body.get("userName"), body.get("deviceId"), "unblock_dates", {
+            "bookingId": booking_id, "roomId": bk.get("roomId"), "from": libre_desde, "to": libre_hasta, "accion": accion})
+        return jsonify({"ok": True, "accion": accion, "bloqueo": actualizado, "nuevoBloqueo": nuevo,
+                        "liberadas": {"from": libre_desde, "to": libre_hasta}})
 
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

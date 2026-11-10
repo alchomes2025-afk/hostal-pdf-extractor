@@ -66,7 +66,7 @@ Antes casi todas aceptaban cualquier PIN válido (`check_pin`), incluidas las de
 | `/health`, `/login` | sin PIN | sin PIN (el login limita intentos) |
 | `/rooms`, `/all-data`, `/reload`, `/check-changes` | cualquier PIN | `calendario.ver` |
 | `/update` (precios y disponibilidad) | **cualquier PIN** | `precios.escribir` |
-| `/create-booking`, `/block-dates`, `/cancel-booking`, `/edit-booking` | cualquier PIN | `reservas.escribir` |
+| `/create-booking`, `/block-dates`, `/unblock-dates`, `/cancel-booking`, `/edit-booking` | cualquier PIN | `reservas.escribir` |
 | `/finance` | cualquier PIN; hostal solo admin | `finanzas.primavera` o `finanzas.hostal` según la propiedad |
 | `/finance/desglose` | PIN normal + PIN 1379 | `finanzas.facturas` (+ PIN 1379) |
 | `/assistant`, `/finance-chat` | cualquier PIN; el cliente manda `finanzas:true` | `asistente.usar`; herramientas y ámbito según permisos; el servidor ignora `finanzas` del cliente |

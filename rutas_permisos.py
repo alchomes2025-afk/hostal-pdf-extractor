@@ -29,6 +29,7 @@ PERMISOS_RUTAS = {
     # Reservas y precios
     "mobile.create_booking": (a.RESERVAS,),
     "mobile.block_dates": (a.RESERVAS,),
+    "mobile.unblock_dates": (a.RESERVAS,),
     "mobile.cancel_booking": (a.RESERVAS,),
     "mobile.edit_booking": (a.RESERVAS,),
     "mobile.mobile_update": (a.PRECIOS,),

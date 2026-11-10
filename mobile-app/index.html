@@ -506,6 +506,11 @@ body.sin-registro #btn-history{display:none!important}
 .dc-icon{font-size:20px;font-weight:700;line-height:1}
 .dc-icon.av-c{color:var(--avail)}
 .dc-icon.bl-c{color:var(--blocked)}
+.dc-orig{font-size:9px;font-weight:800;letter-spacing:.3px;color:var(--blocked);text-transform:uppercase;line-height:1;margin-top:2px}
+.ub-row{display:flex;gap:10px}
+.ub-row .form-grp{flex:1}
+.ub-todo{width:100%;margin:0 0 12px;padding:9px;border-radius:10px;border:1.5px solid var(--border);background:#fff;font-weight:700;font-size:13px}
+.ub-info{font-size:13px;color:var(--muted);line-height:1.5;margin-bottom:14px}
 /* Nombre del huésped */
 .dc-name{
   font-size:13px;font-weight:700;color:var(--booked);
@@ -1364,8 +1369,23 @@ function roomBookedOn(roomId, ds) {
 function isBlockBooking(bk) {
   return !!bk && (
     bk.email === "bloqueo@bloqueo.com" ||
-    (bk.guestName || "").startsWith("Fecha bloqueada")
+    (bk.guestName || "").startsWith("Fecha bloqueada") ||
+    /^blocked\b/i.test(bk.guestName || "")   // bloqueo importado de un canal por iCal: «BLOCKED by Holidu»
   );
+}
+// De dónde viene un bloqueo: del propio calendario/app («Fecha bloqueada») o importado de un canal («BLOCKED by Holidu»).
+// Un bloqueo importado NO se puede quitar desde aquí: el canal lo vuelve a crear en la siguiente sincronización. Holidu, además,
+// bloquea todo el alojamiento y no se puede bloquear desde Beds24, por eso se bloquea y se desbloquea allí.
+function blockOrigin(bk) {
+  const m = /^blocked(?:\s+by)?\s*(.*)$/i.exec(((bk && bk.guestName) || "").trim());
+  if (!m) return null;
+  const canal = (m[1] || "").trim() || "otro calendario";
+  return {canal: /holidu/i.test(canal) ? "Holidu" : canal, holidu: /holidu/i.test(canal)};
+}
+function addDaysStr(ds, n) {
+  const d = new Date(ds + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return localDateStr(d);
 }
 function fmtPrice(v) {
   return v != null ? "€" + Number(v).toFixed(0) : "—";
@@ -1470,7 +1490,8 @@ function renderCalendar() {
         const first = (bk.guestName || "Hués.").split(" ")[0].substring(0, 7);
         td.innerHTML = marcas + `<div class="dc-name">${first}</div><div class="dc-price dim">${fmtPrice(price1)}</div>`;
       } else if (bl) {
-        td.innerHTML = marcas + `<div class="dc-icon bl-c">—</div>`;
+        const orig = isBlock ? blockOrigin(bkRaw) : null;
+        td.innerHTML = marcas + `<div class="dc-icon bl-c">—</div>` + (orig ? `<div class="dc-orig">${orig.canal}</div>` : "");
       } else {
         const pCls = price1 == null ? " na" : isOverride ? " ov" : "";
         td.innerHTML = marcas + `<div class="dc-icon av-c">✔</div><div class="dc-price${pCls}">${fmtPrice(price1)}</div>`;
@@ -1602,24 +1623,51 @@ function openDaySheet(ds, room) {
 
   } else if (bl) {
     // ── BLOCKED ──
-    const reasonText = blockBooking
+    const origen = blockBooking ? blockOrigin(blockBooking) : null;
+    const reasonText = blockBooking && !origen
       ? (blockBooking.guestName || "Fecha bloqueada").replace(/^Fecha bloqueada( - )?/, "") || null
       : null;
-    body.innerHTML = `<div class="day-badge bl">— Bloqueado</div>
-    <p style="color:var(--muted);font-size:13px;margin-bottom:20px;line-height:1.5">
-      Esta fecha está bloqueada y no está disponible para reservas.${reasonText ? `<br><b>Motivo:</b> ${reasonText}` : ""}
-    </p>
-    <button class="unblock-btn" id="unblock-btn">✔ Desbloquear esta fecha</button>`;
+    const fmtCorta = f => dateLabel(f, {day:"numeric",month:"short",year:"numeric"});
+    if (origen) {
+      // Bloqueo importado de un canal: aquí solo se informa; se quita en el canal.
+      const ultima = addDaysStr(blockBooking.departure, -1);
+      body.innerHTML = `<div class="day-badge bl">— Bloqueado desde ${origen.canal}</div>
+      <p class="ub-info">Este bloqueo viene de <b>${origen.canal}</b>: del <b>${fmtCorta(blockBooking.arrival)}</b> al <b>${fmtCorta(ultima)}</b> (noches bloqueadas).
+      ${origen.holidu ? "Holidu no se puede bloquear desde Beds24 y, al bloquear allí, se bloquea todo el alojamiento." : ""}
+      <br><br><b>Para desbloquearlo hay que hacerlo en ${origen.canal}.</b> Si se quitara solo aquí, volvería a aparecer en la siguiente sincronización.</p>`;
+    } else {
+      const ultima = blockBooking ? addDaysStr(blockBooking.departure, -1) : null;
+      const limites = blockBooking ? `min="${blockBooking.arrival}" max="${ultima}"` : "";
+      body.innerHTML = `<div class="day-badge bl">— Bloqueado</div>
+      <p style="color:var(--muted);font-size:13px;margin-bottom:14px;line-height:1.5">
+        Esta fecha está bloqueada y no está disponible para reservas.${reasonText ? `<br><b>Motivo:</b> ${reasonText}` : ""}
+        ${blockBooking ? `<br>El bloqueo va del ${fmtCorta(blockBooking.arrival)} al ${fmtCorta(ultima)} (noches).` : ""}
+      </p>
+      <div class="ub-row">
+        <div class="form-grp"><label class="form-lbl">Desbloquear desde</label><input type="date" id="ub-from" class="form-inp" value="${ds}" ${limites}/></div>
+        <div class="form-grp"><label class="form-lbl">Hasta (incluida)</label><input type="date" id="ub-to" class="form-inp" value="${ds}" ${limites}/></div>
+      </div>
+      ${blockBooking ? `<button type="button" class="ub-todo" id="ub-all">Todo el bloqueo (${fmtCorta(blockBooking.arrival)} → ${fmtCorta(ultima)})</button>` : ""}
+      <div id="ub-alert" class="form-alert"></div>
+      <button class="unblock-btn" id="unblock-btn">✔ Desbloquear estas fechas</button>`;
 
-    $("#unblock-btn").addEventListener("click", () => {
-      if (blockBooking && blockBooking.id) {
-        cancelBooking(blockBooking); // el botón cancelar reutiliza la misma lógica
-      } else if (blockBooking) {
-        alert("Esta fecha se acaba de bloquear y aún no tiene ID confirmado por Beds24. Pulsa ↺ arriba para actualizar y vuelve a intentarlo.");
-      } else {
-        unblockDate(ds); // fallback: bloqueos antiguos hechos por inventario
+      if (blockBooking) {
+        $("#ub-all").addEventListener("click", () => { $("#ub-from").value = blockBooking.arrival; $("#ub-to").value = ultima; });
       }
-    });
+      $("#unblock-btn").addEventListener("click", () => {
+        const from = $("#ub-from").value, to = $("#ub-to").value;
+        clearAlert("#ub-alert");
+        if (!from || !to) { showAlert("#ub-alert","err","✗ Elige las dos fechas"); return; }
+        if (from > to) { showAlert("#ub-alert","err","✗ La fecha final no puede ser anterior a la inicial"); return; }
+        if (blockBooking && blockBooking.id) {
+          unblockRange(blockBooking, from, to);
+        } else if (blockBooking) {
+          showAlert("#ub-alert","err","✗ Este bloqueo aún no tiene ID confirmado por Beds24. Pulsa ↺ arriba para actualizar y vuelve a intentarlo.");
+        } else {
+          unblockDate(from, to); // bloqueos de calendario (sin reserva ficticia): se abre la disponibilidad de ese rango
+        }
+      });
+    }
 
   } else {
     // ── AVAILABLE ──
@@ -1805,28 +1853,66 @@ $("#eb-save").addEventListener("click", async () => {
 });
 
 // ── UNBLOCK ────────────────────────────────────────────
-async function unblockDate(ds) {
+function eachDay(from, to, fn) {
+  for (let d = from; d <= to; d = addDaysStr(d, 1)) fn(d);
+}
+function setOverrideAvail(roomId, from, to, num) {
+  const rid = String(roomId);
+  if (!OVERRIDES[rid]) OVERRIDES[rid] = {};
+  eachDay(from, to, d => { (OVERRIDES[rid][d] = OVERRIDES[rid][d] || {}).numAvail = num; });
+}
+// Bloqueo de calendario (sin reserva ficticia): abre la disponibilidad de un rango de noches.
+async function unblockDate(from, to) {
   const btn = $("#unblock-btn");
   btn.textContent = "Desbloqueando…"; btn.disabled = true;
   try {
     const r = await fetch(`${API}/update`, {
       method: "POST",
       headers: {"content-type":"application/json","x-app-pin":PIN},
-      body: JSON.stringify({pin: PIN, roomId: SEL_ROOM.id, from: ds, to: ds, numAvail: 1, userName: USER_NAME, deviceId: DEVICE_ID})
+      body: JSON.stringify({pin: PIN, roomId: SEL_ROOM.id, from, to, numAvail: 1, userName: USER_NAME, deviceId: DEVICE_ID})
     });
     const d = await r.json();
     if (d.ok) {
-      // Actualizar OVERRIDES local
-      if (!OVERRIDES[String(SEL_ROOM.id)]) OVERRIDES[String(SEL_ROOM.id)] = {};
-      if (!OVERRIDES[String(SEL_ROOM.id)][ds]) OVERRIDES[String(SEL_ROOM.id)][ds] = {};
-      OVERRIDES[String(SEL_ROOM.id)][ds].numAvail = 1;
+      setOverrideAvail(SEL_ROOM.id, from, to, 1);
       closeSheet();
       renderCalendar();
     } else {
-      btn.textContent = "✗ Error al desbloquear"; btn.disabled = false;
+      btn.textContent = "✔ Desbloquear estas fechas"; btn.disabled = false;
+      showAlert("#ub-alert","err","✗ Error al desbloquear");
     }
   } catch {
-    btn.textContent = "✗ Error de conexión"; btn.disabled = false;
+    btn.textContent = "✔ Desbloquear estas fechas"; btn.disabled = false;
+    showAlert("#ub-alert","err","✗ Error de conexión");
+  }
+}
+// Bloqueo hecho con reserva ficticia: libera solo el rango elegido (todo, un extremo o un trozo del medio).
+async function unblockRange(bk, from, to) {
+  const btn = $("#unblock-btn");
+  btn.textContent = "Desbloqueando…"; btn.disabled = true;
+  try {
+    const r = await fetch(`${API}/unblock-dates`, {
+      method: "POST",
+      headers: {"content-type":"application/json","x-app-pin":PIN},
+      body: JSON.stringify({pin: PIN, bookingId: bk.id, from, to, userName: USER_NAME, deviceId: DEVICE_ID})
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (d.accion === "cancelar") {
+        ALL_BOOKINGS = ALL_BOOKINGS.filter(b => String(b.id) !== String(bk.id));
+      } else if (d.bloqueo) {
+        ALL_BOOKINGS.forEach(b => { if (String(b.id) === String(bk.id)) { b.arrival = d.bloqueo.arrival; b.departure = d.bloqueo.departure; } });
+        if (d.nuevoBloqueo) ALL_BOOKINGS.push(d.nuevoBloqueo);
+      }
+      setOverrideAvail(bk.roomId, d.liberadas.from, d.liberadas.to, 1);
+      closeSheet();
+      renderCalendar();
+    } else {
+      btn.textContent = "✔ Desbloquear estas fechas"; btn.disabled = false;
+      showAlert("#ub-alert","err","✗ " + (typeof d.error === "object" ? JSON.stringify(d.error) : (d.error || "Error al desbloquear")));
+    }
+  } catch {
+    btn.textContent = "✔ Desbloquear estas fechas"; btn.disabled = false;
+    showAlert("#ub-alert","err","✗ Error de conexión");
   }
 }
 
