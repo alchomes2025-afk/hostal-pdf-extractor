@@ -30,7 +30,7 @@ LECTURAS = [
     ("GET /limpieza/calendario", "/limpieza/calendario", {LIMP: 200}),
     ("GET /test-whatsapp (no se llama)", None, {}),
 ]
-SIN_CONSULTAR_POSITIVO = {"GET /finance (Primavera)": {PROP, PRIM}, "GET /finance (Hostal)": {PROP}}   # se esperan 200 pero no se piden
+SIN_CONSULTAR_POSITIVO = {"GET /finance (Primavera)": {PROP, PRIM}, "GET /finance (Hostal)": {PROP, PRIM}}   # se esperan 200 pero no se piden
 
 
 def entrar(pin):

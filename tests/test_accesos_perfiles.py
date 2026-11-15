@@ -17,7 +17,7 @@ TABLA = {
     a.ASISTENTE: {"propietario", "gestor_primavera", "gestor", "sustituto"},
     a.ASISTENTE_COMPLETO: {"propietario"},
     a.FINANZAS_PRIMAVERA: {"propietario", "gestor_primavera"},
-    a.FINANZAS_HOSTAL: {"propietario"},
+    a.FINANZAS_HOSTAL: {"propietario", "gestor_primavera"},
     a.FACTURAS: {"propietario"},
     a.EMERGENCIA: {"propietario", "sustituto"},
     a.EMERGENCIA_SIN_PIN: {"propietario"},
@@ -76,7 +76,7 @@ class Permisos(unittest.TestCase):
         for perfil in ("gestor", "sustituto"):
             for p in (a.FINANZAS_PRIMAVERA, a.FINANZAS_HOSTAL, a.FACTURAS, a.ENTRENAMIENTO, a.HISTORIAL, a.PRECIOS):
                 self.assertFalse(a.tiene(perfil, p), f"{perfil} no debe tener {p}")
-        self.assertFalse(a.tiene("gestor_primavera", a.FINANZAS_HOSTAL))
+        self.assertTrue(a.tiene("gestor_primavera", a.FINANZAS_HOSTAL))   # desde 2026-11-15 el 9999 también ve las finanzas del hostal
         self.assertFalse(a.tiene("gestor_primavera", a.FACTURAS))
         self.assertFalse(a.tiene("gestor_primavera", a.OPERATIVA))
         self.assertFalse(a.tiene("gestor", a.OPERATIVA))

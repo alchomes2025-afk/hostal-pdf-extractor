@@ -7,7 +7,7 @@ define y se prueba la tabla; hasta la fase 2 la app sigue funcionando con los do
 
 Perfiles (confirmados por Adrián el 2026-10-24):
   propietario (1379, Ione y Adrián)  → todo
-  gestor_primavera (9999)            → como gestor + precios + Finanzas de La Casa de la Primavera
+  gestor_primavera (9999)            → como gestor + precios + Finanzas de La Casa de la Primavera y del hostal (desde 2026-11-15)
   gestor (2486, resto de gestores)   → calendario, reservas, asistente acotado
   sustituto (2589, quien sustituye a Ione) → calendario, reservas, asistente acotado, Operativa de Gestión, envío de emergencia con el PIN 1432 (y el
                                        asistente le dice ese PIN); toda su actividad queda registrada (`auditado`)
@@ -73,7 +73,7 @@ _GESTOR = frozenset({CALENDARIO, RESERVAS, ASISTENTE})
 PERFILES = {
     "propietario": Perfil("propietario", "Propietario (Ione y Adrián)", frozenset(p for p in TODOS if p not in (LIMPIEZA_CALENDARIO, LIMPIEZA_MARCAR)),
                           identidad_por_dispositivo=("Ione", "Adrián")),
-    "gestor_primavera": Perfil("gestor_primavera", "Gestor de la Casa de la Primavera", _GESTOR | {PRECIOS, FINANZAS_PRIMAVERA, PRIMAVERA, INCIDENCIAS_VER},
+    "gestor_primavera": Perfil("gestor_primavera", "Gestor de la Casa de la Primavera", _GESTOR | {PRECIOS, FINANZAS_PRIMAVERA, FINANZAS_HOSTAL, PRIMAVERA, INCIDENCIAS_VER},
                                nombre_fijo="Hermann"),
     "gestor": Perfil("gestor", "Gestor", _GESTOR, pregunta_nombre=True),
     "sustituto": Perfil("sustituto", "Sustituto de Ione", _GESTOR | {EMERGENCIA, EMERGENCIA_VER_PIN, OPERATIVA}, auditado=True, pide_nombre=True),

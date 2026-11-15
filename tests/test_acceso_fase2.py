@@ -122,7 +122,7 @@ class Sesiones(Base):
         return self.c.post("/mobile/login", json={"pin": pin, **extra})
 
     def test_login_de_cada_perfil(self):
-        for pin, perfil, admin in (("1379", "propietario", True), ("9999", "gestor_primavera", False), ("2486", "gestor", False)):
+        for pin, perfil, admin in (("1379", "propietario", True), ("9999", "gestor_primavera", True), ("2486", "gestor", False)):
             d = self._login(pin).get_json()
             self.assertEqual((d["ok"], d["perfil"], d["admin"]), (True, perfil, admin), pin)
             self.assertEqual(accesos.verificar_sesion(d["token"])[0].id, perfil)
@@ -261,8 +261,11 @@ class SoloPrimavera(Base):
     def test_finanzas_de_la_primavera(self):
         for perfil in ("gestor", "sustituto"):
             self.assertEqual(self.c.get("/mobile/finance?propertyId=349341&month=2026-10", headers=cab(perfil)).status_code, 403, perfil)
-        for perfil in ("gestor", "sustituto", "gestor_primavera"):    # y el hostal, solo el propietario
+        for perfil in ("gestor", "sustituto"):    # y el hostal, solo el propietario y el 9999
             self.assertEqual(self.c.get(f"/mobile/finance?propertyId={mobile_routes.PROPERTY_ID}&month=2026-10", headers=cab(perfil)).status_code, 403, perfil)
+        with mock.patch.object(mobile_routes, "get_access_token", side_effect=RuntimeError("sin Beds24 en la prueba")):
+            for perfil in ("propietario", "gestor_primavera"):    # pasan la puerta de permisos (el error es de Beds24, no un 403)
+                self.assertNotEqual(self.c.get(f"/mobile/finance?propertyId={mobile_routes.PROPERTY_ID}&month=2026-10", headers=cab(perfil)).status_code, 403, perfil)
 
 
 class Asistente(Base):
@@ -286,7 +289,7 @@ class Asistente(Base):
         return self.ctx
 
     def test_el_contexto_sale_del_perfil(self):
-        esperado = {"propietario": (True, True, True, True, True, True), "gestor_primavera": (False, True, False, False, False, True),
+        esperado = {"propietario": (True, True, True, True, True, True), "gestor_primavera": (True, True, False, False, False, True),
                     "gestor": (False, False, False, False, False, False), "sustituto": (False, False, True, False, True, False)}
         for perfil, (es_admin, finanzas, emergencia, sin_pin, ver_pin, primavera) in esperado.items():
             ctx = self._preguntar(perfil)

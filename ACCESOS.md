@@ -8,7 +8,7 @@ Encargo de Adrián del 2026-10-24; la tabla de abajo la confirmó él. Mientras 
 | PIN | Perfil | Quién |
 |---|---|---|
 | 1379 | `propietario` | Ione y Adrián |
-| 9999 | `gestor_primavera` | el gestor que además lleva la Casa de la Primavera |
+| 9999 | `gestor_primavera` | el gestor que además lleva la Casa de la Primavera (y, desde el 15-11-2026, ve también las finanzas del hostal) |
 | 2486 | `gestor` | el resto de gestores |
 | 2589 | `sustituto` | quien sustituya a Ione (PIN compartido: pide el nombre; actividad auditada) |
 | 4268 | `limpieza` | personal de limpieza |
@@ -26,7 +26,7 @@ estos valores por defecto. En memoria solo se conserva su hash (PBKDF2-SHA256, s
 | `asistente.usar` | ✔ | ✔ | ✔ | ✔ | |
 | `asistente.alcance_completo` | ✔ | | | | |
 | `finanzas.primavera` | ✔ | ✔ | | | |
-| `finanzas.hostal` | ✔ | | | | |
+| `finanzas.hostal` | ✔ | ✔ | | | |
 | `finanzas.facturas` (facturas, Asesor Contable, Desglose) | ✔ | | | | |
 | `emergencia.enviar` (🚨, correo de códigos, enlace del parte) | ✔ | | | ✔ | |
 | `emergencia.sin_pin` | ✔ | | | | |
@@ -67,7 +67,7 @@ Antes casi todas aceptaban cualquier PIN válido (`check_pin`), incluidas las de
 | `/rooms`, `/all-data`, `/reload`, `/check-changes` | cualquier PIN | `calendario.ver` |
 | `/update` (precios y disponibilidad) | **cualquier PIN** | `precios.escribir` |
 | `/create-booking`, `/block-dates`, `/unblock-dates`, `/cancel-booking`, `/edit-booking` | cualquier PIN | `reservas.escribir` |
-| `/finance` | cualquier PIN; hostal solo admin | `finanzas.primavera` o `finanzas.hostal` según la propiedad |
+| `/finance` | cualquier PIN; hostal solo propietario y 9999 | `finanzas.primavera` o `finanzas.hostal` según la propiedad |
 | `/finance/desglose` | PIN normal + PIN 1379 | `finanzas.facturas` (+ PIN 1379) |
 | `/assistant`, `/finance-chat` | cualquier PIN; el cliente manda `finanzas:true` | `asistente.usar`; herramientas y ámbito según permisos; el servidor ignora `finanzas` del cliente |
 | `/assistant/preparar-codigos`, `/assistant/enviar-codigos` | admin o PIN normal + 1432 | `emergencia.enviar` (+ 1432 salvo `emergencia.sin_pin`) |
@@ -94,7 +94,8 @@ servidor reinicia, la app avisa y pide volver a entrar.
 - **2486 y 9999:** solo calendario y reservas y cómo funciona la app. **Las tareas de gestión no son para ellos** (sin `buscar_operativa`): «Eso no está disponible para tu perfil: consúltalo con Ione».
   Fuera de eso declina con amabilidad (barrera blanda, por el prompt). **Finanzas es barrera dura:** sin acceso a datos económicos, una pregunta de dinero (ingresos, beneficio,
   comisiones, costes, rentabilidad, impuestos…) ni llega al modelo: el servidor responde «Dirígete a Ione.»; y la herramienta `finanzas_mes` ni existe para ellos.
-  El 9999 ve la Primavera pero no el hostal: el modelo y las herramientas lo limitan, y se le remite a Ione.
+  El 9999 ve la Primavera y, desde el 15-11-2026, también las finanzas del hostal (`finanzas.hostal`): el asistente le da los datos económicos de las dos propiedades.
+  No cambia lo demás: sigue sin tareas de gestión, sin facturas ni Desglose, sin envío de emergencia y sin diagnóstico.
 - **Base de conocimiento** (`services/operativa_kb.py`, colección `kb_operativa`): herramienta `buscar_operativa`, solo con entradas **aprobadas**. Si no hay nada, el asistente
   dice «Eso todavía no está recogido: consúltalo con Ione» y no inventa procedimientos. La edición, el alta y el Entrenamiento llegan en las fases 5 y 6.
 
