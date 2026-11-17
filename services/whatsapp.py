@@ -12,13 +12,17 @@ from urllib.parse import quote
 from services import avisos_registro
 from config import (
     AVISOS_CLIENTE, AVISOS_EMAIL, CALLMEBOT_PHONE, CALLMEBOT_API_KEY, CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2,
-    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID,
+    TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_ID_SOLO_SISTEMA,
 )
 
 logger = logging.getLogger(__name__)
 
 NOMBRE_REMITENTE_AVISOS = "Avisos del sistema"   # nombre visible del remitente de los avisos por correo
 ETIQUETA_ASUNTO = "[Aviso ALCHOMES] "   # prefijo fijo del asunto de los avisos por correo (para el filtro de Gmail)
+
+# Tipo de aviso. El número 2 de CallMeBot y los chats de TELEGRAM_CHAT_ID_SOLO_SISTEMA reciben ÚNICAMENTE los de tipo «sistema». Cualquier otro
+# (reservas, llegadas, resúmenes, huéspedes, limpieza… o un aviso sin tipo) NO les llega: así un aviso nuevo que se olvide etiquetar no se cuela.
+TIPO_SISTEMA = "sistema"   # funcionamiento del sistema: fallos, recuperaciones, tokens, CallMeBot caído, reinicios…
 
 
 def _lista(texto):
@@ -38,10 +42,18 @@ def cabecera_aviso(mensaje):
     return " · ".join(["📍 HostalFácil", AVISOS_CLIENTE] + propiedades)
 
 
-def _enviar_telegram(mensaje):
-    """Mensaje por el bot de Telegram a cada chat de TELEGRAM_CHAT_ID. Lanza excepción si alguno no se entrega."""
+def _chats_telegram(tipo=None):
+    """Chats de Telegram que reciben un aviso de ese tipo. Los de TELEGRAM_CHAT_ID_SOLO_SISTEMA solo reciben los avisos de sistema; aunque
+    estén también en TELEGRAM_CHAT_ID, mandan los de «solo sistema». El resto recibe todos."""
+    solo_sistema = _lista(TELEGRAM_CHAT_ID_SOLO_SISTEMA)
+    generales = [c for c in _lista(TELEGRAM_CHAT_ID) if c not in solo_sistema]
+    return generales + solo_sistema if tipo == TIPO_SISTEMA else generales
+
+
+def _enviar_telegram(mensaje, tipo=None):
+    """Mensaje por el bot de Telegram a cada chat que corresponda a su tipo (ver _chats_telegram). Lanza excepción si alguno no se entrega."""
     errores = []
-    for chat in _lista(TELEGRAM_CHAT_ID):
+    for chat in _chats_telegram(tipo):
         resp = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                              json={"chat_id": chat, "text": (cabecera_aviso(mensaje) + "\n\n" + mensaje)[:4000]}, timeout=15)
         try:
@@ -74,10 +86,10 @@ def _enviar_correo_aviso(mensaje):
                          nombre=NOMBRE_REMITENTE_AVISOS, timeout=30)
 
 
-def _enviar_respaldos(mensaje):
+def _enviar_respaldos(mensaje, tipo=None):
     """Envía por los canales de respaldo configurados. Devuelve [(canal, error|None)]."""
     resultados = []
-    for canal, configurado, enviar in (("Telegram", TELEGRAM_BOT_TOKEN and _lista(TELEGRAM_CHAT_ID), _enviar_telegram),
+    for canal, configurado, enviar in (("Telegram", TELEGRAM_BOT_TOKEN and _chats_telegram(tipo), lambda m: _enviar_telegram(m, tipo)),
                                        ("correo", _lista(AVISOS_EMAIL), _enviar_correo_aviso)):
         if not configurado:
             continue
@@ -90,18 +102,21 @@ def _enviar_respaldos(mensaje):
     return resultados
 
 
-def enviar_whatsapp_callmebot(mensaje):
+def enviar_whatsapp_callmebot(mensaje, tipo=None):
     """
     Envía un aviso interno: por WhatsApp (CallMeBot) y, además, por los canales de respaldo configurados (Telegram y/o
     correo). Cuenta como enviado si llega por CUALQUIERA de ellos; si fallan todos lanza la excepción de WhatsApp. Sin
     canales de respaldo se comporta como siempre (solo WhatsApp).
+
+    `tipo`: TIPO_SISTEMA para los avisos de funcionamiento del sistema; sin tipo (o cualquier otro) el aviso no llega al número 2 de
+    CallMeBot ni a los chats de TELEGRAM_CHAT_ID_SOLO_SISTEMA.
     """
     error_whatsapp, respuesta = None, ""
     try:
-        respuesta = _enviar_callmebot(mensaje)
+        respuesta = _enviar_callmebot(mensaje, tipo)
     except Exception as e:
         error_whatsapp = e
-    respaldos = _enviar_respaldos(mensaje)
+    respaldos = _enviar_respaldos(mensaje, tipo)
     seguidos = avisos_registro.registrar(mensaje, None if error_whatsapp is None else str(error_whatsapp), respaldos)
     if error_whatsapp is not None:
         if seguidos == avisos_registro.FALLOS_PARA_AVISAR:
@@ -117,16 +132,17 @@ def _avisar_callmebot_caido(seguidos):
     """Una sola vez al llegar a FALLOS_PARA_AVISAR fallos seguidos: por los respaldos (no por WhatsApp, que es lo que falla)."""
     try:
         _enviar_respaldos(f"🟡 ALCHOMES — CallMeBot no está entregando WhatsApp: {seguidos} avisos seguidos sin llegar. "
-                          "Los avisos siguen llegando por Telegram. Revisa CallMeBot (límite, número desvinculado o servicio caído).")
+                          "Los avisos siguen llegando por Telegram. Revisa CallMeBot (límite, número desvinculado o servicio caído).",
+                          TIPO_SISTEMA)
     except Exception as e:
         logger.error(f"[avisos] No se pudo avisar de que CallMeBot falla: {e}")
 
 
-def _enviar_callmebot(mensaje):
+def _enviar_callmebot(mensaje, tipo=None):
     """
     Envía un mensaje WhatsApp via CallMeBot a uno o dos números.
     Requiere CALLMEBOT_PHONE y CALLMEBOT_API_KEY en Render.
-    Opcionalmente CALLMEBOT_PHONE_2 y CALLMEBOT_API_KEY_2 para el segundo destinatario.
+    Opcionalmente CALLMEBOT_PHONE_2 y CALLMEBOT_API_KEY_2 para el segundo destinatario, que solo recibe los avisos de TIPO_SISTEMA.
     """
     if not CALLMEBOT_PHONE or not CALLMEBOT_API_KEY:
         raise Exception(
@@ -155,7 +171,7 @@ def _enviar_callmebot(mensaje):
     resultados = []
     resultados.append(_enviar(CALLMEBOT_PHONE, CALLMEBOT_API_KEY))
 
-    if CALLMEBOT_PHONE_2 and CALLMEBOT_API_KEY_2:
+    if CALLMEBOT_PHONE_2 and CALLMEBOT_API_KEY_2 and tipo == TIPO_SISTEMA:
         try:
             resultados.append(_enviar(CALLMEBOT_PHONE_2, CALLMEBOT_API_KEY_2))
         except Exception as e:
@@ -165,9 +181,12 @@ def _enviar_callmebot(mensaje):
     return " | ".join(resultados)
 
 
-def alerta(titulo, detalle="", nivel="critico"):
+def alerta(titulo, detalle="", nivel="critico", tipo=None):
     """
     Sistema centralizado de alertas por WhatsApp.
+
+    tipo: TIPO_SISTEMA si es un aviso de funcionamiento del sistema (llega también al número 2 y a los chats «solo sistema»);
+    sin tipo es un aviso normal (reservas, limpieza…) y no les llega.
 
     nivel:
       "critico"  → 🔴 error que impide el funcionamiento (auth caducada, servicio caído)
@@ -186,7 +205,7 @@ def alerta(titulo, detalle="", nivel="critico"):
         f"[ALERTA {nivel.upper()}] {titulo}: {detalle}"
     )
     try:
-        enviar_whatsapp_callmebot(msg)
+        enviar_whatsapp_callmebot(msg, tipo)
     except Exception as e:
         logger.error(f"No se pudo enviar alerta WhatsApp: {e}")
 
@@ -196,4 +215,4 @@ def avisar_error_critico(titulo, detalle):
     Envía un aviso por WhatsApp cuando falla un punto crítico del flujo.
     No lanza excepción si el propio envío de WhatsApp falla.
     """
-    alerta(titulo, detalle, nivel="critico")
+    alerta(titulo, detalle, nivel="critico", tipo=TIPO_SISTEMA)

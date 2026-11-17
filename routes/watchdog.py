@@ -20,7 +20,7 @@ from config import (
 from services.beds24 import get_beds24_access_token, _token_cache as _token_cache_beds24
 from services.rpv import comprobar_cuentas, TTL_SEGUNDO_PLANO
 from services.ical_beds24 import comprobar_feeds_ical
-from services.whatsapp import alerta
+from services.whatsapp import alerta, TIPO_SISTEMA
 from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hora
 from services.fechas import hoy_madrid
 from services.hostelworld_avisos import enviar_avisos_checkin_hostelworld
@@ -419,12 +419,13 @@ def watchdog():
         alerta(
             f"Watchdog — {n_criticos} error(es) crítico(s), {n_warnings} aviso(s)",
             "\n\n".join(lineas),
-            nivel="critico" if n_criticos > 0 else "warning"
+            nivel="critico" if n_criticos > 0 else "warning",
+            tipo=TIPO_SISTEMA
         )
     elif problemas and not debe_avisar:
         logger.info("[watchdog] Mismo(s) problema(s) que en el último aviso — no se repite la notificación por WhatsApp.")
     elif es_recuperacion:
-        alerta("Watchdog — ✅ Recuperado, todos los sistemas vuelven a estar operativos", "", nivel="info")
+        alerta("Watchdog — ✅ Recuperado, todos los sistemas vuelven a estar operativos", "", nivel="info", tipo=TIPO_SISTEMA)
     else:
         logger.info("[watchdog] ✅ Todos los sistemas operativos — sin aviso WhatsApp (solo se avisa si hay problemas)")
 

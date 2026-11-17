@@ -23,7 +23,7 @@ from mobile_historial import sustitucion_bp
 from config import (
     BEDS24_REFRESH_TOKEN, RPV_API_KEY, CALLMEBOT_PHONE, CALLMEBOT_API_KEY, GROQ_API_KEY,
 )
-from services.whatsapp import enviar_whatsapp_callmebot
+from services.whatsapp import enviar_whatsapp_callmebot, TIPO_SISTEMA
 
 from routes.misc import misc_bp
 from routes.chat import chat_bp
@@ -71,7 +71,8 @@ def _startup_check():
                 f"🟡 ALCHOMES — Render reiniciado\n\n"
                 f"⚠️ Variables críticas no configuradas:\n"
                 + "\n".join(f"• {k}" for k in faltantes)
-                + "\n\nAcceder a Render → Environment para añadirlas."
+                + "\n\nAcceder a Render → Environment para añadirlas.",
+                TIPO_SISTEMA
             )
         except Exception as e:
             logger.error(f"[STARTUP] No se pudo enviar alerta WhatsApp: {e}")

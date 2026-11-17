@@ -63,7 +63,7 @@ class CallMeBotCaido(unittest.TestCase):
         seguidos = iter([1, 2, 3, 4])
         enviados = []
         with mock.patch.object(whatsapp, "_enviar_callmebot", side_effect=Exception("no confirmó")), \
-             mock.patch.object(whatsapp, "_enviar_respaldos", side_effect=lambda m: enviados.append(m) or [("Telegram", None)]), \
+             mock.patch.object(whatsapp, "_enviar_respaldos", side_effect=lambda m, tipo=None: enviados.append(m) or [("Telegram", None)]), \
              mock.patch.object(whatsapp.avisos_registro, "registrar", side_effect=lambda *a: next(seguidos)):
             for _ in range(4):
                 whatsapp.enviar_whatsapp_callmebot("aviso")

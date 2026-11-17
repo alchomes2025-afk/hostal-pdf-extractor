@@ -30,7 +30,7 @@ from config import BEDS24_API_BASE, BEDS24_PROPERTY_IDS
 from services.beds24 import (CAMPOS_ID_INTERNOS, ROOM_ID_DISPLAY_NAME, _canal_legible, _extraer_nombre_huesped_beds24,
                              _ref_en_booking, es_bloqueo_beds24, get_beds24_access_token)
 from services.fechas import hoy_madrid
-from services.whatsapp import enviar_whatsapp_callmebot
+from services.whatsapp import enviar_whatsapp_callmebot, TIPO_SISTEMA
 
 logger = logging.getLogger(__name__)
 
@@ -420,7 +420,7 @@ def avisar_errores_canal(ahora=None):
         ultimo = _minutos(estado.get(canal), ahora)
         if ultimo is not None and ultimo < ERRORES_SILENCIO_HORAS * 60:
             continue
-        enviar_whatsapp_callmebot(mensaje_errores_canal(canal, datos["rooms"], datos["desde"]))
+        enviar_whatsapp_callmebot(mensaje_errores_canal(canal, datos["rooms"], datos["desde"]), TIPO_SISTEMA)
         estado[canal] = ahora.isoformat()
         avisados.append(canal)
     if avisados:

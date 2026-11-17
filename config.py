@@ -165,6 +165,10 @@ CHECKIN_LINK_SECRET = os.environ.get("CHECKIN_LINK_SECRET", "")
 # el Gmail del buzón de huéspedes). Si WhatsApp falla pero un respaldo llega, el aviso cuenta como enviado.
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+# Chats de Telegram (ids separados por comas) que reciben SOLO los avisos de funcionamiento del sistema (fallos, recuperaciones, tokens,
+# CallMeBot caído…) y ninguno de reservas. Pueden estar también en TELEGRAM_CHAT_ID: aquí mandan. El número 2 de CallMeBot hace lo mismo
+# por WhatsApp (no necesita variable: services/whatsapp.py).
+TELEGRAM_CHAT_ID_SOLO_SISTEMA = os.environ.get("TELEGRAM_CHAT_ID_SOLO_SISTEMA", "")
 AVISOS_EMAIL       = os.environ.get("AVISOS_EMAIL", "")
 # Nombre del cliente que sale en la cabecera de los avisos por Telegram y correo («📍 HostalFácil · ALC Homes · …»).
 AVISOS_CLIENTE     = os.environ.get("AVISOS_CLIENTE", "ALC Homes")

@@ -314,9 +314,11 @@ def diag_avisos():
     tokens_validos = [t for t in [API_TOKEN, TEST_TOKEN] if t]
     if token not in tokens_validos:
         return jsonify({"ok": False, "error": "No autorizado"}), 401
-    from config import AVISOS_EMAIL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+    from config import AVISOS_EMAIL, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_CHAT_ID_SOLO_SISTEMA
     from services import whatsapp as wa
-    resultado = {"ok": True, "telegram": {"bot_configurado": bool(TELEGRAM_BOT_TOKEN), "chats_configurados": len(wa._lista(TELEGRAM_CHAT_ID))},
+    resultado = {"ok": True, "telegram": {"bot_configurado": bool(TELEGRAM_BOT_TOKEN), "chats_configurados": len(wa._lista(TELEGRAM_CHAT_ID)),
+                                          "chats_solo_sistema": len(wa._lista(TELEGRAM_CHAT_ID_SOLO_SISTEMA)),
+                                          "reciben_avisos_de_reservas": len(wa._chats_telegram(None)), "reciben_avisos_de_sistema": len(wa._chats_telegram(wa.TIPO_SISTEMA))},
                  "correo": {"direcciones_configuradas": len(wa._lista(AVISOS_EMAIL))}}
     if TELEGRAM_BOT_TOKEN:
         try:

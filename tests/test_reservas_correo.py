@@ -156,7 +156,7 @@ class Flujo(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         for nombre, valor in (("_coleccion", mock.Mock(return_value=self.col)),
-                              ("enviar_whatsapp_callmebot", mock.Mock(side_effect=self.envios.append))):
+                              ("enviar_whatsapp_callmebot", mock.Mock(side_effect=lambda mensaje, tipo=None: self.envios.append(mensaje)))):
             p = mock.patch.object(rc, nombre, valor)
             p.start()
             self.addCleanup(p.stop)
