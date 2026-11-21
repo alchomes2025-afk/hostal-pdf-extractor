@@ -69,6 +69,7 @@ def guardar(master_id, modo):
 def _sin_codigo(d):
     d["pin"] = None
     d["pin_available"] = False
+    d.pop("codigos_comunes", None)   # el portal/urbanización también son «códigos»: no salen mientras el grupo no haya elegido, ni con «separados»
 
 
 def aplicar_eleccion(respuesta, master_id):

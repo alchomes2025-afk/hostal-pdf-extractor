@@ -13,6 +13,7 @@ from config import (
     BEDS24_API_BASE, BEDS24_PROPERTY_ID,
 )
 from services import grupos_acceso
+from config import CODIGO_PORTAL, CODIGO_URBANIZACION
 from services.acceso_enlace import crear_token, crear_token_habitacion, interpretar_token, verificar_token
 from services.beds24 import (
     buscar_booking_por_id, buscar_booking_por_ref, buscar_booking_por_nombre, reservas_del_grupo, reservas_encadenadas, clave_grupo,
@@ -30,6 +31,29 @@ HORA_CHECKIN  = dtime(15, 0)   # Check-in a las 15:00
 HORA_CHECKOUT = dtime(12, 0)   # Check-out hasta las 12:00
 # De más a menos «activo»: el estado del grupo es el primero de esta lista que tenga alguna de sus habitaciones
 PRIORIDAD_ESTADOS = ["staying", "checkin_pending", "pre_checkin", "pending_early", "expired"]
+
+
+ROOM_ID_PRIMAVERA = "720841"
+
+
+def _codigos_comunes(room_id):
+    """Códigos de acceso que NO son de una habitación: la puerta de la calle del hostal o la urbanización de La Casa de la Primavera.
+    Solo se entregan al huésped alojado (`staying`) y desaparecen donde se oculta el `pin` (services/grupos_acceso.py). Solo cifras."""
+    room_id = str(room_id)
+    if room_id == ROOM_ID_PRIMAVERA:
+        return {"urbanizacion": CODIGO_URBANIZACION} if CODIGO_URBANIZACION else None
+    if room_id in ROOM_CONFIG:
+        return {"portal": CODIGO_PORTAL} if CODIGO_PORTAL else None
+    return None
+
+
+def _alojado(room_id, cfg):
+    """La respuesta de un huésped alojado: parte hecho y código de su habitación a la vista, más los códigos comunes si los hay."""
+    r = {"estado": "staying", "parte_submitted": True, "pin_available": True, "pin": cfg.get("pin"), "rpv_link": None}
+    comunes = _codigos_comunes(room_id)
+    if comunes:
+        r["codigos_comunes"] = comunes
+    return r
 
 
 def _estado_reserva(booking, ahora_madrid):
@@ -67,7 +91,7 @@ def _estado_reserva(booking, ahora_madrid):
         if parte_pendiente:
             return {"estado": "checkin_pending", "parte_submitted": False, "pin_available": False, "pin": None,
                     "rpv_link": RPV_LINKS.get(room_id), "aviso_parte": None}
-        return {"estado": "staying", "parte_submitted": True, "pin_available": True, "pin": cfg.get("pin"), "rpv_link": None}
+        return _alojado(room_id, cfg)
 
     # ── 3. Verificar parte via API de RPV (válido para el día de hoy o días previos) ──
     parte_enviado = parte_recibido_para(room_id, arrival)
@@ -87,7 +111,7 @@ def _estado_reserva(booking, ahora_madrid):
 
     # ── 5. A partir de las 15:00 del día de check-in ──
     if parte_enviado:
-        return {"estado": "staying", "parte_submitted": True, "pin_available": True, "pin": cfg.get("pin"), "rpv_link": None}
+        return _alojado(room_id, cfg)
     return {"estado": "checkin_pending", "parte_submitted": False, "pin_available": False, "pin": None,
             "rpv_link": RPV_LINKS.get(room_id), "aviso_parte": aviso_parte}
 
@@ -160,6 +184,8 @@ def check_in_status():
         # ── Reservas ficticias de prueba ──────────────────────────────────────
         if ref in TEST_BOOKINGS:
             t = TEST_BOOKINGS[ref]
+            if t.get("estado") == "staying" and _codigos_comunes(t.get("room_id")):
+                t = {**t, "codigos_comunes": _codigos_comunes(t.get("room_id"))}
             return jsonify({"ok": True, **t})
 
         booking = buscar_booking_por_ref(ref)

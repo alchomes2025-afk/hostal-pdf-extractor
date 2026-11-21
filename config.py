@@ -63,6 +63,11 @@ PIN_HABITACION_3 = os.environ.get("PIN_HABITACION_3", "")  # Cala del Moraig
 PIN_DOBLE        = os.environ.get("PIN_DOBLE", "")         # Playa de la Fossá
 PIN_DELUXE       = os.environ.get("PIN_DELUXE", "")        # Cala Coveta Fumá
 PIN_CASA_PRIMAVERA = os.environ.get("PIN_CASA_PRIMAVERA", "2486")  # Código del cajetín de llaves
+# Códigos COMUNES de acceso (no de una habitación): puerta de la calle del hostal y entrada a la urbanización de La Casa de la Primavera.
+# Solo cifras, sin almohadilla. /check-in los entrega únicamente al huésped alojado (`codigos_comunes`). El valor por defecto es el actual:
+# cuando PIN_PORTAL y CODIGO_URBANIZACION estén puestos en Render se podrá quitar de aquí.
+CODIGO_PORTAL = os.environ.get("PIN_PORTAL", "130773")
+CODIGO_URBANIZACION = os.environ.get("CODIGO_URBANIZACION", "2308")
 
 # Configuración de las habitaciones: roomId de Beds24 → nombre + PIN.
 ROOM_CONFIG = {

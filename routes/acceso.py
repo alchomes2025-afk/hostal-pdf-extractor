@@ -72,8 +72,7 @@ def solicitar_acceso():
     return jsonify({"ok": True})
 
 
-CODIGO_PORTAL = "130773"   # puerta de la calle del hostal; el mismo que muestra la web de check-in
-CODIGO_URBANIZACION = "2308"   # urbanización Costa Hispania (La Casa de la Primavera); el mismo que muestra la web de check-in
+from config import CODIGO_PORTAL, CODIGO_URBANIZACION   # puerta de la calle del hostal y urbanización de La Casa de la Primavera (variables de entorno)
 ROOM_ID_PRIMAVERA = "720841"
 
 
