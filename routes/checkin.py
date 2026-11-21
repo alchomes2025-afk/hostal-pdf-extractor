@@ -13,7 +13,7 @@ from config import (
     BEDS24_API_BASE, BEDS24_PROPERTY_ID,
 )
 from services import grupos_acceso
-from config import CODIGO_PORTAL, CODIGO_URBANIZACION
+from config import (CODIGO_PORTAL, CODIGO_URBANIZACION, WIFI_CLAVE_CASA, WIFI_CLAVE_HOSTAL, WIFI_SSID_CASA, WIFI_SSID_HOSTAL)
 from services.acceso_enlace import crear_token, crear_token_habitacion, interpretar_token, verificar_token
 from services.beds24 import (
     buscar_booking_por_id, buscar_booking_por_ref, buscar_booking_por_nombre, reservas_del_grupo, reservas_encadenadas, clave_grupo,
@@ -37,14 +37,20 @@ ROOM_ID_PRIMAVERA = "720841"
 
 
 def _codigos_comunes(room_id):
-    """Códigos de acceso que NO son de una habitación: la puerta de la calle del hostal o la urbanización de La Casa de la Primavera.
-    Solo se entregan al huésped alojado (`staying`) y desaparecen donde se oculta el `pin` (services/grupos_acceso.py). Solo cifras."""
+    """Lo común de la propiedad que NO es de una habitación: la puerta de la calle del hostal (`portal`) o la urbanización de La Casa de la
+    Primavera (`urbanizacion`), más su wifi (`wifi`: red y clave). Solo se entrega al huésped alojado (`staying`) y desaparece donde se oculta el
+    `pin` (services/grupos_acceso.py). Los códigos, solo cifras. Solo lo de SU propiedad; lo que no esté configurado no aparece."""
     room_id = str(room_id)
     if room_id == ROOM_ID_PRIMAVERA:
-        return {"urbanizacion": CODIGO_URBANIZACION} if CODIGO_URBANIZACION else None
-    if room_id in ROOM_CONFIG:
-        return {"portal": CODIGO_PORTAL} if CODIGO_PORTAL else None
-    return None
+        codigo, clave, red = ("urbanizacion", CODIGO_URBANIZACION), WIFI_CLAVE_CASA, WIFI_SSID_CASA
+    elif room_id in ROOM_CONFIG:
+        codigo, clave, red = ("portal", CODIGO_PORTAL), WIFI_CLAVE_HOSTAL, WIFI_SSID_HOSTAL
+    else:
+        return None
+    comunes = {codigo[0]: codigo[1]} if codigo[1] else {}
+    if clave and red:
+        comunes["wifi"] = {"ssid": red, "clave": clave}
+    return comunes or None
 
 
 def _alojado(room_id, cfg):

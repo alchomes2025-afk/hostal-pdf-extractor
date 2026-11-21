@@ -68,6 +68,12 @@ PIN_CASA_PRIMAVERA = os.environ.get("PIN_CASA_PRIMAVERA", "2486")  # Código del
 # cuando PIN_PORTAL y CODIGO_URBANIZACION estén puestos en Render se podrá quitar de aquí.
 CODIGO_PORTAL = os.environ.get("PIN_PORTAL", "130773")
 CODIGO_URBANIZACION = os.environ.get("CODIGO_URBANIZACION", "2308")
+# Wifi que /check-in entrega, junto a los códigos comunes, solo al huésped alojado. El nombre de la red puede quedar por defecto; la CLAVE sale
+# solo de variables de entorno (WIFI_CLAVE_HOSTAL, WIFI_CLAVE_CASA): sin ella el wifi de esa propiedad no se entrega.
+WIFI_SSID_HOSTAL = os.environ.get("WIFI_SSID_HOSTAL", "ALCHOMES")
+WIFI_CLAVE_HOSTAL = os.environ.get("WIFI_CLAVE_HOSTAL", "")
+WIFI_SSID_CASA = os.environ.get("WIFI_SSID_CASA", "Livebox6s-3D26")
+WIFI_CLAVE_CASA = os.environ.get("WIFI_CLAVE_CASA", "")
 
 # Configuración de las habitaciones: roomId de Beds24 → nombre + PIN.
 ROOM_CONFIG = {
