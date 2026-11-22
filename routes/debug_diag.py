@@ -628,3 +628,16 @@ def diag_calendario():
             rangos.append(dia if request.args.get("crudo") else {"desde": dia.get("from"), "hasta": dia.get("to") or dia.get("from"),
                                                                   "numAvail": dia.get("numAvail"), "price1": dia.get("price1")})
     return jsonify({"ok": True, "habitacion": habitacion, "consultado": f"{desde} → {hasta}", "rangos": rangos}), 200
+
+
+@debug_bp.route("/diag-variables", methods=["GET"])
+def diag_variables():
+    """Diagnóstico de solo lectura: cuáles de las variables de entorno de códigos, PIN y wifi están PUESTAS en Render (sí/no). NUNCA devuelve
+    los valores. Sirve para saber si se puede quitar el valor por defecto de config.py sin romper nada.
+    Uso: /diag-variables?token=<TOKEN>"""
+    import os
+    if request.args.get("token", "") not in [t for t in [API_TOKEN, TEST_TOKEN] if t]:
+        return jsonify({"ok": False, "error": "No autorizado"}), 401
+    nombres = ("PIN_PORTAL", "CODIGO_URBANIZACION", "PIN_CASA_PRIMAVERA", "WIFI_SSID_HOSTAL", "WIFI_CLAVE_HOSTAL", "WIFI_SSID_CASA", "WIFI_CLAVE_CASA",
+               "PIN_HABITACION_2", "PIN_HABITACION_3", "PIN_DELUXE", "PIN_ENVIO_CODIGOS", "PIN_DESGLOSE_GESTION", "PIN_LIMPIEZA", "TEST_TOKEN")
+    return jsonify({"ok": True, "puestas": {n: bool(os.environ.get(n)) for n in nombres}}), 200
