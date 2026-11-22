@@ -16,7 +16,7 @@ Backend del sistema de self check-in automatizado para **dos propiedades**: el h
 
 ## Dos propiedades en Beds24
 - **ALC Homes San Blas** (hostal): `BEDS24_PROPERTY_ID=339751`, 5 habitaciones (`702395`–`702399`), check-in 15:00 / check-out 12:00.
-- **La Casa de la Primavera** (Gran Alacant, Santa Pola): `BEDS24_PROPERTY_ID_CASA_PRIMAVERA=349341`, 1 unidad (`room_id 720841`), vivienda completa. Acceso: código fijo de la urbanización (2308, no secreto) + cajetín de llaves físico (código dinámico, `PIN_CASA_PRIMAVERA`) — NO es una cerradura electrónica como en el hostal.
+- **La Casa de la Primavera** (Gran Alacant, Santa Pola): `BEDS24_PROPERTY_ID_CASA_PRIMAVERA=349341`, 1 unidad (`room_id 720841`), vivienda completa. Acceso: código de la urbanización (`CODIGO_URBANIZACION`, solo en Render) + cajetín de llaves físico (código dinámico, `PIN_CASA_PRIMAVERA`) — NO es una cerradura electrónica como en el hostal.
 - `BEDS24_PROPERTY_IDS` (config.py) recorre ambas propiedades donde hace falta buscar/sincronizar reservas de cualquiera de las dos (`buscar_booking_por_ref`, `obtener_bookings_dia_beds24`, `mobile_routes.py`).
 - RPV (registroparteviajeros.com): **dos cuentas separadas**, `RPV_API_KEY` (hostal) y `RPV_API_KEY_CASA_PRIMAVERA`, resueltas por habitación vía `RPV_API_KEY_MAP`.
 - `RPV_LINKS["720841"]` ya configurado (septiembre 2026).

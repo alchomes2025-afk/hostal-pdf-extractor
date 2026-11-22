@@ -64,10 +64,11 @@ PIN_DOBLE        = os.environ.get("PIN_DOBLE", "")         # Playa de la Fossá
 PIN_DELUXE       = os.environ.get("PIN_DELUXE", "")        # Cala Coveta Fumá
 PIN_CASA_PRIMAVERA = os.environ.get("PIN_CASA_PRIMAVERA", "2486")  # Código del cajetín de llaves
 # Códigos COMUNES de acceso (no de una habitación): puerta de la calle del hostal y entrada a la urbanización de La Casa de la Primavera.
-# Solo cifras, sin almohadilla. /check-in los entrega únicamente al huésped alojado (`codigos_comunes`). El valor por defecto es el actual:
-# cuando PIN_PORTAL y CODIGO_URBANIZACION estén puestos en Render se podrá quitar de aquí.
-CODIGO_PORTAL = os.environ.get("PIN_PORTAL", "130773")
-CODIGO_URBANIZACION = os.environ.get("CODIGO_URBANIZACION", "2308")
+# Solo cifras, sin almohadilla. /check-in los entrega únicamente al huésped alojado (`codigos_comunes`). SIN valor por defecto: solo salen de las
+# variables de entorno PIN_PORTAL y CODIGO_URBANIZACION de Render. Si faltan, /check-in no los entrega, los correos de emergencia no se redactan
+# (un correo con códigos a medias es peor que ninguno) y el watchdog lo avisa.
+CODIGO_PORTAL = os.environ.get("PIN_PORTAL", "")
+CODIGO_URBANIZACION = os.environ.get("CODIGO_URBANIZACION", "")
 # Wifi que /check-in entrega, junto a los códigos comunes, solo al huésped alojado. El nombre de la red puede quedar por defecto; la CLAVE sale
 # solo de variables de entorno (WIFI_CLAVE_HOSTAL, WIFI_CLAVE_CASA): sin ella el wifi de esa propiedad no se entrega.
 WIFI_SSID_HOSTAL = os.environ.get("WIFI_SSID_HOSTAL", "ALCHOMES")

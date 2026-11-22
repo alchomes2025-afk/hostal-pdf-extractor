@@ -121,6 +121,10 @@ def redactar_codigos(booking, idioma, miembros=None):
         if not cfg.get("pin"):
             raise ErrorCodigos("habitacion_sin_codigo", 409)
         habitaciones.append((cfg.get("nombre", ""), cfg["pin"], rid == ROOM_ID_PRIMAVERA))
+    if any(not primavera for _, _, primavera in habitaciones) and not CODIGO_PORTAL:
+        raise ErrorCodigos("falta_codigo_portal", 409)          # PIN_PORTAL sin configurar en Render
+    if any(primavera for _, _, primavera in habitaciones) and not CODIGO_URBANIZACION:
+        raise ErrorCodigos("falta_codigo_urbanizacion", 409)    # CODIGO_URBANIZACION sin configurar en Render
     url = url_checkin(booking.get("id"), idioma)
     if len(habitaciones) == 1:
         nombre, pin, primavera = habitaciones[0]   # urbanización + cajetín de llaves en la casa, sin portal del hostal

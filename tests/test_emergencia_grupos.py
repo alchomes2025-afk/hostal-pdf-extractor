@@ -21,12 +21,17 @@ CONFIG = {"702399": {"nombre": "Cala del Moraig", "pin": "213456"}, "702398": {"
 
 
 def setUpModule():
-    global _p
+    global _p, _codigos
     _p = mock.patch.dict(acceso.ROOM_CONFIG, CONFIG)
     _p.start()
+    _codigos = [mock.patch.object(acceso, "CODIGO_PORTAL", "130773"), mock.patch.object(acceso, "CODIGO_URBANIZACION", "2308")]
+    for c in _codigos:
+        c.start()
 
 
 def tearDownModule():
+    for c in _codigos:
+        c.stop()
     _p.stop()
 
 

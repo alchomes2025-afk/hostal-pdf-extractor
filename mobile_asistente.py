@@ -816,7 +816,10 @@ def borrador_codigos(reserva, email, idioma, primavera=True):
     miembros = [booking] if separado else todos   # con «códigos por habitación» cada habitación lleva su propio correo
     try:
         asunto, cuerpo, habitacion = redactar_codigos(booking, idioma, miembros)
-    except ErrorCodigos:
+    except ErrorCodigos as e:
+        if e.codigo in ("falta_codigo_portal", "falta_codigo_urbanizacion"):
+            raise ErrorHerramienta("Falta configurar el código de " + ("la puerta de la calle" if e.codigo == "falta_codigo_portal" else "la urbanización")
+                                   + " en el sistema: avisa a Adrián (variable " + ("PIN_PORTAL" if e.codigo == "falta_codigo_portal" else "CODIGO_URBANIZACION") + " en Render)")
         raise ErrorHerramienta("Esa habitación (o alguna de las de su grupo) no tiene código de acceso configurado" if len(miembros) > 1
                                else "Esa habitación no tiene código de acceso configurado")
     huesped = " ".join(x for x in (booking.get("firstName"), booking.get("lastName")) if x).strip()

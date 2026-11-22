@@ -190,6 +190,12 @@ class Grupos(unittest.TestCase):
 
 
 class ReservasDePrueba(unittest.TestCase):
+    def setUp(self):
+        for nombre, valor in VALORES:
+            p = mock.patch.object(checkin, nombre, valor)
+            p.start()
+            self.addCleanup(p.stop)
+
     def test_una_reserva_ficticia_alojada_lleva_los_codigos_y_la_que_no_lo_esta_no(self):
         app = Flask(__name__)
         app.register_blueprint(checkin.checkin_bp)

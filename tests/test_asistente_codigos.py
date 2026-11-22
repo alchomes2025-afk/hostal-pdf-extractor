@@ -28,7 +28,7 @@ def _ctx(base):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        for objeto, nombre, valor in ((acceso, "ROOM_CONFIG", HABITACIONES),
+        for objeto, nombre, valor in ((acceso, "ROOM_CONFIG", HABITACIONES), (acceso, "CODIGO_PORTAL", "130773"), (acceso, "CODIGO_URBANIZACION", "2308"),
                                       (asistente, "buscar_booking_por_id", mock.Mock(return_value=dict(BOOKING)))):
             p = mock.patch.object(objeto, nombre, valor)
             p.start()
