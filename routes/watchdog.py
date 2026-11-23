@@ -187,7 +187,7 @@ def watchdog():
     }
 
     # Códigos comunes y wifi que /check-in entrega al huésped alojado: sin valor por defecto, solo de Render
-    pins.update({"PIN_PORTAL": CODIGO_PORTAL, "CODIGO_URBANIZACION": CODIGO_URBANIZACION,
+    pins.update({"PIN_CASA_PRIMAVERA": ROOM_CONFIG["720841"]["pin"], "PIN_PORTAL": CODIGO_PORTAL, "CODIGO_URBANIZACION": CODIGO_URBANIZACION,
                  "WIFI_CLAVE_HOSTAL": WIFI_CLAVE_HOSTAL, "WIFI_CLAVE_CASA": WIFI_CLAVE_CASA})
 
     falt_criticas = [k for k, v in env_criticas.items() if not v]
@@ -207,7 +207,7 @@ def watchdog():
     if falt_pins:
         problemas.append(("warning",
             f"PINs sin configurar: {', '.join(falt_pins)}",
-            "Añadir en Render → Environment (PIN_HABITACION_2, PIN_HABITACION_3, PIN_DELUXE, PIN_PORTAL, CODIGO_URBANIZACION, WIFI_CLAVE_HOSTAL, WIFI_CLAVE_CASA)"))
+            "Añadir en Render → Environment (PIN_HABITACION_2, PIN_HABITACION_3, PIN_DELUXE, PIN_CASA_PRIMAVERA, PIN_PORTAL, CODIGO_URBANIZACION, WIFI_CLAVE_HOSTAL, WIFI_CLAVE_CASA)"))
 
     # ── 2. Beds24 ─────────────────────────────────────────────────────────
     resultados["beds24"], problema_beds24 = _comprobar_beds24()

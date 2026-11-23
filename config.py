@@ -62,7 +62,7 @@ PIN_HABITACION_2 = os.environ.get("PIN_HABITACION_2", "")  # Playa del Albir
 PIN_HABITACION_3 = os.environ.get("PIN_HABITACION_3", "")  # Cala del Moraig
 PIN_DOBLE        = os.environ.get("PIN_DOBLE", "")         # Playa de la Fossá
 PIN_DELUXE       = os.environ.get("PIN_DELUXE", "")        # Cala Coveta Fumá
-PIN_CASA_PRIMAVERA = os.environ.get("PIN_CASA_PRIMAVERA", "2486")  # Código del cajetín de llaves
+PIN_CASA_PRIMAVERA = os.environ.get("PIN_CASA_PRIMAVERA", "")  # Código del cajetín de llaves: solo de la variable de entorno de Render (sin valor por defecto)
 # Códigos COMUNES de acceso (no de una habitación): puerta de la calle del hostal y entrada a la urbanización de La Casa de la Primavera.
 # Solo cifras, sin almohadilla. /check-in los entrega únicamente al huésped alojado (`codigos_comunes`). SIN valor por defecto: solo salen de las
 # variables de entorno PIN_PORTAL y CODIGO_URBANIZACION de Render. Si faltan, /check-in no los entrega, los correos de emergencia no se redactan
