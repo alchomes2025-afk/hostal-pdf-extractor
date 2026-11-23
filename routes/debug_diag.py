@@ -640,4 +640,7 @@ def diag_variables():
         return jsonify({"ok": False, "error": "No autorizado"}), 401
     nombres = ("PIN_PORTAL", "CODIGO_URBANIZACION", "PIN_CASA_PRIMAVERA", "WIFI_SSID_HOSTAL", "WIFI_CLAVE_HOSTAL", "WIFI_SSID_CASA", "WIFI_CLAVE_CASA",
                "PIN_HABITACION_2", "PIN_HABITACION_3", "PIN_DELUXE", "PIN_ENVIO_CODIGOS", "PIN_DESGLOSE_GESTION", "PIN_LIMPIEZA", "TEST_TOKEN")
-    return jsonify({"ok": True, "puestas": {n: bool(os.environ.get(n)) for n in nombres}}), 200
+    codigos = ("PIN_PORTAL", "CODIGO_URBANIZACION", "PIN_CASA_PRIMAVERA", "PIN_HABITACION_2", "PIN_HABITACION_3", "PIN_DELUXE")
+    # Del formato solo la longitud y si son todo cifras (nunca el valor): sirve para cazar espacios, comillas o saltos de línea pegados por error.
+    formato = {n: {"longitud": len(os.environ.get(n, "")), "solo_cifras": os.environ.get(n, "").isdigit()} for n in codigos if os.environ.get(n)}
+    return jsonify({"ok": True, "puestas": {n: bool(os.environ.get(n)) for n in nombres}, "formato": formato}), 200
