@@ -331,11 +331,40 @@ def refrescar_cuenta(room_id):
         del _copias_pasados[clave]
 
 
-def comprobar_cuentas(max_age=TTL_SEGUNDO_PLANO):
+def tipo_error(error):
+    """Qué clase de fallo es un texto de error de RPV (los que devuelve comprobar_cuentas):
+      "limite"       429: RPV (o nuestro freno local) limita las peticiones.
+      "credenciales" 401/403: la clave no vale o no es de esa propiedad.
+      "contrato"     400/404 o respuesta sin lista de partes: RPV ha cambiado su API.
+      "temporal"     todo lo demás: timeouts, caídas de conexión, errores 5xx… RPV lento o caído un rato."""
+    texto = str(error or "")
+    if texto.startswith("429"):
+        return "limite"
+    if texto.startswith(("API key inválida (401)", "Acceso denegado (403)")):
+        return "credenciales"
+    if texto.startswith(("RPV rechazó la petición (400)", "Endpoint de partes no encontrado (404)", "respuesta inesperada de RPV")):
+        return "contrato"
+    return "temporal"
+
+
+PAUSA_REINTENTO = 2          # segundos entre el primer intento y el reintento
+PRESUPUESTO_REINTENTO = 12   # solo se reintenta si la primera pasada tardó menos: el watchdog corre en una petición con tope de 60 s
+
+
+def comprobar_cuentas(max_age=TTL_SEGUNDO_PLANO, reintentar=False, reloj=time.time):
     """[(etiqueta, error|None)] — una entrada por cuenta de RPV, para el chequeo de
-    salud del watchdog. Usa la misma copia que el resto, así que no añade llamadas."""
-    return [(_etiqueta(rooms), _partes_cuenta(key, max_age, _etiqueta(rooms))[1])
-            for key, rooms in _cuentas().items()]
+    salud del watchdog. Usa la misma copia que el resto, así que no añade llamadas.
+
+    Con `reintentar`, un fallo TEMPORAL (timeout, 5xx; ver tipo_error) se vuelve a pedir una vez a RPV tras una pausa corta, para no dar
+    por malo un tropiezo de un instante. Solo si la primera pasada fue rápida (como mucho una cuenta agotó su timeout de 10 s), porque
+    el watchdog corre dentro de una petición con tope de 60 s. Los fallos de credenciales, de contrato y de límite no se reintentan."""
+    inicio = reloj()
+    resultado = [(key, _etiqueta(rooms), _partes_cuenta(key, max_age, _etiqueta(rooms))[1]) for key, rooms in _cuentas().items()]
+    if reintentar and reloj() - inicio < PRESUPUESTO_REINTENTO and any(e and tipo_error(e) == "temporal" for _, _, e in resultado):
+        time.sleep(PAUSA_REINTENTO)
+        resultado = [(key, etiqueta, _partes_cuenta(key, 0, etiqueta)[1] if error and tipo_error(error) == "temporal" else error)
+                     for key, etiqueta, error in resultado]   # max_age=0: se pide de nuevo a RPV
+    return [(etiqueta, error) for _, etiqueta, error in resultado]
 
 
 def diagnostico_pasado(dias=3):

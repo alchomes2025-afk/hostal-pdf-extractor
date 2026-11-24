@@ -19,7 +19,7 @@ from config import (
     GROQ_API_KEY, GROQ_API_URL, GROQ_MODEL_PRI,
 )
 from services.beds24 import get_beds24_access_token, _token_cache as _token_cache_beds24
-from services.rpv import comprobar_cuentas, TTL_SEGUNDO_PLANO
+from services.rpv import comprobar_cuentas, tipo_error as tipo_error_rpv, TTL_SEGUNDO_PLANO
 from services.ical_beds24 import comprobar_feeds_ical
 from services.whatsapp import alerta, TIPO_SISTEMA
 from services.checkins_ultima_hora import comprobar_y_avisar_checkins_ultima_hora
@@ -136,6 +136,47 @@ def _comprobar_beds24():
     return {"ok": False, "error": str(ultimo_error)}, _clasificar_fallo_beds24(ultimo_error)
 
 
+# Textos FIJOS (sin la lista de cuentas ni el error de la excepción): la firma de deduplicación del watchdog depende de la descripción, y si
+# variara (Casa → hostal y Casa → Casa…) se repetiría el aviso en cada cambio en vez de uno por episodio.
+_RPV_LENTO = ("warning", "RPV no responde (no contesta a tiempo o devuelve error del servidor)",
+              "Suele ser un fallo puntual de RPV: no hay que tocar nada. El check-in sigue con la última copia buena de los partes y se avisa cuando "
+              "se recupere. Si dura más de una hora, mirar el estado de RPV y, solo entonces, las claves RPV_API_KEY en Render")
+_RPV_CONTRATO = ("critico", "RPV rechaza la petición o ha cambiado el formato de su respuesta (error 400/404 o respuesta inesperada)",
+                 "No son las claves: RPV puede haber cambiado su API (endpoint /partes). Revisar su documentación en el panel de RPV")
+_RPV_LIMITADO = ("warning", "RPV API está limitando peticiones (429)",
+                 "No hay que tocar nada: el backend deja de llamar unos minutos y reintenta solo; mientras, la web de check-in usa el último dato "
+                 "conocido. Si dura más de una hora, revisar el volumen de llamadas a RPV")
+
+
+def _comprobar_rpv():
+    """
+    Chequeo de las cuentas de RPV para el watchdog. Devuelve (resultado_para_el_informe, [problemas]).
+    Solo un 401/403 es «crítico» con la acción de revisar las claves; un timeout o un 5xx (RPV lento un rato, de madrugada o a las 23:30) es un
+    AVISO con texto fijo y se reintenta una vez antes de darlo por malo.
+    """
+    ok, por_tipo = [], {"credenciales": [], "contrato": [], "temporal": [], "limite": []}
+    for etiqueta, error in comprobar_cuentas(TTL_SEGUNDO_PLANO, reintentar=True):
+        if error is None:
+            ok.append(etiqueta)
+        else:
+            por_tipo[tipo_error_rpv(error)].append(f"{etiqueta}: {error}")
+    fallos = por_tipo["credenciales"] + por_tipo["contrato"] + por_tipo["temporal"]
+    resultado = {"ok": not fallos and not por_tipo["limite"], "ok_list": ok, "fail_list": fallos, "limitado_429": por_tipo["limite"]}
+    problemas = []
+    if por_tipo["credenciales"]:
+        problemas.append(("critico",
+                          f"RPV API rechaza las claves en {len(por_tipo['credenciales'])} cuenta(s): {'; '.join(por_tipo['credenciales'])}",
+                          "Verificar en Render que RPV_API_KEY (hostal) y RPV_API_KEY_CASA_PRIMAVERA (si aplica) están configuradas y son correctas — "
+                          "puede haber caducado, cambiado, o faltar la variable de la propiedad afectada"))
+    if por_tipo["contrato"]:
+        problemas.append(_RPV_CONTRATO)
+    if por_tipo["temporal"]:
+        problemas.append(_RPV_LENTO)
+    if por_tipo["limite"]:
+        problemas.append(_RPV_LIMITADO)
+    return resultado, problemas
+
+
 @watchdog_bp.route("/watchdog", methods=["GET", "POST"])
 def watchdog():
     """
@@ -215,36 +256,10 @@ def watchdog():
         problemas.append(problema_beds24)
 
     # ── 3. RPV API (una consulta por cuenta de RPV) ───────────────────────
-    # Va por services/rpv.comprobar_cuentas, con la misma copia en memoria que
-    # usan los avisos y resúmenes: son 2 llamadas (hostal y Primavera) como
-    # mucho cada 10 min (antes, 12 en ráfaga cada 15 min provocaron un 429).
-    rpv_ok = []
-    rpv_fail = []
-    rpv_limitado = []
-    for etiqueta, error in comprobar_cuentas(TTL_SEGUNDO_PLANO):
-        if error is None:
-            rpv_ok.append(etiqueta)
-        elif error.startswith("429"):
-            rpv_limitado.append(etiqueta)
-        else:
-            rpv_fail.append(f"{etiqueta}: {error}")
-
-    resultados["rpv_api"] = {"ok": not rpv_fail and not rpv_limitado, "ok_list": rpv_ok,
-                             "fail_list": rpv_fail, "limitado_429": rpv_limitado}
-    if rpv_fail:
-        problemas.append(("critico",
-            f"RPV API falla en {len(rpv_fail)} cuenta(s): {'; '.join(rpv_fail)}",
-            "Verificar en Render que RPV_API_KEY (hostal) y RPV_API_KEY_CASA_PRIMAVERA "
-            "(si aplica) están configuradas y son correctas — puede haber caducado, "
-            "cambiado, o faltar la variable de la propiedad afectada"))
-    if rpv_limitado:
-        # Texto fijo (sin lista de habitaciones): la firma de dedupe del
-        # watchdog depende de él, y si variara se repetiría el WhatsApp.
-        problemas.append(("warning",
-            "RPV API está limitando peticiones (429)",
-            "No hay que tocar nada: el backend deja de llamar unos minutos y "
-            "reintenta solo; mientras, la web de check-in usa el último dato "
-            "conocido. Si dura más de una hora, revisar el volumen de llamadas a RPV"))
+    # Va por services/rpv.comprobar_cuentas, con la misma copia en memoria que usan los avisos y resúmenes (como mucho 2 llamadas cada
+    # 10 min; antes, 12 en ráfaga cada 15 min provocaron un 429). Un fallo de red se reintenta una vez; ver _comprobar_rpv.
+    resultados["rpv_api"], problemas_rpv = _comprobar_rpv()
+    problemas.extend(problemas_rpv)
 
     # ── 3b. Calendarios iCal de Beds24 (los que importa RPV) ──────────────
     # RPV no avisa si deja de poder importarlos (sigue poniendo "Sincronizado"):
